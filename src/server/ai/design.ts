@@ -1,6 +1,4 @@
 import "server-only";
-import type { Part } from "@google/genai";
-import type { AttachmentRef } from "@/lib/assistant/attachments";
 import type {
   Block,
   Blueprint,
@@ -20,7 +18,6 @@ import { CATALOG } from "@/lib/catalog";
 import { computeAll } from "@/lib/engine/compute";
 import { isImagePath } from "@/lib/engine/records";
 import { hhmm, todayKey } from "@/lib/time";
-import { attachmentParts } from "./attachments";
 import { DESIGN_SYSTEM, type Design, design } from "./design-prompt";
 import { generateJsonHedged } from "./gemini";
 
@@ -449,22 +446,10 @@ export type DesignResult =
   | { ok: false; message: string };
 
 /** Designs a workspace from the interview brief. Invalid designs get up to two repairs with the validator's errors. */
-export async function designWorkspace(
-  brief: string,
-  workspaceName: string,
-  files?: { userId: string; attachments: AttachmentRef[] },
-): Promise<DesignResult> {
+export async function designWorkspace(brief: string, workspaceName: string): Promise<DesignResult> {
   const now = new Date();
   const context = `Examples:\n${EXAMPLES}\n\nToday in Manila: ${todayKey(now)}\nWorkspace name: ${workspaceName || "choose one"}\n\nBrief:\n${brief}`;
-  // The owner's files go with the first request; a repair works from the previous design, which already used them.
-  const fileParts = files ? await attachmentParts(files.userId, files.attachments) : [];
-  let prompt: string | Part[] = fileParts.length
-    ? [
-        { text: context },
-        ...fileParts,
-        { text: "Design the workspace from the brief, using these files for real names, items and prices." },
-      ]
-    : context;
+  let prompt = context;
   let repairs = 0;
   for (let attempt = 0; attempt < 4; attempt++) {
     // Designs take 8–30 s; a stalled call gets a parallel twin after 35 s instead of a minute's wait.
