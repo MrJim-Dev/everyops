@@ -1,4 +1,6 @@
 import "server-only";
+import type { Part } from "@google/genai";
+import type { AttachmentRef } from "@/lib/assistant/attachments";
 import type {
   Block,
   Blueprint,
@@ -18,8 +20,9 @@ import { CATALOG } from "@/lib/catalog";
 import { computeAll } from "@/lib/engine/compute";
 import { isImagePath } from "@/lib/engine/records";
 import { hhmm, todayKey } from "@/lib/time";
+import { attachmentParts } from "./attachments";
 import { DESIGN_SYSTEM, type Design, design } from "./design-prompt";
-import { generateJson } from "./gemini";
+import { generateJsonHedged } from "./gemini";
 
 const SLOT_MINUTES = [15, 30, 60, 90, 120] as const;
 const pick = <T extends object>(source: T, keys: (keyof T)[]) =>
@@ -446,23 +449,31 @@ export type DesignResult =
   | { ok: false; message: string };
 
 /** Designs a workspace from the interview brief. Invalid designs get up to two repairs with the validator's errors. */
-export async function designWorkspace(brief: string, workspaceName: string): Promise<DesignResult> {
+export async function designWorkspace(
+  brief: string,
+  workspaceName: string,
+  files?: { userId: string; attachments: AttachmentRef[] },
+): Promise<DesignResult> {
   const now = new Date();
   const context = `Examples:\n${EXAMPLES}\n\nToday in Manila: ${todayKey(now)}\nWorkspace name: ${workspaceName || "choose one"}\n\nBrief:\n${brief}`;
-  let prompt = context;
+  // The owner's files go with the first request; a repair works from the previous design, which already used them.
+  const fileParts = files ? await attachmentParts(files.userId, files.attachments) : [];
+  let prompt: string | Part[] = fileParts.length
+    ? [
+        { text: context },
+        ...fileParts,
+        { text: "Design the workspace from the brief, using these files for real names, items and prices." },
+      ]
+    : context;
   let repairs = 0;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const result = await generateJson(design, {
-      system: DESIGN_SYSTEM,
-      prompt,
-      task: "design",
-      timeoutMs: 60_000,
-      thinking: "LOW",
-    });
-    if (!result.ok) {
-      if (result.retryable && attempt < 1) continue;
-      return { ok: false, message: result.error };
-    }
+    // Designs take 8–30 s; a stalled call gets a parallel twin after 35 s instead of a minute's wait.
+    const result = await generateJsonHedged(
+      design,
+      { system: DESIGN_SYSTEM, prompt, task: "design", timeoutMs: 75_000, thinking: "LOW" },
+      { hedgeMs: 35_000 },
+    );
+    if (!result.ok) return { ok: false, message: result.error };
     const raw = toBlueprint(result.data);
     const samples = mergeDateAndSlot(raw, result.data.samples);
     const bp = ensurePages(repairStructure(tidy(raw)));
