@@ -1,0 +1,30 @@
+"use client";
+
+import type { View } from "@/lib/blueprint/types";
+import { ApprovalQueueView } from "./approval-queue-view";
+import { CalendarView } from "./calendar-view";
+import { CheckoutView } from "./checkout-view";
+import { KanbanView } from "./kanban-view";
+import { SlotGridView } from "./slot-grid-view";
+import { TableView } from "./table-view";
+
+/** Maps a view in the blueprint to the one component that renders that view type. */
+export function ViewRenderer({ view }: { view: View }) {
+  switch (view.type) {
+    case "table":
+      return <TableView key={view.id} view={view} />;
+    case "kanban":
+      return <KanbanView key={view.id} view={view} />;
+    case "calendar":
+      return <CalendarView key={view.id} view={view} />;
+    case "slot_grid":
+      return <SlotGridView key={view.id} view={view} />;
+    case "checkout":
+      return <CheckoutView key={view.id} view={view} />;
+    case "approval_queue":
+      return <ApprovalQueueView key={view.id} view={view} />;
+  }
+}
+
+/** Views where "New …" makes sense from the page header. */
+export const CREATABLE: View["type"][] = ["table", "kanban", "calendar", "slot_grid"];
