@@ -15,7 +15,7 @@ gcloud run deploy "$SERVICE" \
   --service-account="everyops-run@$PROJECT.iam.gserviceaccount.com" \
   --add-cloudsql-instances="$INSTANCE" \
   --set-secrets="DATABASE_URL=everyops-database-url:latest,BETTER_AUTH_SECRET=everyops-better-auth-secret:latest" \
-  --set-env-vars="BETTER_AUTH_URL=$URL,NEXT_PUBLIC_SITE_URL=$URL,GOOGLE_CLOUD_PROJECT=$PROJECT,GOOGLE_CLOUD_LOCATION=$REGION" \
+  --set-env-vars="BETTER_AUTH_URL=$URL,NEXT_PUBLIC_SITE_URL=$URL,GOOGLE_CLOUD_PROJECT=$PROJECT,GEMINI_LOCATION=$REGION,GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash}" \
   --allow-unauthenticated \
   --cpu=1 --memory=1Gi --concurrency=80 --timeout=300 \
   --min-instances="$MIN_INSTANCES" --max-instances=3 \

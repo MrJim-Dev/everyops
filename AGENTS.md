@@ -45,6 +45,14 @@ Use pnpm only. `pnpm build` matters: `cacheComponents` errors (below) only show 
 
 ## Next.js 16 specifics
 
+## AI
+
+- Gemini is called only from server code in `src/server/ai` (Vertex AI, `asia-southeast1`, model from `GEMINI_MODEL`, default `gemini-3.5-flash`). Never call it from the browser and never add API keys; Cloud Run uses the `everyops-run` service account and local dev uses gcloud ADC.
+- Every AI feature returns structured JSON through `generateJson` with a Zod schema, and its output must pass the same validation the app already uses (`validateBlueprint`, op checks) before the user sees it. Nothing is applied without the owner's approval.
+- AI routes check the session and `takeAiToken`. Keep prompts in a `*-prompt.ts` module next to the feature so they can be tested directly.
+- Don't lower temperature or force a thinking level on Gemini 3 models (they loop), and don't use the `global` location (it stalls).
+
+
 - `cacheComponents` is on: anything reading `headers()`, `cookies()` or awaited `params` on the server must sit inside `<Suspense>`.
 - Use `proxy.ts`, not `middleware.ts`. Read `node_modules/next/dist/docs/` before using an API you haven't checked.
 

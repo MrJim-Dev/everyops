@@ -66,6 +66,22 @@ blueprint (JSON) ──► engine (src/lib/engine) ──► views (src/componen
 
 ## Design rules
 
+## AI (Gemini on Vertex AI)
+
+Gemini runs only on the server, through Vertex AI in `asia-southeast1`, signed in as the Cloud Run service account (locally, gcloud's Application Default Credentials). There are no API keys.
+
+| File | Role |
+|---|---|
+| `src/server/ai/gemini.ts` | Vertex AI client and `generateJson`: structured JSON checked against a Zod schema, a 25-second timeout, and token and latency logging |
+| `src/server/ai/rate-limit.ts` | Per-user AI request limit (`AI_RATE_LIMIT` per 10 minutes, default 30) |
+| `src/server/ai/plan-change-prompt.ts` | Instructions and output schema for planning workspace changes, including the formula language |
+| `src/server/ai/plan-change.ts` | Turns Gemini's answer into `ChangeOp`s, rejects anything that doesn't fit the blueprint or fails `validateBlueprint`, and gives Gemini one repair attempt with the errors |
+| `src/app/api/ai/plan-change/route.ts` | `POST` endpoint: signed-in users only, size-limited, rate-limited |
+| `src/lib/assistant/ai-client.ts` | Browser helper used by Ask EveryOps; falls back to the built-in planner only if Gemini is unreachable |
+
+The model is `gemini-3.5-flash` (`GEMINI_MODEL`). Typical answers take 3–10 seconds. Leave temperature and thinking at their defaults: lowering them made Gemini 3 models loop, and the `global` endpoint stalled often, which is why the regional endpoint is used.
+
+
 - Dark, compact, Linear-inspired. Tokens live in `src/app/globals.css` with one accent (#3FA796).
 - Geist and Geist Mono. Numbers are tabular.
 - Motion follows Emil Kowalski's rules. ⌘K opens with no animation. Panels use a 220 ms ease-out curve. Buttons scale to 0.97 when pressed. Reduced motion is respected.

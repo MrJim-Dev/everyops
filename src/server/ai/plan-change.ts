@@ -1,0 +1,122 @@
+import "server-only";
+import type { Blueprint, Field } from "@/lib/blueprint/types";
+import { validateBlueprint } from "@/lib/blueprint/validate";
+import { applyOps, type ChangeOp, type ChangePlan } from "@/lib/engine/changes";
+import { generateJson } from "./gemini";
+import { type Answer, answer, SYSTEM } from "./plan-change-prompt";
+
+export type PlanChangeResult =
+  | { ok: true; plan: ChangePlan; model: string }
+  | { ok: false; message: string; kind: "clarify" | "unsupported" | "error" };
+
+/** Turns the model's flat operations into ChangeOps, rejecting anything that doesn't fit the blueprint. */
+function toOps(bp: Blueprint, raw: NonNullable<Answer["ops"]>): { ops: ChangeOp[]; errors: string[] } {
+  const ops: ChangeOp[] = [];
+  const errors: string[] = [];
+  const added = new Map<string, Set<string>>();
+  for (const [i, o] of raw.entries()) {
+    const at = `ops[${i}] (${o.op})`;
+    const entity = o.entityId ? bp.entities.find((e) => e.id === o.entityId) : undefined;
+    switch (o.op) {
+      case "add_field": {
+        if (!entity || !o.field) {
+          errors.push(`${at}: needs an existing entityId and a field`);
+          continue;
+        }
+        if (!/^[a-z][a-z0-9_]*$/.test(o.field.id)) {
+          errors.push(`${at}: field id must be snake_case`);
+          continue;
+        }
+        if (entity.fields.some((f) => f.id === o.field?.id)) {
+          errors.push(`${at}: ${entity.name} already has a field "${o.field.id}"`);
+          continue;
+        }
+        const field = o.field as Field;
+        ops.push({ op: "add_field", entityId: entity.id, field });
+        added.set(entity.id, (added.get(entity.id) ?? new Set()).add(field.id));
+        continue;
+      }
+      case "update_field": {
+        const field = entity?.fields.find((f) => f.id === o.fieldId);
+        if (!entity || !field || !o.patch) {
+          errors.push(`${at}: needs an existing entityId, fieldId and a patch`);
+          continue;
+        }
+        if (o.patch.formula && field.type !== "formula") {
+          errors.push(`${at}: ${field.name} is not a formula field, so it can't get a formula`);
+          continue;
+        }
+        ops.push({ op: "update_field", entityId: entity.id, fieldId: field.id, patch: o.patch });
+        continue;
+      }
+      case "add_view_field": {
+        const view = bp.views.find((v) => v.id === o.viewId);
+        if (!view || view.type !== "table" || !o.fieldId) {
+          errors.push(`${at}: needs an existing table viewId`);
+          continue;
+        }
+        const exists =
+          bp.entities.find((e) => e.id === view.entityId)?.fields.some((f) => f.id === o.fieldId) ||
+          added.get(view.entityId)?.has(o.fieldId);
+        if (!exists) {
+          errors.push(`${at}: "${o.fieldId}" is not a field of that view's entity`);
+          continue;
+        }
+        ops.push({ op: "add_view_field", viewId: view.id, fieldId: o.fieldId });
+        continue;
+      }
+      case "rename_workspace": {
+        const name = o.name?.trim();
+        if (!name) {
+          errors.push(`${at}: needs a name`);
+          continue;
+        }
+        ops.push({ op: "rename_workspace", name });
+        continue;
+      }
+    }
+  }
+  if (!errors.length) {
+    // Only report problems the plan introduces, not ones the blueprint already had.
+    const before = new Set(validateBlueprint(bp).map((e) => `${e.path} ${e.message}`));
+    for (const e of validateBlueprint(applyOps(bp, ops)))
+      if (!before.has(`${e.path} ${e.message}`)) errors.push(`${e.path}: ${e.message}`);
+  }
+  return { ops, errors };
+}
+
+/** Plans a change with Gemini. Invalid plans get one repair attempt with the validator's errors. */
+export async function planChangeWithGemini(bp: Blueprint, request: string): Promise<PlanChangeResult> {
+  const context = `Blueprint (JSON):\n${JSON.stringify(bp)}\n\nOwner's request: ${request}`;
+  let prompt = context;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await generateJson(answer, { system: SYSTEM, prompt, task: "plan-change" });
+    if (!result.ok) {
+      if (result.retryable && attempt === 0) continue;
+      return { ok: false, kind: "error", message: result.error };
+    }
+    const a = result.data;
+    if (a.status !== "plan")
+      return {
+        ok: false,
+        kind: a.status,
+        message: a.message ?? "I couldn't plan that change. Try describing it differently.",
+      };
+    const { ops, errors } = toOps(bp, a.ops ?? []);
+    if (!errors.length && ops.length)
+      return {
+        ok: true,
+        model: result.model,
+        plan: {
+          request,
+          title: a.title ?? "Workspace change",
+          facts: a.facts ?? [],
+          steps: a.steps ?? [],
+          ops,
+        },
+      };
+    console.warn(JSON.stringify({ event: "plan_rejected", attempt, errors }));
+    prompt = `${context}\n\nYour previous plan was rejected:\n- ${errors.length ? errors.join("\n- ") : "it had no operations"}\nReturn a corrected plan.`;
+  }
+  return { ok: false, kind: "error", message: "I couldn't make a valid plan for that. Try rephrasing it." };
+}

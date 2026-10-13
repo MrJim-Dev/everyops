@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Textarea } from "@/components/ui/textarea";
 import { useWorkspace } from "@/components/workspace/workspace-context";
-import { EXAMPLE_REQUESTS, type PlanResult, planChange } from "@/lib/assistant/planner";
+import { type AiPlanResult, requestPlan } from "@/lib/assistant/ai-client";
+import { EXAMPLE_REQUESTS } from "@/lib/assistant/planner";
 import { displayKind } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, recordTitle } from "@/lib/blueprint/lookup";
 import { applyOps, computeImpact } from "@/lib/engine/changes";
@@ -27,10 +28,17 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
   const applyChange = useWorkspaces((s) => s.applyChange);
   const undoChange = useWorkspaces((s) => s.undoChange);
   const [request, setRequest] = useState("");
-  const [result, setResult] = useState<PlanResult | null>(null);
+  const [result, setResult] = useState<AiPlanResult | null>(null);
+  const [pending, setPending] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
-  const review = () => setResult(planChange(ws.blueprint, request));
+  const review = async () => {
+    if (!request.trim() || pending) return;
+    setPending(true);
+    const next = await requestPlan(ws.blueprint, request.trim());
+    setPending(false);
+    setResult(next);
+  };
   const plan = result?.ok ? result.plan : null;
 
   const impact = useMemo(() => {
@@ -105,12 +113,13 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
         className="flex flex-col gap-3"
         onSubmit={(e) => {
           e.preventDefault();
-          review();
+          void review();
         }}
       >
         <Textarea
           autoFocus={autoFocus}
           value={request}
+          readOnly={pending}
           onChange={(e) => {
             setRequest(e.target.value);
             setResult(null);
@@ -118,7 +127,7 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              review();
+              void review();
             }
           }}
           rows={3}
@@ -150,8 +159,8 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
           <span className="hidden text-[12px] text-muted-foreground sm:inline">
             <Kbd>⌘</Kbd> <Kbd>↵</Kbd> to review
           </span>
-          <Button type="submit" disabled={!request.trim()}>
-            Review change
+          <Button type="submit" disabled={!request.trim() || pending}>
+            {pending ? "Planning with Gemini…" : "Review change"}
           </Button>
         </div>
       </form>
@@ -165,6 +174,11 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
       <h3 className="animate-rise text-[15px] font-semibold">
         Review {plan.title.charAt(0).toLowerCase() + plan.title.slice(1)}
       </h3>
+      <p className="-mt-3 text-[12px] text-muted-foreground">
+        {result?.source === "gemini"
+          ? "Planned by Gemini and checked against your workspace. Nothing changes until you apply it."
+          : "Planned by the built-in planner because Gemini wasn't reachable. Nothing changes until you apply it."}
+      </p>
       <blockquote
         className="animate-rise stagger rounded-lg border bg-muted/40 px-4 py-3 text-[14px]"
         style={{ "--i": 1 } as React.CSSProperties}
