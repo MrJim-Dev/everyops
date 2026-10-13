@@ -5,9 +5,9 @@ import { Progress } from "@/components/ui/progress";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Widget } from "@/lib/blueprint/types";
 import { widgetValue } from "@/lib/engine/aggregate";
+import { metricFormatter } from "@/lib/engine/metric-format";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { metricFormatter } from "./metric-format";
 import { WidgetFrame } from "./widget-frame";
 
 export function ProgressWidget({ widget }: { widget: Widget }) {

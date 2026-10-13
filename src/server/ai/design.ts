@@ -201,7 +201,10 @@ export function tidy(bp: Blueprint): Blueprint {
       v.lineEntityId = resolve(v.lineEntityId) as string;
     }
   }
-  for (const w of bp.widgets) w.entityId = resolve(w.entityId) as string;
+  for (const w of bp.widgets) {
+    w.entityId = resolve(w.entityId) as string;
+    for (const t of w.calc?.terms ?? []) t.entityId = resolve(t.entityId) as string;
+  }
   for (const r of bp.rules) r.trigger.entityId = resolve(r.trigger.entityId) as string;
   // "patient.name" when Patient's name field is called something else: point it at the primary field.
   const fixRefs = (entity: Entity, expr: string) =>
@@ -291,6 +294,16 @@ export function tidy(bp: Blueprint): Blueprint {
     if (v.type === "approval_queue") v.detailFieldIds = v.detailFieldIds.filter((id) => has.has(id));
   }
   bp.widgets = bp.widgets.filter((w) => {
+    if (w.calc) {
+      // A formula card keeps only totals that point at real record types and fields.
+      w.calc.terms = w.calc.terms.filter(
+        (t) =>
+          entityIds.has(t.entityId) &&
+          (t.op === "count" || (!!t.fieldId && fieldsOf(t.entityId).has(t.fieldId))),
+      );
+      if (!w.calc.terms.length || (w.type !== "stat" && w.type !== "progress")) delete w.calc;
+      else w.entityId = w.calc.terms[0].entityId;
+    }
     if (!entityIds.has(w.entityId)) return false;
     const has = fieldsOf(w.entityId);
     if (w.metric.fieldId && !has.has(w.metric.fieldId)) return false;
@@ -808,6 +821,8 @@ export function mergeDateAndSlot(bp: Blueprint, samples: Design["samples"]): Des
     for (const v of bp.views)
       if ("filter" in v && v.filter && v.entityId === e.id) v.filter = rewrite(v.filter);
     for (const w of bp.widgets) if (w.filter && w.entityId === e.id) w.filter = rewrite(w.filter);
+    for (const w of bp.widgets)
+      for (const t of w.calc?.terms ?? []) if (t.filter && t.entityId === e.id) t.filter = rewrite(t.filter);
 
     resource.resource ??= {
       opensAt: hhmm(starts[0]),

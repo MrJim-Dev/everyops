@@ -1,6 +1,6 @@
 "use client";
 
-import { DotsThreeIcon, PencilSimpleIcon, TrashIcon } from "@phosphor-icons/react";
+import { DotsThreeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,8 +26,10 @@ import { findEntity, findRecord, optionOf, recordTitle } from "@/lib/blueprint/l
 import type { DataRecord, Entity, RecordData } from "@/lib/blueprint/types";
 import type { FieldError } from "@/lib/engine/records";
 import { formatDateTime } from "@/lib/format";
+import { canEdit } from "@/lib/store/workspaces";
 import { FieldValue } from "./field-value";
 import { RecordFieldsForm } from "./record-fields-form";
+import { useRecordPanels } from "./record-panels";
 import { StatusMenu } from "./status-menu";
 
 /** Side panel for one record: properties, its line items, and the next sensible action. */
@@ -56,7 +58,9 @@ function RecordSheetBody({
   entity: Entity;
   onClose: () => void;
 }) {
-  const { blueprint, records } = useWorkspace();
+  const { blueprint, records, role } = useWorkspace();
+  const { openCreate } = useRecordPanels();
+  const editable = canEdit(role);
   const actions = useRecordActions();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<RecordData>(record.data);
@@ -117,27 +121,55 @@ function RecordSheetBody({
 
         {!editing &&
           children.map((child) => {
-            const lines = records.filter(
-              (r) => r.entityId === child.id && r.data[child.parent?.fieldId ?? ""] === record.id,
-            );
-            if (!lines.length) return null;
+            const parentField = child.parent?.fieldId ?? "";
+            const lines = records.filter((r) => r.entityId === child.id && r.data[parentField] === record.id);
+            if (!lines.length && !editable) return null;
+            // Every field but the link back to this record, skipping ones no line fills in (an unused title) and
+            // links a formula already shows (an Item formula reading product.name stands in for Product).
+            const filled = (id: string) =>
+              lines.some((l) => l.data[id] !== undefined && l.data[id] !== null && l.data[id] !== "");
+            const mirrored = (id: string) =>
+              child.fields.some((o) => filled(o.id) && !!o.formula?.expr.trim().startsWith(`${id}.`));
             const shown = child.fields
-              .filter((f) => f.id !== child.parent?.fieldId && f.type !== "relation")
+              .filter(
+                (f) => f.id !== parentField && filled(f.id) && !(f.type === "relation" && mirrored(f.id)),
+              )
+              .sort((a, b) => Number(b.id === child.primaryFieldId) - Number(a.id === child.primaryFieldId))
               .slice(0, 4);
             return (
               <section key={child.id} className="mt-6">
-                <h3 className="mb-2 text-[12px] font-medium text-muted-foreground">{child.pluralName}</h3>
-                <ul className="divide-y rounded-md border">
-                  {lines.map((line) => (
-                    <li key={line.id} className="flex items-center gap-3 px-3 py-2 text-[13px]">
-                      {shown.map((f, i) => (
-                        <span key={f.id} className={i === 0 ? "min-w-0 flex-1 truncate" : "shrink-0"}>
-                          <FieldValue field={f} value={line.data[f.id]} />
-                        </span>
-                      ))}
-                    </li>
-                  ))}
-                </ul>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h3 className="text-[12px] font-medium text-muted-foreground">{child.pluralName}</h3>
+                  {editable ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        openCreate(child.id, { [parentField]: record.id }, { returnTo: record.id })
+                      }
+                    >
+                      <PlusIcon data-icon="inline-start" />
+                      Add {child.name.toLowerCase()}
+                    </Button>
+                  ) : null}
+                </div>
+                {lines.length ? (
+                  <ul className="divide-y rounded-md border">
+                    {lines.map((line) => (
+                      <li key={line.id} className="flex items-center gap-3 px-3 py-2 text-[13px]">
+                        {shown.map((f, i) => (
+                          <span key={f.id} className={i === 0 ? "min-w-0 flex-1 truncate" : "shrink-0"}>
+                            <FieldValue field={f} value={line.data[f.id]} />
+                          </span>
+                        ))}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="rounded-md border border-dashed px-3 py-2.5 text-[12.5px] text-muted-foreground">
+                    No {child.pluralName.toLowerCase()} yet.
+                  </p>
+                )}
               </section>
             );
           })}
