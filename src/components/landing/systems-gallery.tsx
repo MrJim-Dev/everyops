@@ -3,7 +3,7 @@
 import { ArrowUpRightIcon, UsersIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { formatUses } from "@/components/community/system-card";
-import { SystemThumbnail } from "@/components/community/system-thumbnail";
+import { SystemShot } from "@/components/community/system-shot";
 import { SystemIcon } from "@/components/system-icon";
 import { CATALOG, CATEGORIES, type CatalogSystem } from "@/lib/catalog";
 
@@ -61,9 +61,9 @@ function GalleryCard({ system }: { system: CatalogSystem }) {
       className="group flex flex-col gap-4 rounded-2xl border border-foreground/[0.08] bg-card/60 p-3 outline-none transition-[border-color,background-color] duration-200 hover:border-foreground/20 hover:bg-card focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       <div className="overflow-hidden rounded-xl">
-        <SystemThumbnail
+        <SystemShot
           system={system}
-          className="rounded-xl transition-transform duration-300 ease-[var(--ease-out-strong)] group-hover:scale-[1.02]"
+          className="transition-transform duration-300 ease-[var(--ease-out-strong)] group-hover:scale-[1.02]"
         />
       </div>
       <div className="flex items-start gap-3 px-1 pb-1">

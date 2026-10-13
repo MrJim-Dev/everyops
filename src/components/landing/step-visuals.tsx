@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowRightIcon, CheckIcon, SparkleIcon } from "@phosphor-icons/react";
-import { SystemThumbnail } from "@/components/community/system-thumbnail";
+import { SystemShot } from "@/components/community/system-shot";
 import { CATALOG } from "@/lib/catalog";
 import { cn } from "@/lib/utils";
 
@@ -78,7 +78,9 @@ export function RunVisual() {
   const system = CATALOG[0];
   return (
     <Panel className="gap-4">
-      <SystemThumbnail system={system} className="rounded-lg" />
+      <div className="overflow-hidden rounded-lg border">
+        <SystemShot system={system} />
+      </div>
       <div className="grid grid-cols-2 gap-2">
         {system.includes.map((item) => (
           <span key={item} className="flex items-center gap-2 text-[12.5px] text-muted-foreground">

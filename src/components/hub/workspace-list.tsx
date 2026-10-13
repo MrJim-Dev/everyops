@@ -1,21 +1,35 @@
 "use client";
 
-import { ArrowRightIcon, PlusIcon } from "@phosphor-icons/react";
-import { formatDistanceToNowStrict } from "date-fns";
+import { PlusIcon, RowsIcon, SquaresFourIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SegmentedControl } from "@/components/motion/segmented-control";
-import { WorkspaceTile } from "@/components/shell/workspace-tile";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SearchInput } from "@/components/views/search-input";
 import { ViewEmpty } from "@/components/views/view-empty";
-import { useRecentWorkspaces } from "@/lib/store/selectors";
+import { useCurrentUser } from "@/lib/auth/client";
+import { usePublished } from "@/lib/community/published";
 import { useHydrated } from "@/lib/store/use-hydrated";
+import { roleOf } from "@/lib/store/workspace-model";
+import { useWorkspaces } from "@/lib/store/workspaces";
+import { WorkspaceCard } from "./workspace-card";
+import { WorkspaceOverview } from "./workspace-overview";
+import { WorkspaceRow } from "./workspace-row";
 
-type Filter = "all" | "owned" | "shared";
+type Filter = "all" | "owned" | "shared" | "public";
+type Layout = "grid" | "list";
+type Sort = "opened" | "records" | "name";
+const SORTS: Record<Sort, string> = { opened: "Recently opened", records: "Most records", name: "Name" };
 
 /** Lowercase without accents, so "kape" finds "Kapé". */
 const fold = (s: string) =>
@@ -24,48 +38,79 @@ const fold = (s: string) =>
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase();
 
-/** Every workspace the signed-in account owns or was invited to, most recently opened first. */
+/** Every workspace the account owns or was invited to, as project cards or a compact list. */
 export function WorkspaceList() {
   const hydrated = useHydrated();
-  const workspaces = useRecentWorkspaces();
+  const user = useCurrentUser();
   const router = useRouter();
+  const all = useWorkspaces((s) => s.workspaces);
+  const listings = usePublished((s) => s.systems);
+  const loadCommunity = usePublished((s) => s.load);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [layout, setLayout] = useState<Layout>("grid");
+  const [sort, setSort] = useState<Sort>("opened");
+  // One clock for the whole page, so every "this week" agrees. Only rendered in the browser.
+  const now = useMemo(() => Date.now(), []);
 
-  const ownedCount = workspaces.filter((w) => !w.shared).length;
-  const sharedCount = workspaces.length - ownedCount;
+  // Community listings tell each workspace whether it's public.
+  useEffect(() => {
+    void loadCommunity();
+  }, [loadCommunity]);
+
+  const workspaces = useMemo(
+    () => Object.values(all).sort((a, b) => b.openedAt.localeCompare(a.openedAt)),
+    [all],
+  );
+  const publicSlugs = useMemo(() => new Set(listings.map((l) => l.sourceWorkspaceId)), [listings]);
+  const owned = workspaces.filter((w) => w.ownerId === user?.id).length;
+  const shared = workspaces.length - owned;
 
   const visible = useMemo(() => {
     const q = fold(query.trim());
     return workspaces
-      .filter((w) => filter === "all" || (filter === "shared") === w.shared)
-      .filter((w) => !q || fold(`${w.name} ${w.summary}`).includes(q));
-  }, [workspaces, query, filter]);
+      .filter((w) => {
+        if (filter === "owned") return w.ownerId === user?.id;
+        if (filter === "shared") return w.ownerId !== user?.id;
+        if (filter === "public") return publicSlugs.has(w.slug);
+        return true;
+      })
+      .filter((w) => !q || fold(`${w.name} ${w.summary}`).includes(q))
+      .sort((a, b) =>
+        sort === "name"
+          ? a.name.localeCompare(b.name)
+          : sort === "records"
+            ? b.records.length - a.records.length
+            : 0,
+      );
+  }, [workspaces, query, filter, sort, user?.id, publicSlugs]);
+
+  const filters = [
+    { value: "all", label: `All ${workspaces.length}` },
+    { value: "owned", label: `Owned ${owned}` },
+    ...(shared ? [{ value: "shared", label: `Shared ${shared}` }] : []),
+    { value: "public", label: `Public ${workspaces.filter((w) => publicSlugs.has(w.slug)).length}` },
+  ];
 
   return (
     <>
-      <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="animate-rise flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-1.5">
-          <h1 className="text-[26px] font-semibold tracking-tight">Workspaces</h1>
+          <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.025em]">Workspaces</h1>
           <p className="text-[14px] text-muted-foreground">
             {hydrated
-              ? `${ownedCount} owned by you${sharedCount ? `, ${sharedCount} shared with you` : ""}`
+              ? `${owned} owned by you${shared ? `, ${shared} shared with you` : ""}. Make one public to share its design in Community.`
               : "Workspaces you own or were invited to."}
           </p>
         </div>
-        <Button size="sm" render={<Link href="/" />} nativeButton={false}>
+        <Button className="h-9 px-3.5" render={<Link href="/" />} nativeButton={false}>
           <PlusIcon data-icon="inline-start" />
           New workspace
         </Button>
       </div>
 
       {!hydrated ? (
-        <div className="flex flex-col gap-2" aria-busy="true">
-          <span className="sr-only">Loading</span>
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-16 w-full" />
-          ))}
-        </div>
+        <GridSkeleton />
       ) : workspaces.length === 0 ? (
         <ViewEmpty
           title="No workspaces yet"
@@ -74,54 +119,125 @@ export function WorkspaceList() {
           onAction={() => router.push("/")}
         />
       ) : (
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-wrap items-center gap-3">
-            <SearchInput value={query} onChange={setQuery} placeholder="Find a workspace" />
-            {sharedCount > 0 ? (
-              <SegmentedControl
-                label="Show"
-                value={filter}
-                onValueChange={(v) => setFilter(v as Filter)}
-                options={[
-                  { value: "all", label: "All" },
-                  { value: "owned", label: "Owned" },
-                  { value: "shared", label: "Shared with you" },
-                ]}
-              />
-            ) : null}
+        <div className="flex flex-col gap-6">
+          <WorkspaceOverview
+            workspaces={workspaces}
+            publicCount={workspaces.filter((w) => publicSlugs.has(w.slug)).length}
+            now={now}
+          />
+          <div
+            className="animate-rise stagger flex flex-wrap items-center gap-3"
+            style={{ "--i": 2 } as React.CSSProperties}
+          >
+            <div className="min-w-[200px] flex-1 sm:max-w-[300px] [&>div]:max-w-none">
+              <SearchInput value={query} onChange={setQuery} placeholder="Find a workspace" />
+            </div>
+            <SegmentedControl
+              label="Show"
+              value={filter}
+              onValueChange={(v) => setFilter(v as Filter)}
+              options={filters}
+            />
+            <Select value={sort} onValueChange={(v) => setSort(v as Sort)} items={SORTS}>
+              <SelectTrigger size="sm" className="ml-auto w-[152px]" aria-label="Sort">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectGroup>
+                  {Object.entries(SORTS).map(([id, label]) => (
+                    <SelectItem key={id} value={id}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <SegmentedControl
+              label="Layout"
+              variant="boxed"
+              value={layout}
+              onValueChange={(v) => setLayout(v as Layout)}
+              options={[
+                { value: "grid", label: <SquaresFourIcon aria-label="Grid" className="size-4" /> },
+                { value: "list", label: <RowsIcon aria-label="List" className="size-4" /> },
+              ]}
+            />
           </div>
           {visible.length === 0 ? (
-            <ViewEmpty title="No workspaces match" description="Try another name or filter." />
+            <ViewEmpty
+              title={filter === "public" ? "Nothing is public yet" : "No workspaces match"}
+              description={
+                filter === "public"
+                  ? "Use Make public on any workspace you own to share its design in Community."
+                  : "Try another name or filter."
+              }
+            />
+          ) : layout === "grid" ? (
+            <div key="grid" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {visible.map((w, i) => (
+                <WorkspaceCard
+                  key={w.slug}
+                  workspace={w}
+                  role={roleOf(w, user?.id)}
+                  index={i + 3}
+                  now={now}
+                />
+              ))}
+              <NewWorkspaceTile index={visible.length + 3} />
+            </div>
           ) : (
-            <ul className="divide-y overflow-hidden rounded-xl border">
+            <ul key="list" className="animate-rise divide-y overflow-hidden rounded-xl border">
               {visible.map((w) => (
-                <li key={w.slug}>
-                  <Link
-                    href={w.settingUp ? `/w/${w.slug}/ask` : `/w/${w.slug}`}
-                    className="group flex min-h-16 items-center gap-3 px-4 py-3 outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted"
-                  >
-                    <WorkspaceTile name={w.name} className="size-8 text-[13px]" />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className="truncate text-[13.5px] font-medium">{w.name}</span>
-                        {w.shared ? <Badge variant="secondary">Shared</Badge> : null}
-                        {w.settingUp ? <Badge variant="outline">Setting up</Badge> : null}
-                      </span>
-                      <span className="block truncate text-[12px] text-muted-foreground">
-                        {w.settingUp ? "Continue the setup with Ask EveryOps" : w.summary}
-                      </span>
-                    </span>
-                    <span className="hidden shrink-0 text-[12px] text-muted-foreground sm:inline">
-                      Opened {formatDistanceToNowStrict(new Date(w.openedAt), { addSuffix: true })}
-                    </span>
-                    <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-hover:translate-x-0.5" />
-                  </Link>
-                </li>
+                <WorkspaceRow key={w.slug} workspace={w} role={roleOf(w, user?.id)} />
               ))}
             </ul>
           )}
         </div>
       )}
     </>
+  );
+}
+
+function NewWorkspaceTile({ index }: { index: number }) {
+  return (
+    <Link
+      href="/"
+      style={{ "--i": Math.min(index, 8) } as React.CSSProperties}
+      className="animate-rise stagger group flex min-h-[118px] flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed text-center outline-none transition-[border-color,background-color] duration-200 hover:border-primary/40 hover:bg-primary/[0.03] focus-visible:ring-2 focus-visible:ring-ring/50"
+    >
+      <span className="flex size-10 items-center justify-center rounded-xl border border-dashed text-muted-foreground transition-colors duration-200 group-hover:border-primary/40 group-hover:text-primary">
+        <PlusIcon className="size-4.5" />
+      </span>
+      <span>
+        <span className="block text-[14px] font-medium">New workspace</span>
+        <span className="mt-0.5 block text-[12.5px] text-muted-foreground">
+          Describe your business and we'll build it
+        </span>
+      </span>
+    </Link>
+  );
+}
+
+/** Same shape as the cards, so nothing jumps when workspaces arrive. */
+export function GridSkeleton() {
+  return (
+    <div className="flex flex-col gap-6" aria-busy="true">
+      <span className="sr-only">Loading workspaces</span>
+      <Skeleton className="h-[110px] rounded-xl" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="flex flex-col gap-5 rounded-xl border border-foreground/[0.06] p-4">
+            <div className="flex gap-3">
+              <Skeleton className="size-9 rounded-lg" />
+              <div className="flex flex-1 flex-col gap-2">
+                <Skeleton className="h-4 w-1/2" />
+                <Skeleton className="h-3.5 w-3/4" />
+              </div>
+            </div>
+            <Skeleton className="h-3.5 w-2/3" />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

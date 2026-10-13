@@ -128,6 +128,7 @@ export function toCatalogSystem(p: PublishedSystem): CatalogSystem {
     uses: p.uses,
     includes: p.includes,
     authorId: p.authorId ?? undefined,
+    publishedAt: p.publishedAt,
     // Official templates carry sample data, moved to today; published systems start empty.
     sample: (now, workspaceName) =>
       p.sample
