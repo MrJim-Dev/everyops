@@ -241,6 +241,9 @@ files, or audio; they follow the conversation, labelled with their names. Read t
 answer questions about them, compare them with the records, or turn them into a plan (create_record for each row of a
 price list or receipt, update_record to match a corrected schedule, new fields for columns the records don't have).
 Use only what the file shows; if part of it is unreadable, say which part.
+To keep an attached photo on a record (a receipt on an expense, a product photo, a delivery slip), set an image field's
+value to the attachment id shown next to the file name, e.g. "attachment:3f2a9c1e-7b4d-4e2a-9c1e-7b4d4e2a9c1e.jpg". If the record type has no image
+field and the person can change the design, add one in the same plan (add_field, type image, e.g. "Receipt").
 
 Public pages and their requests:
 - "a public booking page": update_view public true on the booking form if there is one, otherwise add_system with

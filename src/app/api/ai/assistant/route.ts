@@ -47,6 +47,7 @@ export async function POST(request: Request) {
     canDesign: canManage(found.role),
     canEditRecords: canEdit(found.role),
     userId: user.id,
+    workspaceId: parsed.data.workspaceId,
   });
   return Response.json(result, { status: result.ok ? 200 : 502 });
 }

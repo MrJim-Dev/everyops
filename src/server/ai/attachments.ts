@@ -134,6 +134,35 @@ export async function readAttachment(
   }
 }
 
+/** Picture types a record's image field can show (the same ones workspace uploads accept). */
+const RECORD_PICTURE = /^image\/(png|jpeg|gif|webp)$/;
+
+/**
+ * Copies one of the account's attached photos into a workspace's own uploads, so a record can show it like any
+ * picture uploaded there. Returns the app path for the image field, or null if the file is gone or isn't a photo
+ * a record can show. The caller must have checked that the person can edit the workspace.
+ */
+export async function copyPhotoToWorkspace(
+  userId: string,
+  id: string,
+  workspaceId: string,
+): Promise<string | null> {
+  if (!ATTACHMENT_ID.test(id) || !/^[a-z0-9][a-z0-9-]{1,79}$/.test(workspaceId)) return null;
+  try {
+    const source = bucket().file(`${ownerFolder(userId)}/${id}`);
+    const [meta] = await source.getMetadata();
+    if (!RECORD_PICTURE.test(meta.contentType ?? "")) return null;
+    const name = `${workspaceId}/${randomUUID()}.${id.split(".").pop()}`;
+    await source.copy(bucket().file(name), {
+      contentType: meta.contentType,
+      metadata: { cacheControl: "private" },
+    });
+    return `/api/files/${name}`;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Where a stored attachment lives and what it is, without downloading it. Null when it's gone or isn't the
  * account's own.

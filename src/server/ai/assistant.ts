@@ -20,7 +20,7 @@ import { isPublic } from "@/lib/public/resolve";
 import { randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
 import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer } from "./assistant-prompt";
-import { attachmentParts } from "./attachments";
+import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
 import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
 import { generateJsonHedged } from "./gemini";
 
@@ -404,11 +404,16 @@ function toDesignOps(
   return { ops, errors };
 }
 
-function toRecordOps(
+/** Image field values of the form "attachment:<id>": an attached photo to copy into the workspace for the record. */
+const PHOTO_VALUE = /^attachment:(\S+)$/;
+
+async function toRecordOps(
   bp: Blueprint,
   records: DataRecord[],
   raw: RawPlan["recordOps"],
-): { ops: RecordOp[]; errors: string[] } {
+  /** Turns an attached photo's id into the workspace picture path, or null if it can't be used. */
+  photo: (attachmentId: string) => Promise<string | null>,
+): Promise<{ ops: RecordOp[]; errors: string[] }> {
   const errors: string[] = [];
   const refs = new Map<string, string>();
   for (const o of raw)
@@ -447,6 +452,16 @@ function toRecordOps(
         errors.push(`recordOps[${i}]: ${entity.name} has no field "${fieldId}"`);
         continue;
       }
+      const attached = field.type === "image" ? PHOTO_VALUE.exec(value.trim()) : null;
+      if (attached) {
+        const path = await photo(attached[1]);
+        if (path) data[field.id] = path;
+        else
+          errors.push(
+            `recordOps[${i}]: "${value}" isn't a photo attached in this conversation that a record can show (PNG, JPG, WebP or GIF)`,
+          );
+        continue;
+      }
       const v = toFieldValue(field, value, resolve(field.relation?.entityId));
       if (v === undefined)
         errors.push(`recordOps[${i}]: "${value}" doesn't fit ${entity.name}.${field.id} (${field.type})`);
@@ -479,6 +494,8 @@ export async function assistantTurn(input: {
   canEditRecords: boolean;
   /** The signed-in person; attachments are read from their own files only. */
   userId: string;
+  /** The workspace the plan is for; attached photos used in records are copied into its uploads. */
+  workspaceId: string;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
   const permissions = input.canDesign
@@ -527,14 +544,24 @@ ${recordContext(bp, records, { ids: screen.focusIds, entityId: screen.entityId }
 Conversation:
 ${input.messages
   .map((m) => {
-    const files = m.attachments?.length ? `\n[Attached: ${attachmentNames(m.attachments)}]` : "";
+    const files = m.attachments?.length
+      ? `\n[Attached: ${m.attachments.map((a) => `${a.name} (attachment:${a.id})`).join(", ")}]`
+      : "";
     return `${m.role === "user" ? "Person" : "You"}: ${m.text || "(sent files)"}${files}`;
   })
   .join("\n\n")}`;
 
   // Files the person attached follow the text on every attempt, including a repair.
-  const fileParts = await attachmentParts(input.userId, attachmentsIn(input.messages));
+  const attachments = attachmentsIn(input.messages);
+  const fileParts = await attachmentParts(input.userId, attachments);
   const withFiles = (text: string): string | Part[] => (fileParts.length ? [{ text }, ...fileParts] : text);
+  // Each attached photo is copied into the workspace at most once per turn, even across repair attempts.
+  const copies = new Map<string, Promise<string | null>>();
+  const photo = (id: string) => {
+    if (!attachments.some((a) => a.id === id && a.kind === "image")) return Promise.resolve(null);
+    if (!copies.has(id)) copies.set(id, copyPhotoToWorkspace(input.userId, id, input.workspaceId));
+    return copies.get(id) as Promise<string | null>;
+  };
   let prompt = withFiles(context);
   let repaired = false;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -572,7 +599,7 @@ ${input.messages
       if ((op.op === "add_view" || op.op === "add_widget") && !next.systems.some((s) => s.id === op.systemId))
         errors.push(`${op.op}: section "${op.systemId}" doesn't exist`);
 
-    const recordPart = toRecordOps(next, records, a.plan.recordOps);
+    const recordPart = await toRecordOps(next, records, a.plan.recordOps, photo);
     errors.push(...recordPart.errors);
     if (recordPart.ops.length && !input.canEditRecords) errors.push("This person can't change data.");
     if (!errors.length) {
