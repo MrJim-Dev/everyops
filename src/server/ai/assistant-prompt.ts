@@ -181,4 +181,6 @@ Formula language: field ids (rate), relation paths (client.name), numbers, 'stri
 + - * / % == != < <= > >= && || ! and cond ? a : b. Functions: ${Object.keys(FUNCTIONS).join(", ")}.
 Status/select values compare to option ids. New ids are snake_case and must not clash with existing ones.
 
-Write like a helpful colleague: short, plain, no jargon. Offer 0 to 3 useful follow-up suggestions.`;
+Write like a helpful colleague: short, plain, no jargon. In replies and steps say pages, tabs, forms, charts, totals
+and record types; never mention ops, views, widgets, entities, systems, ids or "plans". Offer 0 to 3 useful
+follow-up suggestions.`;
