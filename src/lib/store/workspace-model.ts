@@ -1,0 +1,159 @@
+/**
+ * Workspace model shared by the browser store and the server. A workspace is stored as one JSON
+ * document (blueprint versions, records, change history, setup conversation); its owner, members
+ * and invites live in their own tables so access can be checked in SQL.
+ */
+import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
+import { DEMO_WORKSPACES } from "@/lib/catalog/demo-workspaces";
+import type { ChangePlan, RecordChange } from "@/lib/engine/changes";
+
+export type Role = "owner" | "admin" | "staff" | "viewer";
+export type MemberRole = Exclude<Role, "owner">;
+export const ROLES: { id: MemberRole; label: string; description: string }[] = [
+  { id: "admin", label: "Admin", description: "Manage systems, settings and the team" },
+  { id: "staff", label: "Staff", description: "Add and edit records" },
+  { id: "viewer", label: "Viewer", description: "View only" },
+];
+export type Member = { accountId: string; name: string; email: string; role: MemberRole; joinedAt: string };
+export type Invite = { token: string; email: string; role: MemberRole; invitedAt: string; invitedBy: string };
+
+/** One turn of the Ask EveryOps setup conversation. */
+export type ChatTurn = {
+  role: "user" | "assistant";
+  text: string;
+  suggestions?: string[];
+  /** Set on the turn where Gemini decided to design, so an interrupted design can resume. */
+  brief?: string;
+  workspaceName?: string;
+};
+export type ProfileLine = { label: string; value: string };
+/** A workspace Gemini designed, waiting for the owner to create it. */
+export type SetupDraft = {
+  name: string;
+  summary: string;
+  data: WorkspaceData;
+  preview: { label: string; detail: string }[];
+};
+/** Where the setup conversation is, so a refresh or another device picks it up. */
+export type SetupProgress = { messages: ChatTurn[]; profile: ProfileLine[]; draft?: SetupDraft };
+
+export type ChangeEntry = {
+  id: string;
+  request: string;
+  title: string;
+  steps: ChangePlan["steps"];
+  fromVersion: number;
+  toVersion: number;
+  recordChanges: RecordChange[];
+  appliedAt: string;
+  undoneAt?: string;
+};
+
+export type Workspace = {
+  /** Globally unique id, also the URL segment: /w/[slug]. */
+  slug: string;
+  name: string;
+  summary: string;
+  createdAt: string;
+  openedAt: string;
+  source?: { systemId: string; version: string };
+  /** Every blueprint version; versions[n - 1] is version n. */
+  versions: Blueprint[];
+  currentVersion: number;
+  records: DataRecord[];
+  changes: ChangeEntry[];
+  /** Filled in by the server from the workspace table. */
+  ownerId?: string;
+  owner?: { name: string; email: string };
+  members?: Member[];
+  /** Only sent to owners and admins. */
+  invites?: Invite[];
+  /** Set while Ask EveryOps is still setting the workspace up. */
+  setup?: { prompt: string; progress?: SetupProgress };
+};
+
+/** The parts of a workspace stored in its JSON document. */
+export type WorkspaceDoc = Omit<Workspace, "ownerId" | "owner" | "members" | "invites">;
+
+export type NewWorkspace = {
+  name: string;
+  summary: string;
+  data: WorkspaceData;
+  source?: Workspace["source"];
+  setup?: Workspace["setup"];
+  slug?: string;
+};
+
+export function roleOf(ws: Workspace | undefined, accountId: string | null | undefined): Role | null {
+  if (!ws || !accountId) return null;
+  if (ws.ownerId === accountId) return "owner";
+  return ws.members?.find((m) => m.accountId === accountId)?.role ?? null;
+}
+export const canManage = (role: Role | null) => role === "owner" || role === "admin";
+export const canEdit = (role: Role | null) => role === "owner" || role === "admin" || role === "staff";
+
+export function blueprintOf(ws: Workspace): Blueprint {
+  return ws.versions[ws.currentVersion - 1];
+}
+export function dataOf(ws: Workspace): WorkspaceData {
+  return { blueprint: blueprintOf(ws), records: ws.records };
+}
+
+export const slugify = (name: string) =>
+  name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40) || "workspace";
+
+export function randomToken(bytes = 12) {
+  const buf = new Uint8Array(bytes);
+  crypto.getRandomValues(buf);
+  return [...buf].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** URL-friendly and unique across accounts: "court-house-7f3a". */
+export const newWorkspaceId = (name: string) => `${slugify(name)}-${randomToken(2)}`;
+
+export function workspaceFrom(input: NewWorkspace, slug: string, now: string): Workspace {
+  return {
+    slug,
+    name: input.name,
+    summary: input.summary,
+    createdAt: now,
+    openedAt: now,
+    source: input.source,
+    versions: [{ ...input.data.blueprint, version: 1, workspaceName: input.name }],
+    currentVersion: 1,
+    records: input.data.records,
+    changes: [],
+    setup: input.setup,
+  };
+}
+
+/** The four demo workspaces every new account starts with. */
+export function demoWorkspaces(now = new Date()): Workspace[] {
+  const stamp = now.toISOString();
+  return DEMO_WORKSPACES.map((demo, i) => {
+    const ws = workspaceFrom(
+      {
+        name: demo.name,
+        summary: demo.summary,
+        data: demo.build(now),
+        source: demo.sourceId ? { systemId: demo.sourceId, version: "1.2" } : undefined,
+      },
+      newWorkspaceId(demo.slug),
+      stamp,
+    );
+    // Stagger "last opened" so the recent list has a stable order.
+    ws.openedAt = new Date(now.getTime() - i * 60_000).toISOString();
+    return ws;
+  });
+}
+
+export function toDoc(ws: Workspace): WorkspaceDoc {
+  const { ownerId: _o, owner: _p, members: _m, invites: _i, ...doc } = ws;
+  return doc;
+}

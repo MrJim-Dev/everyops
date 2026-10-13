@@ -1,0 +1,402 @@
+import "server-only";
+import type {
+  Blueprint,
+  DataRecord,
+  Entity,
+  Field,
+  FieldValue,
+  Rule,
+  View,
+  Widget,
+  WorkspaceData,
+} from "@/lib/blueprint/types";
+import { validateBlueprint } from "@/lib/blueprint/validate";
+import { CATALOG } from "@/lib/catalog";
+import { computeAll } from "@/lib/engine/compute";
+import { todayKey } from "@/lib/time";
+import { DESIGN_SYSTEM, type Design, design } from "./design-prompt";
+import { generateJson } from "./gemini";
+
+const SLOT_MINUTES = [15, 30, 60, 90, 120] as const;
+const pick = <T extends object>(source: T, keys: (keyof T)[]) =>
+  Object.fromEntries(keys.filter((k) => source[k] !== undefined).map((k) => [k, source[k]])) as Partial<T>;
+
+/** Turns the model's view (optional keys) into the strict view type for its kind. */
+function toView(v: Design["views"][number]): View {
+  const base = { id: v.id, entityId: v.entityId, name: v.name };
+  switch (v.type) {
+    case "table":
+      return { ...base, type: "table", fieldIds: v.fieldIds ?? [], filter: v.filter, sort: v.sort };
+    case "kanban":
+      return {
+        ...base,
+        type: "kanban",
+        statusFieldId: v.statusFieldId ?? "",
+        cardFieldIds: v.cardFieldIds ?? [],
+        filter: v.filter,
+      };
+    case "calendar":
+      return {
+        ...base,
+        type: "calendar",
+        dateFieldId: v.dateFieldId ?? "",
+        titleFieldId: v.titleFieldId ?? "",
+        filter: v.filter,
+      };
+    case "slot_grid":
+      return { ...base, type: "slot_grid" };
+    case "checkout":
+      return {
+        ...base,
+        type: "checkout",
+        productEntityId: v.productEntityId ?? "",
+        lineEntityId: v.lineEntityId ?? "",
+        paymentFieldId: v.paymentFieldId ?? "",
+      };
+    case "approval_queue":
+      return {
+        ...base,
+        type: "approval_queue",
+        statusFieldId: v.statusFieldId ?? "",
+        pending: v.pending ?? "",
+        approve: v.approve ?? "",
+        reject: v.reject ?? "",
+        approveLabel: v.approveLabel ?? "Approve",
+        rejectLabel: v.rejectLabel ?? "Decline",
+        detailFieldIds: v.detailFieldIds ?? [],
+      };
+  }
+}
+
+function toEntity(e: Design["entities"][number]): Entity {
+  const fields = e.fields.map((f) => {
+    const out: Field = {
+      id: f.id,
+      name: f.name,
+      type: f.type,
+      ...pick(f, ["required", "description", "options", "range", "relation", "formula", "rollup"]),
+    };
+    return out;
+  });
+  const want = e.resource?.slotMinutes ?? 60;
+  const resource = e.resource
+    ? {
+        ...e.resource,
+        slotMinutes: SLOT_MINUTES.reduce((a, b) => (Math.abs(b - want) < Math.abs(a - want) ? b : a)),
+      }
+    : undefined;
+  return {
+    id: e.id,
+    name: e.name,
+    pluralName: e.pluralName,
+    primaryFieldId: e.primaryFieldId,
+    fields,
+    ...pick({ ...e, resource }, ["parent", "booking", "resource"]),
+  };
+}
+
+function toBlueprint(d: Design): Blueprint {
+  return {
+    version: 1,
+    workspaceName: d.workspaceName,
+    systems: d.systems,
+    entities: d.entities.map(toEntity),
+    views: d.views.map(toView),
+    widgets: d.widgets as Widget[],
+    rules: d.rules.map((r) => ({
+      ...r,
+      actions: r.actions.map((a) =>
+        a.type === "notify"
+          ? { type: "notify", message: a.message ?? "" }
+          : a.type === "set_field"
+            ? {
+                type: "set_field",
+                target:
+                  a.target?.kind === "relation"
+                    ? { kind: "relation", fieldId: a.target.fieldId ?? "" }
+                    : { kind: "self" },
+                fieldId: a.fieldId ?? "",
+                value: a.value ?? "null",
+              }
+            : {
+                type: "adjust_number",
+                target:
+                  a.target?.kind === "relation"
+                    ? { kind: "relation", fieldId: a.target.fieldId ?? "" }
+                    : { kind: "self" },
+                fieldId: a.fieldId ?? "",
+                delta: a.delta ?? "0",
+              },
+      ),
+    })) as Rule[],
+  };
+}
+
+/**
+ * Fixes small, unambiguous slips so they don't cost a whole repair round: a computed field used as the
+ * record name, status fields without stages, links to record types that don't exist, screens and
+ * widgets that point at missing fields, and empty sidebar sections.
+ */
+function tidy(bp: Blueprint): Blueprint {
+  // Resolve loose references ("projects", "Project") to the real record type id.
+  const norm = (x: string) =>
+    x
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .replace(/(es|s)$/, "");
+  const byName = new Map<string, string>();
+  for (const e of bp.entities) for (const k of [e.id, e.name, e.pluralName]) byName.set(norm(k), e.id);
+  const resolve = (id: string | undefined) =>
+    id === undefined ? id : bp.entities.some((e) => e.id === id) ? id : (byName.get(norm(id)) ?? id);
+  for (const e of bp.entities) {
+    if (e.parent) e.parent.entityId = resolve(e.parent.entityId) as string;
+    for (const f of e.fields) {
+      if (f.relation) f.relation.entityId = resolve(f.relation.entityId) as string;
+      if (f.rollup) f.rollup.childEntityId = resolve(f.rollup.childEntityId) as string;
+    }
+  }
+  for (const v of bp.views) {
+    v.entityId = resolve(v.entityId) as string;
+    if (v.type === "checkout") {
+      v.productEntityId = resolve(v.productEntityId) as string;
+      v.lineEntityId = resolve(v.lineEntityId) as string;
+    }
+  }
+  for (const w of bp.widgets) w.entityId = resolve(w.entityId) as string;
+  for (const r of bp.rules) r.trigger.entityId = resolve(r.trigger.entityId) as string;
+  // "patient.name" when Patient's name field is called something else: point it at the primary field.
+  const fixRefs = (entity: Entity, expr: string) =>
+    expr.replace(/\b([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\b/g, (whole, rel: string, target: string) => {
+      const field = entity.fields.find((x) => x.id === rel);
+      const other = bp.entities.find((x) => x.id === field?.relation?.entityId);
+      if (!other || other.fields.some((x) => x.id === target)) return whole;
+      return /^(name|title|label|full_name)$/.test(target) ? `${rel}.${other.primaryFieldId}` : whole;
+    });
+  for (const e of bp.entities)
+    for (const f of e.fields)
+      if (f.formula) {
+        f.formula.expr = fixRefs(e, f.formula.expr);
+        if (f.formula.freezeWhen) f.formula.freezeWhen = fixRefs(e, f.formula.freezeWhen);
+      }
+  const entityIds = new Set(bp.entities.map((e) => e.id));
+  for (const e of bp.entities) {
+    for (const f of e.fields) {
+      if (f.type === "relation" && !entityIds.has(f.relation?.entityId ?? "")) {
+        f.type = "text";
+        delete f.relation;
+      }
+      if (f.type === "status" && !f.options?.length)
+        f.options = [
+          { id: "todo", label: "To do", tone: "neutral" },
+          { id: "in_progress", label: "In progress", tone: "accent" },
+          { id: "done", label: "Done", tone: "success" },
+        ];
+      if ((f.type === "select" || f.type === "multi_select") && !f.options?.length) {
+        f.type = "text";
+        delete f.options;
+      }
+    }
+    const primary = e.fields.find((x) => x.id === e.primaryFieldId);
+    if (!primary || primary.type === "formula" || primary.type === "rollup" || primary.type === "relation") {
+      const text = e.fields.find((x) => x.type === "text");
+      if (text) e.primaryFieldId = text.id;
+      else {
+        const id = e.fields.some((x) => x.id === "title") ? "record_title" : "title";
+        e.fields.unshift({ id, name: "Title", type: "text", required: true });
+        e.primaryFieldId = id;
+      }
+    }
+  }
+  const fieldsOf = (entityId: string) =>
+    new Set(bp.entities.find((e) => e.id === entityId)?.fields.map((x) => x.id) ?? []);
+  bp.views = bp.views.filter((v) => entityIds.has(v.entityId));
+  for (const v of bp.views) {
+    const has = fieldsOf(v.entityId);
+    if (v.type === "table") {
+      v.fieldIds = v.fieldIds.filter((id) => has.has(id));
+      if (!v.fieldIds.length) v.fieldIds = [...has].slice(0, 5);
+      v.sort = v.sort?.filter((x) => has.has(x.fieldId));
+    }
+    if (v.type === "kanban") v.cardFieldIds = v.cardFieldIds.filter((id) => has.has(id));
+    if (v.type === "approval_queue") v.detailFieldIds = v.detailFieldIds.filter((id) => has.has(id));
+  }
+  bp.widgets = bp.widgets.filter((w) => {
+    if (!entityIds.has(w.entityId)) return false;
+    const has = fieldsOf(w.entityId);
+    if (w.metric.fieldId && !has.has(w.metric.fieldId)) return false;
+    if (w.type === "chart" && (!w.chart || !has.has(w.chart.dateFieldId))) return false;
+    if (w.list) w.list.fieldIds = w.list.fieldIds.filter((id) => has.has(id));
+    if (w.type === "list" && !w.list?.fieldIds.length) return false;
+    return true;
+  });
+  const viewIds = new Set(bp.views.map((v) => v.id));
+  const widgetIds = new Set(bp.widgets.map((w) => w.id));
+  for (const w of bp.widgets) if (w.list?.viewId && !viewIds.has(w.list.viewId)) delete w.list.viewId;
+  bp.systems = bp.systems
+    .map((sys) => ({
+      ...sys,
+      viewIds: sys.viewIds.filter((id) => viewIds.has(id)),
+      widgetIds: sys.widgetIds.filter((id) => widgetIds.has(id)),
+    }))
+    .filter((sys) => sys.viewIds.length + sys.widgetIds.length > 0);
+  bp.rules = bp.rules.filter((r) => entityIds.has(r.trigger.entityId));
+  return bp;
+}
+
+/** Problems the generic validator doesn't catch but would break a screen. */
+function extraChecks(bp: Blueprint): string[] {
+  const errors: string[] = [];
+  const entityIds = new Set(bp.entities.map((e) => e.id));
+  const viewIds = new Set(bp.views.map((v) => v.id));
+  if (!bp.systems.length) errors.push("The workspace has no systems.");
+  for (const e of bp.entities) {
+    const primary = e.fields.find((f) => f.id === e.primaryFieldId);
+    if (primary && (primary.type === "formula" || primary.type === "rollup"))
+      errors.push(`${e.name}: the primary field must be a plain field`);
+    for (const f of e.fields)
+      if (f.type === "rollup" && f.rollup && !entityIds.has(f.rollup.childEntityId))
+        errors.push(`${e.name}.${f.id}: rollup uses a missing record type`);
+  }
+  for (const w of bp.widgets) {
+    const entity = bp.entities.find((e) => e.id === w.entityId);
+    if (!entity) continue;
+    const has = (id?: string) => !id || entity.fields.some((f) => f.id === id);
+    if (!has(w.metric.fieldId)) errors.push(`Widget ${w.title}: field "${w.metric.fieldId}" is missing`);
+    if (w.type === "chart" && (!w.chart || !has(w.chart.dateFieldId)))
+      errors.push(`Widget ${w.title}: a chart needs a date field`);
+    if (w.type === "list" && (!w.list || !w.list.fieldIds.every((id) => has(id))))
+      errors.push(`Widget ${w.title}: list fields are missing`);
+    if (w.list?.viewId && !viewIds.has(w.list.viewId))
+      errors.push(`Widget ${w.title}: links to a missing view`);
+  }
+  return errors;
+}
+
+/** Converts sample values (strings) into typed record data, dropping anything that doesn't fit. */
+function toRecords(bp: Blueprint, samples: Design["samples"], now: Date): DataRecord[] {
+  const stamp = now.toISOString();
+  const ids = new Map<string, string>();
+  for (const [i, s] of samples.entries()) ids.set(s.ref, `${s.entityId}_${i + 1}`);
+  const toIso = (v: string) => {
+    const t = v.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+    const withZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t.length === 16 ? `${t}:00` : t}+08:00`;
+    const ms = Date.parse(withZone);
+    return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+  };
+  return samples.flatMap((s, i) => {
+    const entity = bp.entities.find((e) => e.id === s.entityId);
+    if (!entity) return [];
+    const data: Record<string, FieldValue> = {};
+    for (const { fieldId, value } of s.values) {
+      const field = entity.fields.find((f) => f.id === fieldId);
+      if (!field || field.type === "formula" || field.type === "rollup") continue;
+      const v = value.trim();
+      switch (field.type) {
+        case "number":
+        case "money":
+        case "percent": {
+          const n = Number(v.replace(/[₱,\s]/g, ""));
+          if (Number.isFinite(n)) data[field.id] = n;
+          break;
+        }
+        case "checkbox":
+          data[field.id] = /^(true|yes|1)$/i.test(v);
+          break;
+        case "relation":
+          if (ids.has(v)) data[field.id] = ids.get(v) as string;
+          break;
+        case "select":
+        case "status": {
+          const opt = field.options?.find((o) => o.id === v || o.label.toLowerCase() === v.toLowerCase());
+          if (opt) data[field.id] = opt.id;
+          break;
+        }
+        case "multi_select":
+          data[field.id] = v
+            .split(",")
+            .map(
+              (x) =>
+                field.options?.find(
+                  (o) => o.id === x.trim() || o.label.toLowerCase() === x.trim().toLowerCase(),
+                )?.id,
+            )
+            .filter((x): x is string => !!x);
+          break;
+        case "date": {
+          const iso = toIso(v);
+          if (iso) data[field.id] = iso.slice(0, 10);
+          break;
+        }
+        case "datetime": {
+          const iso = toIso(v);
+          if (iso) data[field.id] = iso;
+          break;
+        }
+        case "time_range": {
+          const [a, b] = v.split("/").map((x) => (x ? toIso(x) : null));
+          if (a && b)
+            data[field.id] =
+              field.range === "dates" ? { start: a.slice(0, 10), end: b.slice(0, 10) } : { start: a, end: b };
+          break;
+        }
+        default:
+          data[field.id] = v;
+      }
+    }
+    if (!data[entity.primaryFieldId]) return [];
+    return [{ id: `${s.entityId}_${i + 1}`, entityId: entity.id, data, createdAt: stamp, updatedAt: stamp }];
+  });
+}
+
+const EXAMPLES = (() => {
+  const now = new Date();
+  return ["court-bookings", "canteen-pos"]
+    .map((id) => CATALOG.find((s) => s.id === id)?.sample(now).blueprint)
+    .filter(Boolean)
+    .map((bp) => JSON.stringify(bp))
+    .join("\n\n");
+})();
+
+export type DesignResult =
+  | { ok: true; name: string; summary: string; data: WorkspaceData }
+  | { ok: false; message: string };
+
+/** Designs a workspace from the interview brief. Invalid designs get up to two repairs with the validator's errors. */
+export async function designWorkspace(brief: string, workspaceName: string): Promise<DesignResult> {
+  const now = new Date();
+  const context = `Examples:\n${EXAMPLES}\n\nToday in Manila: ${todayKey(now)}\nWorkspace name: ${workspaceName || "choose one"}\n\nBrief:\n${brief}`;
+  let prompt = context;
+  let repairs = 0;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const result = await generateJson(design, {
+      system: DESIGN_SYSTEM,
+      prompt,
+      task: "design",
+      timeoutMs: 60_000,
+      thinking: "LOW",
+    });
+    if (!result.ok) {
+      if (result.retryable && attempt < 1) continue;
+      return { ok: false, message: result.error };
+    }
+    const bp = tidy(toBlueprint(result.data));
+    const errors = [...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`), ...extraChecks(bp)];
+    if (!errors.length) {
+      const records = computeAll(bp, toRecords(bp, result.data.samples, now), now);
+      return {
+        ok: true,
+        name: result.data.workspaceName || workspaceName,
+        summary: result.data.summary,
+        data: { blueprint: bp, records },
+      };
+    }
+    console.warn(JSON.stringify({ event: "design_rejected", attempt, errors: errors.slice(0, 15) }));
+    if (++repairs > 2) break;
+    prompt = `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour previous design:\n${JSON.stringify(result.data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\nReturn the full corrected design.`;
+  }
+  return {
+    ok: false,
+    message: "I couldn't design a valid workspace for that yet. Add a detail or two and try again.",
+  };
+}

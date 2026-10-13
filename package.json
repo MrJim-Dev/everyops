@@ -11,8 +11,8 @@
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",
     "env:pull": "bash scripts/pull-env.sh",
-    "db:migrate": "tsx --env-file=.env.local scripts/db-migrate.ts",
-    "db:seed": "tsx --env-file=.env.local scripts/db-seed.ts",
+    "db:migrate": "tsx --conditions=react-server --env-file=.env.local scripts/db-migrate.ts",
+    "db:seed": "tsx --conditions=react-server --env-file=.env.local scripts/db-seed.ts",
     "db:proxy": "cloud-sql-proxy everyops-prod:asia-southeast1:everyops-db --port 5433",
     "deploy:run": "bash scripts/deploy.sh"
   },

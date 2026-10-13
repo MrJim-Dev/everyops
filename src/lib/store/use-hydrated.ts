@@ -2,7 +2,7 @@
 
 import { useWorkspaces } from "./workspaces";
 
-/** True once the signed-in account's workspaces are loaded from this browser. */
+/** True once the signed-in account's workspaces have loaded from the server (or failed to). */
 export function useHydrated(): boolean {
-  return useWorkspaces((s) => s.owner !== undefined);
+  return useWorkspaces((s) => s.status === "ready" || s.status === "error");
 }

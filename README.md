@@ -2,7 +2,7 @@
 
 Describe your business, and EveryOps builds the systems it needs (bookings, POS, content, finance, HR) inside one workspace. Built for the Google Cloud AI Builder Cup 2026.
 
-Accounts and sessions run on the server (Better Auth + Kysely on PostgreSQL). Workspaces are still saved in the browser, per account, until they move to the database. The AI steps are scripted stand-ins with the same inputs and outputs Gemini will use, so the backend can replace them without UI changes.
+Everything is stored in PostgreSQL (Cloud SQL): accounts and sessions (Better Auth), workspaces, teams, invites, community systems and starter templates. Gemini on Vertex AI runs the setup conversation, designs new workspaces, and plans changes; the app validates everything it produces before the owner sees it.
 
 ## Run it
 
@@ -20,6 +20,17 @@ pnpm build
 ```
 
 The first visit seeds four demo workspaces: Court House PH, Tita Nena's Canteen, Kapé Ilaya and Sunrise Bakeshop.
+
+## Data
+
+| Table | Holds |
+|---|---|
+| `workspace` | One JSON document per workspace (blueprint versions, records, change history, setup conversation) and its owner |
+| `workspace_member`, `workspace_invite` | Team access (admin, staff, viewer) and pending invite links |
+| `published_system` | Community systems: official templates (`is_official`, with sample data) and systems people publish |
+| `workspace_template` | The demo workspaces every new account starts with (`account_seed` records that it happened) |
+
+Templates store the day their sample data was built; dates move forward to today whenever one is used (`src/lib/catalog/shift.ts`). `pnpm db:migrate` applies Better Auth's schema and `src/server/migrations/*.sql`; `pnpm db:seed` refreshes templates from `src/lib/catalog`. The API checks access on every request: owners and admins save whole workspaces and the team, staff save records only, viewers read.
 
 ## Deployment
 
@@ -58,13 +69,11 @@ blueprint (JSON) ──► engine (src/lib/engine) ──► views (src/componen
 | `src/lib/engine` | Formula language, compute, records and rules, availability, aggregates, change plans with undo |
 | `src/lib/catalog` | Community systems (blueprint + sample data) and the demo workspaces |
 | `src/lib/assistant` | Setup interview and change planner. **Gemini plugs in here.** |
-| `src/lib/store` | Workspaces saved in localStorage (Zustand), versions and change history |
+| `src/lib/store` | Workspace model and the browser store, which loads from `/api/workspaces` and saves each changed workspace back (debounced) |
 | `src/components/views` | One component per view type: table, kanban, calendar, schedule, checkout, approval queue |
 | `src/components/widgets` | Dashboard stats, charts, progress and lists |
 | `src/components/records` | Shared field display/input, record panel, create dialog |
 | `src/components/workspace` | Workspace context, used by saved workspaces and previews alike |
-
-## Design rules
 
 ## AI (Gemini on Vertex AI)
 
@@ -78,9 +87,13 @@ Gemini runs only on the server, through Vertex AI in `asia-southeast1`, signed i
 | `src/server/ai/plan-change.ts` | Turns Gemini's answer into `ChangeOp`s, rejects anything that doesn't fit the blueprint or fails `validateBlueprint`, and gives Gemini one repair attempt with the errors |
 | `src/app/api/ai/plan-change/route.ts` | `POST` endpoint: signed-in users only, size-limited, rate-limited |
 | `src/lib/assistant/ai-client.ts` | Browser helper used by Ask EveryOps; falls back to the built-in planner only if Gemini is unreachable |
+| `src/server/ai/interview*.ts` | Setup conversation: asks short follow-up questions with tap-to-send suggestions, keeps a profile of the business, and decides when to design |
+| `src/server/ai/design*.ts` | Designs the workspace (blueprint plus sample records) from the conversation's brief, tidies small slips, validates it, and repairs up to twice |
+| `src/app/api/ai/interview`, `src/app/api/ai/design` | The setup endpoints used by `src/components/setup/setup-interview.tsx` |
 
-The model is `gemini-3.5-flash` (`GEMINI_MODEL`). Typical answers take 3–10 seconds. Leave temperature and thinking at their defaults: lowering them made Gemini 3 models loop, and the `global` endpoint stalled often, which is why the regional endpoint is used.
+The model is `gemini-3.5-flash` (`GEMINI_MODEL`). Conversation turns take 3–10 seconds and a design about 20. Leave temperature at its default and only lower thinking for the designer: lowering them elsewhere made Gemini 3 models loop, and the `global` endpoint stalled often, which is why the regional endpoint is used.
 
+## Design rules
 
 - Dark, compact, Linear-inspired. Tokens live in `src/app/globals.css` with one accent (#3FA796).
 - Geist and Geist Mono. Numbers are tabular.
@@ -90,11 +103,10 @@ The model is `gemini-3.5-flash` (`GEMINI_MODEL`). Typical answers take 3–10 se
 
 ## Known limits of this build
 
-- Data is saved per browser. Bumping `DATA_VERSION` in `src/lib/store/workspaces.ts` replaces saved data with fresh demos.
+- Saves are last-write-wins per workspace: two people editing the same workspace at the same moment can overwrite each other.
 - The interviewer guides booking businesses. Other business types are pointed to a matching community system.
 - The change planner understands pricing changes, adding a field, and renaming a workspace.
-- Community authors and usage counts are sample catalog data. Systems you publish are stored in this browser.
-- Invites only work for accounts in the same browser until the backend lands.
+- Official community systems keep their sample authors and usage counts. Invites are links; email isn't sent yet.
 
 ## Accounts
 

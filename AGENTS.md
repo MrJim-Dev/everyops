@@ -29,7 +29,9 @@ Use pnpm only. `pnpm build` matters: `cacheComponents` errors (below) only show 
 
 - A business's system is a **blueprint** (JSON) rendered by one generic engine (`src/lib/engine`) and one set of views. Never generate or run per-client code; AI output must be a validated blueprint or change plan (`src/lib/blueprint/validate.ts`).
 - `src/lib/assistant` (interview, change planner) is where Gemini plugs in. Keep its input/output shapes so the UI doesn't change.
-- Workspaces, versions, records and change history still live in the browser (Zustand + localStorage, `src/lib/store/workspaces.ts`), filed per account id. Bump `DATA_VERSION` when demo blueprints change.
+- Nothing is stored in localStorage. Workspaces live in Postgres (`workspace` JSON documents plus `workspace_member`/`workspace_invite`); the browser store (`src/lib/store/workspaces.ts`) loads them from `/api/workspaces` and saves changed workspaces back. Access rules are enforced in `src/server/workspaces.ts`, never only in the UI.
+- Starter templates (official community systems, demo workspaces) are database rows refreshed by `pnpm db:seed` from `src/lib/catalog`. Schema changes go in a new `src/server/migrations/NNNN_name.sql` applied by `pnpm db:migrate`.
+- Ask EveryOps setup: `src/server/ai/interview*.ts` (conversation) and `src/server/ai/design*.ts` (blueprint + samples, tidied and validated, up to two repairs).
 - Server-only code lives in `src/server` (database, auth, session). Never import it from a `"use client"` file.
 
 ## Database and auth

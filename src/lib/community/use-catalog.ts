@@ -1,13 +1,22 @@
 "use client";
 
-import { useMemo } from "react";
-import { CATALOG, type CatalogSystem } from "@/lib/catalog";
+import { useEffect, useMemo } from "react";
+import type { CatalogSystem } from "@/lib/catalog";
 import { toCatalogSystem, usePublished } from "./published";
 
-/** Community systems: what people published here, then the curated catalog. */
+/** Community systems from the database: what people published first, then the official templates. */
 export function useCatalog(): CatalogSystem[] {
-  const published = usePublished((s) => s.systems);
-  return useMemo(() => [...published.map(toCatalogSystem), ...CATALOG], [published]);
+  const systems = usePublished((s) => s.systems);
+  const load = usePublished((s) => s.load);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  return useMemo(() => systems.map(toCatalogSystem), [systems]);
+}
+
+/** True once community systems have loaded (or failed to). */
+export function useCatalogLoaded(): boolean {
+  return usePublished((s) => s.status === "ready" || s.status === "error");
 }
 
 export function useCatalogSystem(id: string): CatalogSystem | undefined {

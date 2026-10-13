@@ -3,8 +3,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { ShellSkeleton } from "@/components/shell/shell-skeleton";
 import type { WorkspaceData } from "@/lib/blueprint/types";
-import { usePublished } from "@/lib/community/published";
-import { useCatalogSystem } from "@/lib/community/use-catalog";
+import { useCatalogLoaded, useCatalogSystem } from "@/lib/community/use-catalog";
 import { WorkspaceProvider } from "./workspace-context";
 import { WorkspaceMissing } from "./workspace-missing";
 
@@ -14,13 +13,8 @@ import { WorkspaceMissing } from "./workspace-missing";
  */
 export function PreviewWorkspace({ systemId, children }: { systemId: string; children: ReactNode }) {
   const system = useCatalogSystem(systemId);
-  // Published systems load from this browser; wait for them before deciding a system doesn't exist.
-  const [checked, setChecked] = useState(false);
-  useEffect(() => {
-    const done = () => setChecked(true);
-    if (usePublished.persist.hasHydrated()) done();
-    return usePublished.persist.onFinishHydration(done);
-  }, []);
+  // Community systems load from the server; wait for them before deciding a system doesn't exist.
+  const checked = useCatalogLoaded();
   const [data, setData] = useState<WorkspaceData | null>(null);
 
   // Sample data is dated around "today", so build it in the browser only.

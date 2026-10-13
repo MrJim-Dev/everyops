@@ -1,0 +1,18 @@
+import type { Blueprint } from "@/lib/blueprint/types";
+
+/** What a blueprint contains, in words, for listings. */
+export function describeBlueprint(bp: Blueprint): string[] {
+  const names: Partial<Record<string, string>> = {
+    slot_grid: "Schedule",
+    checkout: "Register",
+    approval_queue: "Approval queue",
+    kanban: "Board",
+    calendar: "Calendar",
+  };
+  const screens = [...new Set(bp.views.map((v) => names[v.type]).filter((n): n is string => !!n))];
+  return [
+    ...bp.entities.map((e) => `${e.name} records`),
+    ...screens,
+    ...(bp.rules.length ? [`${bp.rules.length} automatic ${bp.rules.length === 1 ? "rule" : "rules"}`] : []),
+  ].slice(0, 5);
+}

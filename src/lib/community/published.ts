@@ -1,88 +1,40 @@
 "use client";
 
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
-import type { Blueprint, IconName } from "@/lib/blueprint/types";
+import type { Blueprint, DataRecord, IconName } from "@/lib/blueprint/types";
 import type { CatalogCategory, CatalogSystem } from "@/lib/catalog";
+import { freshSample } from "@/lib/catalog/shift";
+import { describeBlueprint } from "./describe";
 
-/**
- * Systems people publish from their workspaces. Only the blueprint is
- * published, never records. Stored in this browser until the backend lands.
- */
+export { describeBlueprint };
+
+/** A community system from the database: official templates and what people published. */
 export type PublishedSystem = {
   id: string;
+  official: boolean;
   name: string;
   summary: string;
   category: CatalogCategory;
+  icon: IconName;
+  author: string;
   license: "MIT" | "Apache-2.0";
   version: string;
-  authorId: string;
-  authorName: string;
-  /** Workspace it was published from: owner account + slug. */
-  source: { owner: string; slug: string };
+  uses: number;
+  includes: string[];
+  authorId: string | null;
+  sourceWorkspaceId: string | null;
   blueprint: Blueprint;
+  sample?: { records: DataRecord[]; builtOn: string };
   publishedAt: string;
   updatedAt: string;
 };
 
-export type PublishInput = Pick<PublishedSystem, "name" | "summary" | "category" | "license">;
-
-type State = {
-  systems: PublishedSystem[];
-  publish: (
-    input: PublishInput &
-      Omit<PublishedSystem, keyof PublishInput | "id" | "version" | "publishedAt" | "updatedAt">,
-  ) => PublishedSystem;
-  update: (id: string, input: PublishInput, blueprint: Blueprint) => PublishedSystem | null;
-  unpublish: (id: string) => void;
+export type PublishInput = {
+  name: string;
+  summary: string;
+  category: CatalogCategory;
+  license: "MIT" | "Apache-2.0";
 };
-
-const slugify = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "") || "system";
-const bump = (version: string) => {
-  const [major, minor] = version.split(".").map(Number);
-  return `${major}.${(minor || 0) + 1}`;
-};
-
-export const usePublished = create<State>()(
-  persist(
-    (set, get) => ({
-      systems: [],
-      publish: (input) => {
-        const now = new Date().toISOString();
-        let id = `${slugify(input.name)}-${input.authorId.slice(-4)}`;
-        for (let i = 2; get().systems.some((s) => s.id === id); i++)
-          id = `${slugify(input.name)}-${input.authorId.slice(-4)}-${i}`;
-        const system: PublishedSystem = { ...input, id, version: "1.0", publishedAt: now, updatedAt: now };
-        set((s) => ({ systems: [system, ...s.systems] }));
-        return system;
-      },
-      update: (id, input, blueprint) => {
-        const current = get().systems.find((s) => s.id === id);
-        if (!current) return null;
-        const next = {
-          ...current,
-          ...input,
-          blueprint,
-          version: bump(current.version),
-          updatedAt: new Date().toISOString(),
-        };
-        set((s) => ({ systems: s.systems.map((x) => (x.id === id ? next : x)) }));
-        return next;
-      },
-      unpublish: (id) => set((s) => ({ systems: s.systems.filter((x) => x.id !== id) })),
-    }),
-    {
-      name: "everyops.community",
-      version: 1,
-      storage: createJSONStorage(() => localStorage),
-      skipHydration: true,
-    },
-  ),
-);
 
 const ICONS: Record<CatalogCategory, IconName> = {
   booking: "calendar",
@@ -92,22 +44,76 @@ const ICONS: Record<CatalogCategory, IconName> = {
   pos: "storefront",
 };
 
-/** What a blueprint contains, in words, for listings. */
-export function describeBlueprint(bp: Blueprint): string[] {
-  const names: Partial<Record<string, string>> = {
-    slot_grid: "Schedule",
-    checkout: "Register",
-    approval_queue: "Approval queue",
-    kanban: "Board",
-    calendar: "Calendar",
-  };
-  const screens = [...new Set(bp.views.map((v) => names[v.type]).filter((n): n is string => !!n))];
-  return [
-    ...bp.entities.map((e) => `${e.name} records`),
-    ...screens,
-    ...(bp.rules.length ? [`${bp.rules.length} automatic ${bp.rules.length === 1 ? "rule" : "rules"}`] : []),
-  ].slice(0, 5);
+type State = {
+  systems: PublishedSystem[];
+  status: "idle" | "loading" | "ready" | "error";
+  load: (force?: boolean) => Promise<void>;
+  publish: (
+    workspaceId: string,
+    input: PublishInput,
+    blueprint: Blueprint,
+  ) => Promise<PublishedSystem | string>;
+  update: (
+    id: string,
+    workspaceId: string,
+    input: PublishInput,
+    blueprint: Blueprint,
+  ) => Promise<PublishedSystem | string>;
+  unpublish: (id: string) => Promise<boolean>;
+};
+
+const body = (workspaceId: string, input: PublishInput, blueprint: Blueprint) =>
+  JSON.stringify({
+    workspaceId,
+    ...input,
+    icon: ICONS[input.category],
+    includes: describeBlueprint(blueprint),
+    blueprint,
+  });
+
+async function call(url: string, init: RequestInit): Promise<PublishedSystem | string> {
+  const res = await fetch(url, { ...init, headers: { "content-type": "application/json" } });
+  const data = (await res.json().catch(() => null)) as { system?: PublishedSystem; message?: string } | null;
+  return data?.system ?? data?.message ?? "Something went wrong. Try again.";
 }
+
+export const usePublished = create<State>()((set, get) => ({
+  systems: [],
+  status: "idle",
+  load: async (force) => {
+    if (!force && (get().status === "ready" || get().status === "loading")) return;
+    set({ status: "loading" });
+    try {
+      const res = await fetch("/api/community", { cache: "no-store" });
+      const data = (await res.json()) as { systems: PublishedSystem[] };
+      set({ systems: data.systems, status: "ready" });
+    } catch {
+      set({ status: "error" });
+    }
+  },
+  publish: async (workspaceId, input, blueprint) => {
+    const result = await call("/api/community", {
+      method: "POST",
+      body: body(workspaceId, input, blueprint),
+    });
+    if (typeof result !== "string") set((s) => ({ systems: [result, ...s.systems] }));
+    return result;
+  },
+  update: async (id, workspaceId, input, blueprint) => {
+    const result = await call(`/api/community/${id}`, {
+      method: "PUT",
+      body: body(workspaceId, input, blueprint),
+    });
+    if (typeof result !== "string")
+      set((s) => ({ systems: s.systems.map((x) => (x.id === id ? result : x)) }));
+    return result;
+  },
+  unpublish: async (id) => {
+    const res = await fetch(`/api/community/${id}`, { method: "DELETE" });
+    if (res.ok) set((s) => ({ systems: s.systems.filter((x) => x.id !== id) }));
+    return res.ok;
+  },
+}));
 
 export function toCatalogSystem(p: PublishedSystem): CatalogSystem {
   return {
@@ -115,17 +121,17 @@ export function toCatalogSystem(p: PublishedSystem): CatalogSystem {
     name: p.name,
     summary: p.summary,
     category: p.category,
-    icon: ICONS[p.category],
-    author: p.authorName,
+    icon: p.icon ?? ICONS[p.category],
+    author: p.author,
     license: p.license,
     version: p.version,
-    uses: 0,
-    includes: describeBlueprint(p.blueprint),
-    authorId: p.authorId,
-    // Published systems carry no records; previews start empty.
-    sample: (_now, workspaceName) => ({
-      blueprint: { ...p.blueprint, version: 1, workspaceName: workspaceName ?? p.name },
-      records: [],
-    }),
+    uses: p.uses,
+    includes: p.includes,
+    authorId: p.authorId ?? undefined,
+    // Official templates carry sample data, moved to today; published systems start empty.
+    sample: (now, workspaceName) =>
+      p.sample
+        ? freshSample(p.blueprint, p.sample.records, p.sample.builtOn, workspaceName ?? p.name, now)
+        : { blueprint: { ...p.blueprint, version: 1, workspaceName: workspaceName ?? p.name }, records: [] },
   };
 }

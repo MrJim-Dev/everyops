@@ -57,7 +57,7 @@ export function TeamPage() {
   const workspace = useWorkspaces((s) => s.workspaces[ws.id]);
   const { inviteMember, revokeInvite, setMemberRole, removeMember, leaveWorkspace } =
     useWorkspaces.getState();
-  const ownerAccount = useWorkspaces((s) => (workspace?.ownerId ? s.profiles[workspace.ownerId] : undefined));
+  const ownerAccount = workspace?.owner;
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Member["role"]>("staff");
   const [error, setError] = useState<string>();

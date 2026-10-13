@@ -2,7 +2,7 @@
 
 import { ArrowSquareOutIcon, CheckIcon, ShieldCheckIcon, UploadSimpleIcon } from "@phosphor-icons/react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { SystemCard } from "@/components/community/system-card";
 import { ConfirmDeleteDialog } from "@/components/settings/confirm-delete-dialog";
@@ -43,13 +43,13 @@ export function PublishPage() {
   const ws = useWorkspace();
   const user = useCurrentUser();
   const workspace = useWorkspaces((s) => s.workspaces[ws.id]);
-  const home =
-    useWorkspaces((s) => s.shared[ws.id]) ??
-    (workspace?.ownerId ? { owner: workspace.ownerId, slug: ws.id } : null);
-  const existing = usePublished((s) =>
-    home ? s.systems.find((x) => x.source.owner === home.owner && x.source.slug === home.slug) : undefined,
-  );
+  const existing = usePublished((s) => s.systems.find((x) => x.sourceWorkspaceId === ws.id));
+  const loadCommunity = usePublished((s) => s.load);
+  useEffect(() => {
+    void loadCommunity();
+  }, [loadCommunity]);
   const { publish, update, unpublish } = usePublished.getState();
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => ({
     name: existing?.name ?? ws.name,
     summary: existing?.summary ?? "",
@@ -58,7 +58,7 @@ export function PublishPage() {
   }));
   const [errors, setErrors] = useState<{ name?: string; summary?: string }>({});
 
-  if (!workspace || !user || !home) return null;
+  if (!workspace || !user) return null;
   if (!canManage(ws.role)) {
     return (
       <ViewEmpty
@@ -79,19 +79,23 @@ export function PublishPage() {
   const includes = describeBlueprint(ws.blueprint);
   const preview = toCatalogSystem({
     id: existing?.id ?? "draft",
+    official: false,
     ...form,
     name: form.name || ws.name,
     summary: form.summary || "Your summary appears here.",
+    icon: existing?.icon ?? "chart",
+    author: user.name,
+    uses: existing?.uses ?? 0,
+    includes,
     version: existing?.version ?? "1.0",
     authorId: user.id,
-    authorName: user.name,
-    source: home,
+    sourceWorkspaceId: ws.id,
     blueprint: ws.blueprint,
     publishedAt: "",
     updatedAt: "",
   });
 
-  const submit = (event: React.FormEvent) => {
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     const next: typeof errors = {};
     if (form.name.trim().length < 3) next.name = "Use at least 3 characters";
@@ -99,13 +103,13 @@ export function PublishPage() {
     setErrors(next);
     if (Object.keys(next).length) return;
     const input = { ...form, name: form.name.trim(), summary: form.summary.trim() };
-    if (existing) {
-      const updated = update(existing.id, input, ws.blueprint);
-      toast.success(`Published version ${updated?.version}`);
-    } else {
-      publish({ ...input, authorId: user.id, authorName: user.name, source: home, blueprint: ws.blueprint });
-      toast.success(`${input.name} is live in Community`);
-    }
+    setSaving(true);
+    const result = existing
+      ? await update(existing.id, ws.id, input, ws.blueprint)
+      : await publish(ws.id, input, ws.blueprint);
+    setSaving(false);
+    if (typeof result === "string") return void toast.error("Couldn't publish", { description: result });
+    toast.success(existing ? `Published version ${result.version}` : `${input.name} is live in Community`);
   };
 
   return (
@@ -229,9 +233,9 @@ export function PublishPage() {
           </section>
 
           <div className="flex gap-2">
-            <Button type="submit">
+            <Button type="submit" disabled={saving}>
               <UploadSimpleIcon data-icon="inline-start" />
-              {existing ? `Publish version ${bumped(existing.version)}` : "Publish"}
+              {saving ? "Publishing…" : existing ? `Publish version ${bumped(existing.version)}` : "Publish"}
             </Button>
           </div>
         </form>
@@ -258,8 +262,8 @@ export function PublishPage() {
               label={`Type ${existing.name} to confirm`}
               expected={existing.name}
               actionLabel="Unpublish"
-              onConfirm={() => {
-                unpublish(existing.id);
+              onConfirm={async () => {
+                if (!(await unpublish(existing.id))) return "Couldn't unpublish. Try again.";
                 toast(`${existing.name} unpublished`);
                 return undefined;
               }}

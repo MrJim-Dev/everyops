@@ -11,11 +11,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SearchInput } from "@/components/views/search-input";
 import { ViewEmpty } from "@/components/views/view-empty";
 import { useCurrentUser } from "@/lib/auth/client";
 import { CATEGORIES } from "@/lib/catalog";
-import { useCatalog } from "@/lib/community/use-catalog";
+import { useCatalog, useCatalogLoaded } from "@/lib/community/use-catalog";
 import { SystemCard } from "./system-card";
 import { SystemDetail } from "./system-detail";
 
@@ -26,6 +27,7 @@ export function CommunityBrowser() {
   const [category, setCategory] = useState("all");
   const [sort, setSort] = useState<keyof typeof SORTS>("uses");
   const catalog = useCatalog();
+  const loaded = useCatalogLoaded();
   const user = useCurrentUser();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -42,6 +44,18 @@ export function CommunityBrowser() {
       .sort((a, b) => (sort === "uses" ? b.uses - a.uses : a.name.localeCompare(b.name)));
   }, [catalog, query, category, sort, user]);
   const selected = catalog.find((s) => s.id === selectedId) ?? systems[0] ?? catalog[0];
+
+  if (!selected) {
+    return loaded ? (
+      <ViewEmpty title="Community systems aren't available" description="Reload the page to try again." />
+    ) : (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true">
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <Skeleton key={i} className="h-56 rounded-xl" />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_320px]">

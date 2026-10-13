@@ -3,29 +3,76 @@
 import { UsersThreeIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AuthLink, AuthShell } from "@/components/auth/auth-shell";
 import { FormAlert } from "@/components/auth/form-alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthReady, useCurrentUser } from "@/lib/auth/client";
-import { findInvite, ROLES, useWorkspaces } from "@/lib/store/workspaces";
+import { type MemberRole, ROLES, useWorkspaces } from "@/lib/store/workspaces";
+
+type InviteInfo = {
+  workspaceId: string;
+  workspaceName: string;
+  email: string;
+  role: MemberRole;
+  invitedBy: string;
+};
 
 export function AcceptInvite({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const router = useRouter();
   const ready = useAuthReady();
   const user = useCurrentUser();
-  const byOwner = useWorkspaces((s) => s.byOwner);
-  const hydrated = useWorkspaces((s) => s.owner !== undefined);
-  const acceptInvite = useWorkspaces((s) => s.acceptInvite);
+  const [invite, setInvite] = useState<InviteInfo | null | undefined>(undefined);
   const [error, setError] = useState<string>();
+  const [joining, setJoining] = useState(false);
+  const next = encodeURIComponent(`/invite/${token}`);
 
-  if (!ready || !hydrated) return <Skeleton className="mx-auto mt-[20vh] h-48 w-full max-w-[360px]" />;
+  useEffect(() => {
+    if (!ready || !user) return;
+    let alive = true;
+    fetch(`/api/invites/${encodeURIComponent(token)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => alive && setInvite(body?.invite ?? null))
+      .catch(() => alive && setInvite(null));
+    return () => {
+      alive = false;
+    };
+  }, [ready, user, token]);
 
-  const found = findInvite(byOwner, token);
-  if (!found) {
+  if (!ready) return <Skeleton className="mx-auto mt-[20vh] h-48 w-full max-w-[360px]" />;
+
+  if (!user) {
+    return (
+      <AuthShell
+        title="You've been invited"
+        description="Sign in or create an account with the invited email to join."
+      >
+        <div className="flex flex-col gap-3">
+          <Button
+            className="h-10 w-full"
+            render={<Link href={`/sign-up?next=${next}`} />}
+            nativeButton={false}
+          >
+            Create an account to join
+          </Button>
+          <Button
+            variant="outline"
+            className="h-10 w-full"
+            render={<Link href={`/sign-in?next=${next}`} />}
+            nativeButton={false}
+          >
+            I already have an account
+          </Button>
+        </div>
+      </AuthShell>
+    );
+  }
+
+  if (invite === undefined) return <Skeleton className="mx-auto mt-[20vh] h-48 w-full max-w-[360px]" />;
+  if (!invite) {
     return (
       <AuthShell
         title="This invite isn't valid"
@@ -37,13 +84,29 @@ export function AcceptInvite({ params }: { params: Promise<{ token: string }> })
     );
   }
 
-  const { workspace, invite } = found;
   const role = ROLES.find((r) => r.id === invite.role);
-  const next = encodeURIComponent(`/invite/${token}`);
+  const join = async () => {
+    setJoining(true);
+    const res = await fetch(`/api/invites/${encodeURIComponent(token)}`, { method: "POST" });
+    const body = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      workspaceId?: string;
+      message?: string;
+    } | null;
+    if (!body?.ok || !body.workspaceId) {
+      setJoining(false);
+      return setError(body?.message ?? "Couldn't join. Try again.");
+    }
+    // Reload the workspace list so the shared workspace appears.
+    await useWorkspaces.getState().load(null);
+    await useWorkspaces.getState().load(user.id);
+    toast.success(`You joined ${invite.workspaceName}`);
+    router.replace(`/w/${body.workspaceId}`);
+  };
 
   return (
     <AuthShell
-      title={`Join ${workspace.name}`}
+      title={`Join ${invite.workspaceName}`}
       description={
         <>
           {invite.invitedBy} invited <span className="text-foreground">{invite.email}</span> to join as{" "}
@@ -62,48 +125,15 @@ export function AcceptInvite({ params }: { params: Promise<{ token: string }> })
           </div>
         </div>
         {error ? <FormAlert key={error} message={error} /> : null}
-        {user ? (
-          <>
-            <Button
-              className="h-10 w-full"
-              onClick={() => {
-                const result = acceptInvite(token, user);
-                if (!result.ok) return setError(result.message);
-                toast.success(`You joined ${workspace.name}`);
-                router.replace(`/w/${result.key}`);
-              }}
-            >
-              Join as {user.name}
-            </Button>
-            <p className="text-center text-[12.5px] text-muted-foreground">
-              Signed in as {user.email}. Not you?{" "}
-              <Link
-                href={`/sign-in?next=${next}`}
-                className="text-foreground underline-offset-4 hover:underline"
-              >
-                Use another account
-              </Link>
-            </p>
-          </>
-        ) : (
-          <>
-            <Button
-              className="h-10 w-full"
-              render={<Link href={`/sign-up?next=${next}`} />}
-              nativeButton={false}
-            >
-              Create an account to join
-            </Button>
-            <Button
-              variant="outline"
-              className="h-10 w-full"
-              render={<Link href={`/sign-in?next=${next}`} />}
-              nativeButton={false}
-            >
-              I already have an account
-            </Button>
-          </>
-        )}
+        <Button className="h-10 w-full" disabled={joining} onClick={join}>
+          {joining ? "Joining…" : `Join as ${user.name}`}
+        </Button>
+        <p className="text-center text-[12.5px] text-muted-foreground">
+          Signed in as {user.email}. Not you?{" "}
+          <Link href={`/sign-in?next=${next}`} className="text-foreground underline-offset-4 hover:underline">
+            Use another account
+          </Link>
+        </p>
       </div>
     </AuthShell>
   );

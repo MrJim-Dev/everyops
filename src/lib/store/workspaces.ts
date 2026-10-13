@@ -1,113 +1,42 @@
 "use client";
 
+import { toast } from "sonner";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
-import type { Answers } from "@/lib/assistant/interview";
-import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
-import { DEMO_WORKSPACES } from "@/lib/catalog/demo-workspaces";
+import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
+import { applyOps, type ChangePlan, commitChange, revertChange } from "@/lib/engine/changes";
 import {
-  applyOps,
-  type ChangePlan,
-  commitChange,
-  type RecordChange,
-  revertChange,
-} from "@/lib/engine/changes";
+  blueprintOf,
+  type ChangeEntry,
+  dataOf,
+  type Invite,
+  type Member,
+  type NewWorkspace,
+  newWorkspaceId,
+  randomToken,
+  type SetupProgress,
+  type Workspace,
+  workspaceFrom,
+} from "./workspace-model";
 
-const DATA_VERSION = 3;
-
-export type Role = "owner" | "admin" | "staff" | "viewer";
-export const ROLES: { id: Exclude<Role, "owner">; label: string; description: string }[] = [
-  { id: "admin", label: "Admin", description: "Manage systems, settings and the team" },
-  { id: "staff", label: "Staff", description: "Add and edit records" },
-  { id: "viewer", label: "Viewer", description: "View only" },
-];
-export type Member = {
-  accountId: string;
-  name: string;
-  email: string;
-  role: Exclude<Role, "owner">;
-  joinedAt: string;
-};
-export type Invite = {
-  token: string;
-  email: string;
-  role: Exclude<Role, "owner">;
-  invitedAt: string;
-  invitedBy: string;
-};
-
-/** Where Ask EveryOps's setup interview left off, so a refresh doesn't lose answers. */
-export type SetupProgress = { stepIndex: number; answers: Answers; notes: string[] };
-
-export type ChangeEntry = {
-  id: string;
-  request: string;
-  title: string;
-  steps: ChangePlan["steps"];
-  fromVersion: number;
-  toVersion: number;
-  recordChanges: RecordChange[];
-  appliedAt: string;
-  undoneAt?: string;
-};
-
-export type Workspace = {
-  slug: string;
-  name: string;
-  summary: string;
-  createdAt: string;
-  openedAt: string;
-  source?: { systemId: string; version: string };
-  /** Every blueprint version; versions[n - 1] is version n. */
-  versions: Blueprint[];
-  currentVersion: number;
-  records: DataRecord[];
-  changes: ChangeEntry[];
-  /** The account that owns it. Filled in when the workspace list is built. */
-  ownerId?: string;
-  members?: Member[];
-  invites?: Invite[];
-  /** Set while Ask EveryOps is still setting the workspace up. */
-  setup?: { prompt: string; progress?: SetupProgress };
-};
-
-type NewWorkspace = {
-  name: string;
-  summary: string;
-  data: WorkspaceData;
-  source?: Workspace["source"];
-  setup?: Workspace["setup"];
-  slug?: string;
-};
+export * from "./workspace-model";
 
 type State = {
-  /** The signed-in account's workspaces. Every action reads and writes this map. */
+  /** Every workspace the signed-in account can open, keyed by id. */
   workspaces: Record<string, Workspace>;
-  /** All accounts' workspaces in this browser, by account id. */
-  byOwner: Record<string, Record<string, Workspace>>;
-  /** Workspaces shared with the signed-in account: view key → where it really lives. */
-  shared: Record<string, { owner: string; slug: string }>;
-  /** undefined until the session is known; null when signed out. */
+  /** undefined until loaded from the server; null when signed out. */
   owner: string | null | undefined;
-  /** Names and emails of accounts seen in this browser, so team lists can show workspace owners. */
-  profiles: Record<string, { name: string; email: string }>;
-  /** Switch to an account's workspaces, creating the demo workspaces on its first visit. */
-  setOwner: (owner: string | null, profile?: { name: string; email: string }) => void;
-  resetDemo: () => void;
+  /** "error" when the last load failed; the shell offers a retry. */
+  status: "idle" | "loading" | "ready" | "error";
+  load: (owner: string | null) => Promise<void>;
   renameWorkspace: (slug: string, name: string) => void;
   deleteWorkspace: (slug: string) => void;
-  /** Removes every workspace of an account (account deletion). */
+  /** Clears local state after the account is deleted (the server removes its data). */
   dropOwner: (owner: string) => void;
   inviteMember: (slug: string, email: string, role: Member["role"], invitedBy: string) => Invite | null;
   revokeInvite: (slug: string, token: string) => void;
   setMemberRole: (slug: string, accountId: string, role: Member["role"]) => void;
   removeMember: (slug: string, accountId: string) => void;
-  /** Accepts an invite for the given account. Returns the workspace key to open, or an error. */
-  acceptInvite: (
-    token: string,
-    account: { id: string; name: string; email: string },
-  ) => { ok: true; key: string } | { ok: false; message: string };
-  leaveWorkspace: (key: string) => void;
+  leaveWorkspace: (slug: string) => void;
   open: (slug: string) => void;
   createWorkspace: (input: NewWorkspace) => string;
   setRecords: (slug: string, records: DataRecord[]) => void;
@@ -117,409 +46,252 @@ type State = {
   undoChange: (slug: string, changeId: string) => void;
 };
 
-/** The signed-in account's role in a workspace. */
-export function roleOf(ws: Workspace | undefined, accountId: string | null | undefined): Role | null {
-  if (!ws || !accountId) return null;
-  if (ws.ownerId === accountId) return "owner";
-  return ws.members?.find((m) => m.accountId === accountId)?.role ?? null;
-}
+/* ---------- Server sync ---------- */
 
-export const canManage = (role: Role | null) => role === "owner" || role === "admin";
-export const canEdit = (role: Role | null) => role === "owner" || role === "admin" || role === "staff";
+const SAVE_DELAY_MS = 500;
+const timers = new Map<string, ReturnType<typeof setTimeout>>();
+const pending = new Set<string>();
+let warned = false;
 
-type Store = Record<string, Record<string, Workspace>>;
-
-/** What an account sees: its own workspaces plus the ones shared with it (under a distinct key). */
-function viewFor(byOwner: Store, owner: string) {
-  const workspaces: Record<string, Workspace> = {};
-  const shared: Record<string, { owner: string; slug: string }> = {};
-  for (const [slug, ws] of Object.entries(byOwner[owner] ?? {})) workspaces[slug] = { ...ws, ownerId: owner };
-  for (const [other, map] of Object.entries(byOwner)) {
-    if (other === owner) continue;
-    for (const ws of Object.values(map)) {
-      if (!ws.members?.some((m) => m.accountId === owner)) continue;
-      const key = `${ws.slug}~${other.slice(-4)}`;
-      workspaces[key] = { ...ws, slug: key, ownerId: other };
-      shared[key] = { owner: other, slug: ws.slug };
+async function send(slug: string, attempt = 0): Promise<void> {
+  const ws = useWorkspaces.getState().workspaces[slug];
+  if (!ws) return;
+  try {
+    const res = await fetch(`/api/workspaces/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(ws),
+    });
+    if (res.ok) {
+      pending.delete(slug);
+      warned = false;
+      return;
     }
+    const body = (await res.json().catch(() => null)) as { message?: string } | null;
+    if (res.status >= 500 && attempt < 2)
+      return void setTimeout(() => void send(slug, attempt + 1), 2000 * (attempt + 1));
+    pending.delete(slug);
+    toast.error("Couldn't save your change", {
+      description: body?.message ?? "Reload the page and try again.",
+    });
+  } catch {
+    if (attempt < 3) return void setTimeout(() => void send(slug, attempt + 1), 2000 * (attempt + 1));
+    if (!warned)
+      toast.error("You're offline", { description: "Changes will save when the connection is back." });
+    warned = true;
   }
-  return { workspaces, shared };
 }
 
-/** Files an edited view back: shared workspaces return to their owner, the rest stay with the account. */
-function fileView(
-  byOwner: Store,
-  owner: string,
-  shared: State["shared"],
-  view: Record<string, Workspace>,
-): Store {
-  const next: Store = { ...byOwner };
-  const own: Record<string, Workspace> = {};
-  for (const [key, ws] of Object.entries(view)) {
-    const home = shared[key];
-    if (home) next[home.owner] = { ...next[home.owner], [home.slug]: { ...ws, slug: home.slug } };
-    else own[key] = ws;
-  }
-  next[owner] = own;
-  return next;
-}
-
-/** Finds a workspace by invite token across every account in this browser. */
-export function findInvite(byOwner: Store, token: string) {
-  for (const [owner, map] of Object.entries(byOwner))
-    for (const ws of Object.values(map)) {
-      const invite = ws.invites?.find((i) => i.token === token);
-      if (invite) return { owner, workspace: ws, invite };
-    }
-  return null;
-}
-
-const randomToken = () => {
-  const buf = new Uint8Array(12);
-  crypto.getRandomValues(buf);
-  return [...buf].map((b) => b.toString(16).padStart(2, "0")).join("");
-};
-
-export function blueprintOf(ws: Workspace): Blueprint {
-  return ws.versions[ws.currentVersion - 1];
-}
-
-export function dataOf(ws: Workspace): WorkspaceData {
-  return { blueprint: blueprintOf(ws), records: ws.records };
-}
-
-const slugify = (name: string) =>
-  name
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "") || "workspace";
-
-function uniqueSlug(base: string, taken: Record<string, unknown>) {
-  let slug = slugify(base);
-  for (let i = 2; slug in taken; i++) slug = `${slugify(base)}-${i}`;
-  return slug;
-}
-
-function workspaceFrom(input: NewWorkspace, slug: string, now: string): Workspace {
-  return {
+function scheduleSave(slug: string) {
+  pending.add(slug);
+  clearTimeout(timers.get(slug));
+  timers.set(
     slug,
-    name: input.name,
-    summary: input.summary,
-    createdAt: now,
-    openedAt: now,
-    source: input.source,
-    versions: [{ ...input.data.blueprint, version: 1, workspaceName: input.name }],
-    currentVersion: 1,
-    records: input.data.records,
-    changes: [],
-    setup: input.setup,
-  };
-}
-
-function demoWorkspaces(): Record<string, Workspace> {
-  const now = new Date();
-  const stamp = now.toISOString();
-  return Object.fromEntries(
-    DEMO_WORKSPACES.map((demo, i) => {
-      const ws = workspaceFrom(
-        {
-          name: demo.name,
-          summary: demo.summary,
-          data: demo.build(now),
-          source: demo.sourceId ? { systemId: demo.sourceId, version: "1.2" } : undefined,
-        },
-        demo.slug,
-        stamp,
-      );
-      // Stagger "last opened" so the recent list has a stable order.
-      ws.openedAt = new Date(now.getTime() - i * 60_000).toISOString();
-      return [demo.slug, ws];
-    }),
+    setTimeout(() => {
+      timers.delete(slug);
+      void send(slug);
+    }, SAVE_DELAY_MS),
   );
 }
 
-export const useWorkspaces = create<State>()(
-  persist(
-    (rawSet, get) => {
-      // Every write to `workspaces` is also filed under the current owner, so accounts never share data.
-      const set = (partial: Partial<State> | ((s: State) => Partial<State> | State)) =>
-        rawSet((state) => {
-          const next = typeof partial === "function" ? partial(state) : partial;
-          if (!next.workspaces || !state.owner || next === state) return next;
-          const byOwner = fileView(state.byOwner, state.owner, state.shared, next.workspaces);
-          // Rebuild the view so new workspaces get their owner and shared keys stay in sync.
-          return { ...next, byOwner, ...viewFor(byOwner, state.owner) };
+async function sendDelete(slug: string) {
+  clearTimeout(timers.get(slug));
+  pending.delete(slug);
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(slug)}`, { method: "DELETE" }).catch(
+    () => null,
+  );
+  if (!res?.ok)
+    toast.error("Couldn't remove the workspace", { description: "Reload the page and try again." });
+}
+
+/** True while edits are waiting to reach the server. */
+export const hasUnsavedChanges = () => pending.size > 0;
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", (event) => {
+    if (pending.size) event.preventDefault();
+  });
+}
+
+/* ---------- Store ---------- */
+
+export const useWorkspaces = create<State>()((rawSet, get) => {
+  /** Applies a change to the workspace map and saves every workspace whose object changed. */
+  const set = (partial: Partial<State> | ((s: State) => Partial<State> | State)) =>
+    rawSet((state) => {
+      const next = typeof partial === "function" ? partial(state) : partial;
+      if (next.workspaces && next.workspaces !== state.workspaces && state.owner) {
+        for (const [slug, ws] of Object.entries(next.workspaces))
+          if (state.workspaces[slug] !== ws) scheduleSave(slug);
+      }
+      return next;
+    });
+  const update = (slug: string, fn: (ws: Workspace) => Workspace) =>
+    set((s) => {
+      const ws = s.workspaces[slug];
+      return ws ? { workspaces: { ...s.workspaces, [slug]: fn(ws) } } : s;
+    });
+
+  return {
+    workspaces: {},
+    owner: undefined,
+    status: "idle",
+
+    load: async (owner) => {
+      if (!owner) return rawSet({ owner: null, workspaces: {}, status: "idle" });
+      if (get().owner === owner && get().status === "ready") return;
+      rawSet({ status: "loading" });
+      try {
+        const res = await fetch("/api/workspaces", { cache: "no-store" });
+        if (!res.ok) throw new Error(String(res.status));
+        const body = (await res.json()) as { workspaces: Workspace[] };
+        rawSet({
+          owner,
+          status: "ready",
+          workspaces: Object.fromEntries(body.workspaces.map((w) => [w.slug, w])),
         });
+      } catch {
+        rawSet({ owner, status: "error", workspaces: {} });
+      }
+    },
 
-      return {
-        workspaces: {},
-        byOwner: {},
-        shared: {},
-        owner: undefined,
-        profiles: {},
+    renameWorkspace: (slug, name) => {
+      const ws = get().workspaces[slug];
+      const clean = name.trim();
+      if (!ws || !clean || clean === ws.name) return;
+      // A rename is a change like any other: versioned, in History, and undoable.
+      get().applyChange(slug, {
+        request: `Rename the workspace to ${clean}`,
+        title: "Rename workspace",
+        facts: [],
+        steps: [{ kind: "change", label: "Workspace name", detail: `${ws.name} → ${clean}` }],
+        ops: [{ op: "rename_workspace", name: clean }],
+      });
+    },
 
-        setOwner: (owner, profile) =>
-          rawSet((state) => {
-            if (!owner) return { owner: null, workspaces: {}, shared: {} };
-            const byOwner = state.byOwner[owner]
-              ? state.byOwner
-              : { ...state.byOwner, [owner]: demoWorkspaces() };
-            const profiles = profile ? { ...state.profiles, [owner]: profile } : state.profiles;
-            return { owner, byOwner, profiles, ...viewFor(byOwner, owner) };
-          }),
+    deleteWorkspace: (slug) => {
+      rawSet((s) => {
+        const { [slug]: _removed, ...rest } = s.workspaces;
+        return { workspaces: rest };
+      });
+      void sendDelete(slug);
+    },
 
-        resetDemo: () => set({ workspaces: demoWorkspaces() }),
+    leaveWorkspace: (slug) => get().deleteWorkspace(slug),
 
-        renameWorkspace: (slug, name) => {
-          const ws = get().workspaces[slug];
-          const clean = name.trim();
-          if (!ws || !clean || clean === ws.name) return;
-          // A rename is a change like any other: versioned, in History, and undoable.
-          get().applyChange(slug, {
-            request: `Rename the workspace to ${clean}`,
-            title: "Rename workspace",
-            facts: [],
-            steps: [{ kind: "change", label: "Workspace name", detail: `${ws.name} → ${clean}` }],
-            ops: [{ op: "rename_workspace", name: clean }],
-          });
-        },
+    dropOwner: () => rawSet({ owner: null, workspaces: {}, status: "idle" }),
 
-        deleteWorkspace: (slug) =>
-          set((s) => {
-            const { [slug]: _removed, ...rest } = s.workspaces;
-            return { workspaces: rest };
-          }),
-
-        dropOwner: (owner) =>
-          rawSet((s) => {
-            const { [owner]: _removed, ...rest } = s.byOwner;
-            // Also remove the account from any workspace it was a member of.
-            const cleaned: Store = Object.fromEntries(
-              Object.entries(rest).map(([o, map]) => [
-                o,
-                Object.fromEntries(
-                  Object.entries(map).map(([slug, ws]) => [
-                    slug,
-                    { ...ws, members: ws.members?.filter((m) => m.accountId !== owner) },
-                  ]),
-                ),
-              ]),
-            );
-            if (s.owner === owner) return { byOwner: cleaned, owner: null, workspaces: {}, shared: {} };
-            return { byOwner: cleaned, ...(s.owner ? viewFor(cleaned, s.owner) : {}) };
-          }),
-
-        inviteMember: (slug, email, role, invitedBy) => {
-          const ws = get().workspaces[slug];
-          const clean = email.trim().toLowerCase();
-          if (!ws || !clean) return null;
-          const invite: Invite = {
-            token: randomToken(),
-            email: clean,
-            role,
-            invitedAt: new Date().toISOString(),
-            invitedBy,
-          };
-          set((s) => ({
-            workspaces: {
-              ...s.workspaces,
-              [slug]: { ...ws, invites: [...(ws.invites ?? []).filter((i) => i.email !== clean), invite] },
-            },
-          }));
-          return invite;
-        },
-
-        revokeInvite: (slug, token) =>
-          set((s) => {
-            const ws = s.workspaces[slug];
-            if (!ws) return s;
-            return {
-              workspaces: {
-                ...s.workspaces,
-                [slug]: { ...ws, invites: ws.invites?.filter((i) => i.token !== token) },
-              },
-            };
-          }),
-
-        setMemberRole: (slug, accountId, role) =>
-          set((s) => {
-            const ws = s.workspaces[slug];
-            if (!ws) return s;
-            const members = ws.members?.map((m) => (m.accountId === accountId ? { ...m, role } : m));
-            return { workspaces: { ...s.workspaces, [slug]: { ...ws, members } } };
-          }),
-
-        removeMember: (slug, accountId) =>
-          set((s) => {
-            const ws = s.workspaces[slug];
-            if (!ws) return s;
-            const members = ws.members?.filter((m) => m.accountId !== accountId);
-            return { workspaces: { ...s.workspaces, [slug]: { ...ws, members } } };
-          }),
-
-        acceptInvite: (token, account) => {
-          const state = get();
-          const found = findInvite(state.byOwner, token);
-          if (!found) return { ok: false, message: "This invite is no longer valid." };
-          const { owner, workspace, invite } = found;
-          if (owner === account.id) return { ok: false, message: "You already own this workspace." };
-          if (invite.email !== account.email.toLowerCase())
-            return {
-              ok: false,
-              message: `This invite was sent to ${invite.email}. Sign in with that account to join.`,
-            };
-          const member: Member = {
-            accountId: account.id,
-            name: account.name,
-            email: account.email,
-            role: invite.role,
-            joinedAt: new Date().toISOString(),
-          };
-          const updated: Workspace = {
-            ...workspace,
-            invites: workspace.invites?.filter((i) => i.token !== token),
-            members: [...(workspace.members ?? []).filter((m) => m.accountId !== account.id), member],
-          };
-          const byOwner = {
-            ...state.byOwner,
-            [owner]: { ...state.byOwner[owner], [workspace.slug]: updated },
-          };
-          rawSet({ byOwner, ...(state.owner ? viewFor(byOwner, state.owner) : {}) });
-          return { ok: true, key: `${workspace.slug}~${owner.slice(-4)}` };
-        },
-
-        leaveWorkspace: (key) =>
-          rawSet((s) => {
-            const home = s.shared[key];
-            if (!home || !s.owner) return s;
-            const ws = s.byOwner[home.owner]?.[home.slug];
-            if (!ws) return s;
-            const me = s.owner;
-            const updated = { ...ws, members: ws.members?.filter((m) => m.accountId !== me) };
-            const byOwner = {
-              ...s.byOwner,
-              [home.owner]: { ...s.byOwner[home.owner], [home.slug]: updated },
-            };
-            return { byOwner, ...viewFor(byOwner, me) };
-          }),
-
-        open: (slug) =>
-          set((s) => {
-            const ws = s.workspaces[slug];
-            if (!ws) return s;
-            return { workspaces: { ...s.workspaces, [slug]: { ...ws, openedAt: new Date().toISOString() } } };
-          }),
-
-        createWorkspace: (input) => {
-          const slug = input.slug ?? uniqueSlug(input.name, get().workspaces);
-          const ws = workspaceFrom(input, slug, new Date().toISOString());
-          set((s) => ({ workspaces: { ...s.workspaces, [slug]: ws } }));
-          return slug;
-        },
-
-        setRecords: (slug, records) =>
-          set((s) => {
-            const ws = s.workspaces[slug];
-            if (!ws) return s;
-            return { workspaces: { ...s.workspaces, [slug]: { ...ws, records } } };
-          }),
-
-        saveSetup: (slug, progress) =>
-          set((s) => {
-            const ws = s.workspaces[slug];
-            if (!ws?.setup) return s;
-            return { workspaces: { ...s.workspaces, [slug]: { ...ws, setup: { ...ws.setup, progress } } } };
-          }),
-
-        finishSetup: (slug, data, name, summary) =>
-          set((s) => {
-            const ws = s.workspaces[slug];
-            if (!ws) return s;
-            const version = ws.versions.length + 1;
-            return {
-              workspaces: {
-                ...s.workspaces,
-                [slug]: {
-                  ...ws,
-                  name,
-                  summary,
-                  versions: [...ws.versions, { ...data.blueprint, version, workspaceName: name }],
-                  currentVersion: version,
-                  records: data.records,
-                  setup: undefined,
-                },
-              },
-            };
-          }),
-
-        applyChange: (slug, plan) => {
-          const ws = get().workspaces[slug];
-          if (!ws) return null;
-          const current = blueprintOf(ws);
-          const next = { ...applyOps(current, plan.ops), version: ws.versions.length + 1 };
-          const { data, changes } = commitChange(dataOf(ws), next);
-          const entry: ChangeEntry = {
-            id: `change_${next.version}`,
-            request: plan.request,
-            title: plan.title,
-            steps: plan.steps,
-            fromVersion: ws.currentVersion,
-            toVersion: next.version,
-            recordChanges: changes,
-            appliedAt: new Date().toISOString(),
-          };
-          set((s) => ({
-            workspaces: {
-              ...s.workspaces,
-              [slug]: {
-                ...ws,
-                name: next.workspaceName,
-                versions: [...ws.versions, next],
-                currentVersion: next.version,
-                records: data.records,
-                changes: [entry, ...ws.changes],
-              },
-            },
-          }));
-          return entry;
-        },
-
-        undoChange: (slug, changeId) =>
-          set((s) => {
-            const ws = s.workspaces[slug];
-            const entry = ws?.changes.find((c) => c.id === changeId);
-            if (!ws || !entry || entry.undoneAt || ws.currentVersion !== entry.toVersion) return s;
-            const previous = ws.versions[entry.fromVersion - 1];
-            const restored = revertChange(dataOf(ws), previous, entry.recordChanges);
-            return {
-              workspaces: {
-                ...s.workspaces,
-                [slug]: {
-                  ...ws,
-                  name: previous.workspaceName,
-                  currentVersion: entry.fromVersion,
-                  records: restored.records,
-                  changes: ws.changes.map((c) =>
-                    c.id === changeId ? { ...c, undoneAt: new Date().toISOString() } : c,
-                  ),
-                },
-              },
-            };
-          }),
+    inviteMember: (slug, email, role, invitedBy) => {
+      const clean = email.trim().toLowerCase();
+      if (!get().workspaces[slug] || !clean) return null;
+      const invite: Invite = {
+        token: randomToken(),
+        email: clean,
+        role,
+        invitedAt: new Date().toISOString(),
+        invitedBy,
       };
+      update(slug, (ws) => ({
+        ...ws,
+        invites: [...(ws.invites ?? []).filter((i) => i.email !== clean), invite],
+      }));
+      return invite;
     },
-    {
-      name: "everyops.workspaces",
-      // Bump when demo blueprints change. Saved data from an older version is replaced by fresh demos;
-      // this is a frontend prototype, so there is no per-version migration yet.
-      version: DATA_VERSION,
-      migrate: () => ({ byOwner: {}, profiles: {} }),
-      storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ byOwner: s.byOwner, profiles: s.profiles }),
-      // Data lives in the browser; hydrate after mount to keep SSR markup stable.
-      skipHydration: true,
+
+    revokeInvite: (slug, token) =>
+      update(slug, (ws) => ({ ...ws, invites: ws.invites?.filter((i) => i.token !== token) })),
+
+    setMemberRole: (slug, accountId, role) =>
+      update(slug, (ws) => ({
+        ...ws,
+        members: ws.members?.map((m) => (m.accountId === accountId ? { ...m, role } : m)),
+      })),
+
+    removeMember: (slug, accountId) =>
+      update(slug, (ws) => ({ ...ws, members: ws.members?.filter((m) => m.accountId !== accountId) })),
+
+    open: (slug) => {
+      // Opening isn't an edit: keep it local so viewers and staff don't send saves.
+      rawSet((s) => {
+        const ws = s.workspaces[slug];
+        return ws
+          ? { workspaces: { ...s.workspaces, [slug]: { ...ws, openedAt: new Date().toISOString() } } }
+          : s;
+      });
     },
-  ),
-);
+
+    createWorkspace: (input) => {
+      const slug = input.slug ?? newWorkspaceId(input.name);
+      const ws = {
+        ...workspaceFrom(input, slug, new Date().toISOString()),
+        ownerId: get().owner ?? undefined,
+        members: [],
+        invites: [],
+      };
+      set((s) => ({ workspaces: { ...s.workspaces, [slug]: ws } }));
+      return slug;
+    },
+
+    setRecords: (slug, records) => update(slug, (ws) => ({ ...ws, records })),
+
+    saveSetup: (slug, progress) =>
+      update(slug, (ws) => (ws.setup ? { ...ws, setup: { ...ws.setup, progress } } : ws)),
+
+    finishSetup: (slug, data, name, summary) =>
+      update(slug, (ws) => {
+        const version = ws.versions.length + 1;
+        return {
+          ...ws,
+          name,
+          summary,
+          versions: [...ws.versions, { ...data.blueprint, version, workspaceName: name }],
+          currentVersion: version,
+          records: data.records,
+          setup: undefined,
+        };
+      }),
+
+    applyChange: (slug, plan) => {
+      const ws = get().workspaces[slug];
+      if (!ws) return null;
+      const next = { ...applyOps(blueprintOf(ws), plan.ops), version: ws.versions.length + 1 };
+      const { data, changes } = commitChange(dataOf(ws), next);
+      const entry: ChangeEntry = {
+        id: `change_${next.version}`,
+        request: plan.request,
+        title: plan.title,
+        steps: plan.steps,
+        fromVersion: ws.currentVersion,
+        toVersion: next.version,
+        recordChanges: changes,
+        appliedAt: new Date().toISOString(),
+      };
+      update(slug, (w) => ({
+        ...w,
+        name: next.workspaceName,
+        versions: [...w.versions, next],
+        currentVersion: next.version,
+        records: data.records,
+        changes: [entry, ...w.changes],
+      }));
+      return entry;
+    },
+
+    undoChange: (slug, changeId) =>
+      update(slug, (ws) => {
+        const entry = ws.changes.find((c) => c.id === changeId);
+        if (!entry || entry.undoneAt || ws.currentVersion !== entry.toVersion) return ws;
+        const previous = ws.versions[entry.fromVersion - 1];
+        const restored = revertChange(dataOf(ws), previous, entry.recordChanges);
+        return {
+          ...ws,
+          name: previous.workspaceName,
+          currentVersion: entry.fromVersion,
+          records: restored.records,
+          changes: ws.changes.map((c) =>
+            c.id === changeId ? { ...c, undoneAt: new Date().toISOString() } : c,
+          ),
+        };
+      }),
+  };
+});

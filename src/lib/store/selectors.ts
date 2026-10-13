@@ -12,10 +12,10 @@ export type WorkspaceSummary = {
   shared: boolean;
 };
 
-/** Workspaces in this browser, most recently opened first. */
+/** The account's workspaces, most recently opened first. */
 export function useRecentWorkspaces(): WorkspaceSummary[] {
   const workspaces = useWorkspaces((s) => s.workspaces);
-  const shared = useWorkspaces((s) => s.shared);
+  const owner = useWorkspaces((s) => s.owner);
   return useMemo(
     () =>
       Object.values(workspaces)
@@ -25,9 +25,9 @@ export function useRecentWorkspaces(): WorkspaceSummary[] {
           summary: w.summary,
           openedAt: w.openedAt,
           settingUp: !!w.setup,
-          shared: w.slug in shared,
+          shared: !!w.ownerId && w.ownerId !== owner,
         }))
         .sort((a, b) => b.openedAt.localeCompare(a.openedAt)),
-    [workspaces, shared],
+    [workspaces, owner],
   );
 }
