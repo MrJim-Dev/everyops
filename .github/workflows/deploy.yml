@@ -1,0 +1,55 @@
+# Production deploys run only from here: every push to main is checked, then deployed to Cloud Run.
+# Google Cloud access is keyless (Workload Identity Federation) and the provider only trusts
+# refs/heads/main of this repository.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/223724593768/locations/global/workloadIdentityPools/github/providers/ai-builder-cup
+          service_account: everyops-deployer@everyops-prod.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Deploy to Cloud Run
+        run: bash scripts/deploy.sh
+
+      - name: Smoke test
+        run: |
+          for path in / /sign-in /brand/email/everyops-logo.png /api/auth/get-session; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://everyops.app$path")
+            echo "$code $path"
+            [ "$code" = "200" ] || exit 1
+          done

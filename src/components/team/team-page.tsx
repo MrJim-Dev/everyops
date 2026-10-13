@@ -27,6 +27,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useCurrentUser } from "@/lib/auth/client";
+import { isDemoEmail } from "@/lib/auth/demo";
 import { emailSchema } from "@/lib/auth/schemas";
 import { formatDate } from "@/lib/format";
 import { canManage, type Member, ROLES, useWorkspaces } from "@/lib/store/workspaces";
@@ -94,7 +95,13 @@ export function TeamPage() {
 
   return (
     <SettingsPage>
-      {manager ? (
+      {manager && isDemoEmail(user.email) ? (
+        <SettingsSection title="Invite people" description="Invite your team by email.">
+          <p className="rounded-lg border bg-card/40 px-4 py-3 text-[13px] text-muted-foreground">
+            Invites are turned off for the shared demo account. Create your own account to invite your team.
+          </p>
+        </SettingsSection>
+      ) : manager ? (
         <SettingsSection
           title="Invite people"
           description="They'll get a link to join. Invites are tied to the email you enter."

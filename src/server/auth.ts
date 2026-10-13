@@ -1,5 +1,7 @@
 import { betterAuth } from "better-auth";
+import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
+import { DEMO_LOCKED_MESSAGE, isDemoEmail } from "@/lib/auth/demo";
 import { db } from "./db";
 import { resetPasswordEmail } from "./emails";
 import { sendMail } from "./mail";
@@ -16,6 +18,9 @@ const trustedOrigins = (process.env.BETTER_AUTH_TRUSTED_ORIGINS ?? "")
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
+
+/** Account endpoints the shared demo account may not use: its login stays the same for everyone. */
+const DEMO_LOCKED_PATHS = new Set(["/update-user", "/change-password", "/change-email", "/delete-user"]);
 
 export const auth = betterAuth({
   appName: "EveryOps",
@@ -35,6 +40,8 @@ export const auth = betterAuth({
     },
   },
   socialProviders: google ? { google } : {},
+  // Someone who signed up with email and password can later continue with Google on the same address.
+  account: { accountLinking: { enabled: true, trustedProviders: ["google"] } },
   user: { deleteUser: { enabled: true } },
   session: {
     expiresIn: 60 * 60 * 24 * 30,
@@ -42,6 +49,15 @@ export const auth = betterAuth({
     cookieCache: { enabled: true, maxAge: 5 * 60 },
   },
   rateLimit: { enabled: true, window: 60, max: 100 },
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === "/request-password-reset" && isDemoEmail((ctx.body as { email?: string })?.email))
+        throw new APIError("FORBIDDEN", { message: DEMO_LOCKED_MESSAGE });
+      if (!DEMO_LOCKED_PATHS.has(ctx.path)) return;
+      const session = await getSessionFromCtx(ctx);
+      if (isDemoEmail(session?.user.email)) throw new APIError("FORBIDDEN", { message: DEMO_LOCKED_MESSAGE });
+    }),
+  },
   // nextCookies must stay last so cookies set by server actions reach the browser.
   plugins: [nextCookies()],
 });

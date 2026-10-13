@@ -1,3 +1,4 @@
+import { DEMO_LOCKED_MESSAGE, isDemoEmail } from "@/lib/auth/demo";
 import { getCommunity, unpublishSystem, updateSystem } from "@/server/community";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { publishBody } from "../route";
@@ -11,6 +12,8 @@ export async function PUT(request: Request, { params }: RouteContext<"/api/commu
   const { user, error } = await apiUser(request);
   if (error) return error;
   if (!sameOrigin(request)) return Response.json({ ok: false, message: "Forbidden" }, { status: 403 });
+  if (isDemoEmail(user.email))
+    return Response.json({ ok: false, message: DEMO_LOCKED_MESSAGE }, { status: 403 });
   const parsed = publishBody.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
     return Response.json({ ok: false, message: "Check the name and summary." }, { status: 400 });

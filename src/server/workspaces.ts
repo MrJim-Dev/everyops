@@ -158,7 +158,11 @@ export async function loadWorkspace(
  * Saves a workspace from the browser. Owners and admins save the whole document and the team;
  * staff only save records; viewers can't save. New ids create a workspace owned by the caller.
  */
-export async function saveWorkspace(userId: string, ws: Workspace): Promise<SaveResult> {
+export async function saveWorkspace(
+  userId: string,
+  ws: Workspace,
+  options: { demo?: boolean } = {},
+): Promise<SaveResult> {
   if (!ID.test(ws.slug)) return { ok: false, status: 400, message: "Invalid workspace id." };
   const access = await roleIn(ws.slug, userId);
   const doc = toDoc(ws);
@@ -209,6 +213,8 @@ export async function saveWorkspace(userId: string, ws: Workspace): Promise<Save
       trx,
     );
     for (const i of invites) {
+      // The shared demo account can't invite anyone, so nobody can use it to send email.
+      if (options.demo) continue;
       // xmax = 0 only for a freshly inserted row, so each invite is emailed once, not on every save.
       const { rows } = await sql<{
         inserted: boolean;

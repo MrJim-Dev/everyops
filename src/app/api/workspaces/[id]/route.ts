@@ -1,3 +1,4 @@
+import { isDemoEmail } from "@/lib/auth/demo";
 import type { Workspace } from "@/lib/store/workspace-model";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { loadWorkspace, MAX_DOC_BYTES, removeWorkspace, saveWorkspace } from "@/server/workspaces";
@@ -34,7 +35,7 @@ export async function PUT(request: Request, { params }: RouteContext<"/api/works
     !ws.versions.length
   )
     return Response.json({ ok: false, message: "Invalid workspace." }, { status: 400 });
-  const result = await saveWorkspace(user.id, ws);
+  const result = await saveWorkspace(user.id, ws, { demo: isDemoEmail(user.email) });
   return Response.json(result, { status: result.ok ? 200 : result.status });
 }
 
