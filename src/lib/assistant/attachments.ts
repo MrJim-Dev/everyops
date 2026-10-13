@@ -24,7 +24,14 @@ export const MAX_ATTACHMENT_BYTES = 10_000_000;
 export const MAX_ATTACHMENTS = 5;
 /** What the file picker offers; the server checks the bytes again. */
 export const ATTACHMENT_ACCEPT =
-  "image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif,application/pdf,audio/*,video/mp4,video/webm,.txt,.csv,.tsv,.md,.json";
+  "image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif,application/pdf,audio/*,video/mp4,video/webm,.txt,.csv,.tsv,.md,.json,.xlsx,.docx";
+
+/** Office files are stored as text but keep their name; show them with the icon people expect. */
+export function officeKind(name: string): "sheet" | "doc" | null {
+  if (/\.xlsx$/i.test(name)) return "sheet";
+  if (/\.docx$/i.test(name)) return "doc";
+  return null;
+}
 
 /** "menu.jpg, prices.pdf", for transcripts and labels. */
 export function attachmentNames(refs: AttachmentRef[] | undefined) {
