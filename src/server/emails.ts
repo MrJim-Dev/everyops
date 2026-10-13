@@ -3,35 +3,73 @@ import type { Mail } from "./mail";
 
 const ROLE_LABEL: Record<string, string> = { admin: "Admin", staff: "Staff", viewer: "Viewer" };
 
+/** Brand colors from globals.css: primary teal with near-black text, as on the app's buttons. */
+const BRAND = {
+  primary: "#34c3a6",
+  onPrimary: "#03130f",
+  ink: "#0f1112",
+  text: "#3f4446",
+  muted: "#7a8285",
+  line: "#e6e9ea",
+  page: "#f3f5f5",
+};
+
+/** Images in email must be absolute and public, so they always load from the live site. */
+const ASSET_BASE = (process.env.EMAIL_ASSET_URL ?? "https://everyops.app").replace(/\/$/, "");
+
 const esc = (s: string) =>
   s.replace(
     /[&<>"']/g,
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c,
   );
 
-/** One plain, readable layout for every notification: a heading, a few lines, one button. */
+/**
+ * One branded layout for every notification: the EveryOps logo, a heading, a few lines, one button.
+ * Tables and inline styles only, so it renders the same in Gmail, Outlook and Apple Mail.
+ */
 function layout({
   heading,
+  preview,
   lines,
   action,
   footnote,
 }: {
   heading: string;
+  preview: string;
   lines: string[];
   action: { label: string; url: string };
   footnote: string;
 }) {
+  const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
   const body = lines
-    .map((l) => `<p style="margin:0 0 12px;font-size:14px;line-height:22px;color:#3f3f46">${l}</p>`)
+    .map((l) => `<p style="margin:0 0 14px;font-size:15px;line-height:24px;color:${BRAND.text}">${l}</p>`)
     .join("");
-  return `<!doctype html><html><body style="margin:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:32px 16px"><tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid #e4e4e7;border-radius:12px">
-<tr><td style="padding:28px 28px 8px"><p style="margin:0 0 20px;font-size:15px;font-weight:600;color:#18181b">EveryOps</p>
-<h1 style="margin:0 0 16px;font-size:20px;line-height:28px;font-weight:600;color:#18181b">${heading}</h1>${body}</td></tr>
-<tr><td style="padding:8px 28px 24px"><a href="${esc(action.url)}" style="display:inline-block;background:#3FA796;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px">${esc(action.label)}</a>
-<p style="margin:16px 0 0;font-size:12px;line-height:18px;color:#71717a">Or open this link: <a href="${esc(action.url)}" style="color:#3FA796;word-break:break-all">${esc(action.url)}</a></p></td></tr>
-<tr><td style="padding:16px 28px;border-top:1px solid #e4e4e7;font-size:12px;line-height:18px;color:#71717a">${footnote}</td></tr>
+  const url = esc(action.url);
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><title>${heading}</title></head>
+<body style="margin:0;padding:0;background:${BRAND.page};font-family:${font};-webkit-font-smoothing:antialiased">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${esc(preview)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND.page}"><tr><td align="center" style="padding:40px 16px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px">
+<tr><td style="padding:0 4px 20px"><a href="${ASSET_BASE}" style="text-decoration:none"><img src="${ASSET_BASE}/brand/email/everyops-logo.png" width="138" height="28" alt="EveryOps" style="display:block;border:0;height:28px;width:138px"></a></td></tr>
+<tr><td style="background:#ffffff;border:1px solid ${BRAND.line};border-radius:14px;overflow:hidden">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="height:4px;background:${BRAND.primary};font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td style="padding:32px 32px 8px">
+<h1 style="margin:0 0 16px;font-size:22px;line-height:30px;font-weight:600;letter-spacing:-0.2px;color:${BRAND.ink}">${heading}</h1>${body}</td></tr>
+<tr><td style="padding:8px 32px 32px">
+<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:8px;background:${BRAND.primary}">
+<a href="${url}" style="display:inline-block;padding:12px 22px;font-size:15px;font-weight:600;line-height:20px;color:${BRAND.onPrimary};text-decoration:none;border-radius:8px">${esc(action.label)}</a>
+</td></tr></table>
+<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:${BRAND.muted}">Button not working? Paste this link into your browser:<br><a href="${url}" style="color:${BRAND.ink};word-break:break-all">${url}</a></p>
+</td></tr>
+<tr><td style="padding:18px 32px;border-top:1px solid ${BRAND.line};font-size:12px;line-height:18px;color:${BRAND.muted}">${footnote}</td></tr>
+</table></td></tr>
+<tr><td style="padding:20px 4px 0;font-size:12px;line-height:18px;color:${BRAND.muted}">
+<strong style="color:${BRAND.text}">EveryOps</strong> · Describe your business, and EveryOps builds the systems it needs.<br>
+<a href="${ASSET_BASE}" style="color:${BRAND.muted}">everyops.app</a> · Sent from notify@everyops.app
+</td></tr>
 </table></td></tr></table></body></html>`;
 }
 
@@ -53,6 +91,7 @@ export function inviteEmail(p: {
   ].join("\n");
   const html = layout({
     heading: `Join ${esc(p.workspaceName)}`,
+    preview: `${p.invitedBy} invited you to join ${p.workspaceName} as ${role}.`,
     lines: [
       `<strong>${esc(p.invitedBy)}</strong> invited you to join <strong>${esc(p.workspaceName)}</strong> on EveryOps as <strong>${esc(role)}</strong>.`,
       `Sign in or create an account with <strong>${esc(p.to)}</strong> to join.`,
@@ -74,6 +113,7 @@ export function resetPasswordEmail(p: { to: string; name: string; url: string })
   ].join("\n");
   const html = layout({
     heading: "Reset your password",
+    preview: "Use this link within 30 minutes to choose a new password.",
     lines: [
       `Hi ${esc(p.name)}, use the button below to choose a new password.`,
       "The link works once and expires in 30 minutes.",
