@@ -9,6 +9,7 @@ import { useVoiceInput } from "@/components/ai/use-voice-input";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
 import { useAuthReady, useCurrentUser } from "@/lib/auth/client";
 import type { WorkspaceData } from "@/lib/blueprint/types";
+import { takePendingFiles } from "@/lib/pending-files";
 import { useHydrated } from "@/lib/store/use-hydrated";
 import { useWorkspaces } from "@/lib/store/workspaces";
 import { PENDING_KEY, StarterChips } from "./starters";
@@ -82,7 +83,9 @@ export function CreatePrompt() {
     create(text, files.refs);
   };
 
-  // Back from sign-in: put the prompt back, and continue once the account's workspaces have loaded.
+  // Back from sign-in: put the prompt back, and continue once the account's workspaces have loaded. Files picked
+  // on the landing page are uploaded first; setup starts when they're in (any that fail are reported and skipped).
+  const [resume, setResume] = useState<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: create only uses stable store and router references
   useEffect(() => {
     const pending = readPending();
@@ -90,8 +93,19 @@ export function CreatePrompt() {
     setPrompt(pending);
     if (!user || !storeReady) return;
     sessionStorage.removeItem(PENDING_KEY);
-    create(pending);
+    void takePendingFiles().then((kept) => {
+      if (!kept.length) return create(pending);
+      files.add(kept);
+      setResume(pending);
+    });
   }, [user, storeReady]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: create only uses stable store and router references
+  useEffect(() => {
+    if (resume === null || files.uploading) return;
+    setResume(null);
+    create(resume, files.refs);
+  }, [resume, files.uploading]);
 
   return (
     <div className="flex w-full flex-col items-center gap-5">
