@@ -86,6 +86,14 @@ function toOps(bp: Blueprint, raw: NonNullable<Answer["ops"]>): { ops: ChangeOp[
 }
 
 /** Plans a change with Gemini. Invalid plans get one repair attempt with the validator's errors. */
+/** Keeps model-written text short even if it runs on; the plan itself is what was validated. */
+function clip(text: string, max: number) {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), max - 15)).replace(/[\s,.;:–-]+$/, "")}…`;
+}
+
 export async function planChangeWithGemini(bp: Blueprint, request: string): Promise<PlanChangeResult> {
   const context = `Blueprint (JSON):\n${JSON.stringify(bp)}\n\nOwner's request: ${request}`;
   let prompt = context;
@@ -102,18 +110,20 @@ export async function planChangeWithGemini(bp: Blueprint, request: string): Prom
       return {
         ok: false,
         kind: a.status,
-        message: a.message ?? "I couldn't plan that change. Try describing it differently.",
+        message: clip(a.message || "I couldn't plan that change. Try describing it differently.", 240),
       };
-    const { ops, errors } = toOps(bp, a.ops ?? []);
+    const { ops, errors } = toOps(bp, a.ops);
     if (!errors.length && ops.length)
       return {
         ok: true,
         model: result.model,
         plan: {
           request,
-          title: a.title ?? "Workspace change",
-          facts: a.facts ?? [],
-          steps: a.steps ?? [],
+          title: clip(a.title || "Workspace change", 60),
+          facts: a.facts.slice(0, 6).map((f) => ({ label: clip(f.label, 40), value: clip(f.value, 100) })),
+          steps: a.steps
+            .slice(0, 8)
+            .map((st) => ({ ...st, label: clip(st.label, 50), detail: clip(st.detail, 140) })),
           ops,
         },
       };

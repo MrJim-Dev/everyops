@@ -63,23 +63,16 @@ const op = z.object({
 
 export const answer = z.object({
   status: z.enum(["plan", "clarify", "unsupported"]),
-  message: z
-    .string()
-    .max(300)
-    .optional()
-    .describe("For clarify/unsupported: one short sentence to the owner"),
-  title: z.string().max(80).optional().describe("Short sentence-case title, e.g. 'Peak-hour pricing'"),
+  message: z.string().optional().describe("For clarify/unsupported: one short sentence to the owner"),
+  // Operations come first so the model settles the actual changes before writing any text about them.
+  ops: z.array(op).describe("The operations. Empty unless status is plan."),
   facts: z
-    .array(z.object({ label: z.string().max(60), value: z.string().max(120) }))
-    .max(6)
-    .optional(),
+    .array(z.object({ label: z.string(), value: z.string() }))
+    .describe("Up to 4 key values the owner should confirm. Empty unless status is plan."),
   steps: z
-    .array(
-      z.object({ kind: z.enum(["add", "change"]), label: z.string().max(60), detail: z.string().max(160) }),
-    )
-    .max(8)
-    .optional(),
-  ops: z.array(op).optional(),
+    .array(z.object({ kind: z.enum(["add", "change"]), label: z.string(), detail: z.string() }))
+    .describe("One line per visible change. Empty unless status is plan."),
+  title: z.string().describe("2 to 6 words, sentence case, e.g. 'Peak-hour pricing'"),
 });
 export type Answer = z.infer<typeof answer>;
 
