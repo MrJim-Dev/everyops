@@ -22,6 +22,13 @@ export function RequireAuth({ children, fallback }: { children: ReactNode; fallb
   return ready && user ? children : fallback;
 }
 
+/** Renders its children only for a signed-in account; nothing for visitors. */
+export function SignedIn({ children }: { children: ReactNode }) {
+  const ready = useAuthReady();
+  const user = useCurrentUser();
+  return ready && user ? children : null;
+}
+
 /** Auth pages bounce signed-in people to where they were going. */
 export function RedirectIfSignedIn({ next, children }: { next: string | null; children: ReactNode }) {
   const ready = useAuthReady();

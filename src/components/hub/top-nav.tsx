@@ -7,7 +7,7 @@ import { Logo } from "@/components/brand/logo";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
-  { href: "/", label: "Workspaces", short: "Workspaces" },
+  { href: "/workspaces", label: "Workspaces", short: "Workspaces" },
   { href: "/community", label: "Community systems", short: "Community" },
 ];
 
@@ -21,7 +21,7 @@ export function TopNav() {
         </Link>
         <nav aria-label="Main" className="flex flex-1 items-center justify-center gap-1">
           {LINKS.map((link) => {
-            const active = link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
+            const active = pathname.startsWith(link.href);
             return (
               <Link
                 key={link.href}

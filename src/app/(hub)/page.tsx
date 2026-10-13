@@ -1,35 +1,11 @@
-import { Suspense } from "react";
-import { RequireAuth } from "@/components/auth/auth-guards";
-import { RequireSession } from "@/components/auth/require-session";
+import Link from "next/link";
+import { SignedIn } from "@/components/auth/auth-guards";
 import { CommunityStarters } from "@/components/hub/community-starters";
 import { CreatePrompt } from "@/components/hub/create-prompt";
 import { RecentWorkspaces } from "@/components/hub/recent-workspaces";
-import { Skeleton } from "@/components/ui/skeleton";
 
-function HomeSkeleton() {
-  return (
-    <div className="flex flex-col items-center gap-4 pt-20" aria-busy="true">
-      <span className="sr-only">Loading</span>
-      <Skeleton className="h-9 w-80" />
-      <Skeleton className="h-5 w-[28rem] max-w-full" />
-      <Skeleton className="mt-4 h-32 w-full max-w-[680px] rounded-xl" />
-    </div>
-  );
-}
-
+/** Public landing page. Visitors can explore; starting a workspace asks them to sign in first. */
 export default function HomePage() {
-  return (
-    <Suspense fallback={<HomeSkeleton />}>
-      <RequireSession next="/">
-        <RequireAuth fallback={<HomeSkeleton />}>
-          <HomeContent />
-        </RequireAuth>
-      </RequireSession>
-    </Suspense>
-  );
-}
-
-function HomeContent() {
   return (
     <>
       <section className="flex flex-col items-center gap-6 pb-16 pt-20 text-center">
@@ -50,13 +26,23 @@ function HomeContent() {
       </section>
       <div className="flex flex-col gap-14">
         <CommunityStarters />
-        <section
-          className="animate-rise stagger flex flex-col gap-4"
-          style={{ "--i": 7 } as React.CSSProperties}
-        >
-          <h2 className="text-[15px] font-semibold">Your workspaces</h2>
-          <RecentWorkspaces />
-        </section>
+        <SignedIn>
+          <section
+            className="animate-rise stagger flex flex-col gap-4"
+            style={{ "--i": 7 } as React.CSSProperties}
+          >
+            <div className="flex items-baseline justify-between gap-4">
+              <h2 className="text-[15px] font-semibold">Your workspaces</h2>
+              <Link
+                href="/workspaces"
+                className="rounded-sm text-[13px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                View all
+              </Link>
+            </div>
+            <RecentWorkspaces />
+          </section>
+        </SignedIn>
       </div>
     </>
   );

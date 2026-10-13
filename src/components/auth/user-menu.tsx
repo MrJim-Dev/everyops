@@ -105,7 +105,7 @@ export function UserMenu({ variant }: { variant: "topbar" | "sidebar" }) {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => router.push("/")}>
+          <DropdownMenuItem onClick={() => router.push("/workspaces")}>
             <HouseIcon />
             Your workspaces
           </DropdownMenuItem>

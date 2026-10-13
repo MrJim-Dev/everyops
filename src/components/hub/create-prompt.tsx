@@ -2,15 +2,28 @@
 
 import { ArrowUpIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group";
+import { useAuthReady, useCurrentUser } from "@/lib/auth/client";
 import type { WorkspaceData } from "@/lib/blueprint/types";
+import { useHydrated } from "@/lib/store/use-hydrated";
 import { useWorkspaces } from "@/lib/store/workspaces";
+
+/** A visitor's prompt, kept across the sign-in round trip so it can continue afterwards. */
+const PENDING_KEY = "everyops.pending-prompt";
+
+function readPending(): string | null {
+  try {
+    return sessionStorage.getItem(PENDING_KEY);
+  } catch {
+    return null;
+  }
+}
 
 const STARTERS = [
   { label: "Booking", prompt: "I run a pickleball venue in Cebu with 4 courts and need a booking system." },
@@ -37,11 +50,14 @@ const EMPTY: WorkspaceData = {
 export function CreatePrompt() {
   const router = useRouter();
   const createWorkspace = useWorkspaces((s) => s.createWorkspace);
+  const authReady = useAuthReady();
+  const user = useCurrentUser();
+  // The signed-in account's workspaces have loaded (not the signed-out state from before sign-in).
+  const loadedOwner = useWorkspaces((s) => s.owner);
+  const storeReady = useHydrated() && !!user && loadedOwner === user.id;
   const [prompt, setPrompt] = useState("");
 
-  const start = () => {
-    const text = prompt.trim();
-    if (!text) return;
+  const create = (text: string) => {
     const slug = createWorkspace({
       name: "New workspace",
       summary: "Setting up",
@@ -50,6 +66,31 @@ export function CreatePrompt() {
     });
     router.push(`/w/${slug}/ask`);
   };
+
+  const start = () => {
+    const text = prompt.trim();
+    if (!text || !authReady) return;
+    if (!user) {
+      // Visitors sign in first, then come back here and the setup continues with this prompt.
+      try {
+        sessionStorage.setItem(PENDING_KEY, text);
+      } catch {}
+      router.push(`/sign-in?next=${encodeURIComponent("/")}`);
+      return;
+    }
+    create(text);
+  };
+
+  // Back from sign-in: put the prompt back, and continue once the account's workspaces have loaded.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: create only uses stable store and router references
+  useEffect(() => {
+    const pending = readPending();
+    if (!pending) return;
+    setPrompt(pending);
+    if (!user || !storeReady) return;
+    sessionStorage.removeItem(PENDING_KEY);
+    create(pending);
+  }, [user, storeReady]);
 
   return (
     <div className="flex w-full flex-col items-center gap-4">
