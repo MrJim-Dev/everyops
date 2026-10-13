@@ -14,7 +14,6 @@ import { toast } from "sonner";
 import { PersonAvatar } from "@/components/records/person-chip";
 import { ConfirmDeleteDialog } from "@/components/settings/confirm-delete-dialog";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-section";
-import { PageHeader } from "@/components/shell/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -94,204 +93,197 @@ export function TeamPage() {
   ];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <PageHeader
-        title="Team"
-        description={`${people.length} ${people.length === 1 ? "person has" : "people have"} access to ${ws.name}.`}
-        className="border-b pb-3"
-      />
-      <SettingsPage>
-        {manager ? (
-          <SettingsSection
-            title="Invite people"
-            description="They'll get a link to join. Invites are tied to the email you enter."
-          >
-            <form onSubmit={invite} noValidate className="flex flex-col gap-2">
-              <Field data-invalid={error ? true : undefined}>
-                <FieldLabel htmlFor="invite-email" className="sr-only">
-                  Email
-                </FieldLabel>
-                <div className="flex flex-wrap gap-2">
-                  <Input
-                    id="invite-email"
-                    type="email"
-                    placeholder="name@business.com"
-                    className="h-9 min-w-[200px] flex-1"
-                    aria-invalid={error ? true : undefined}
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      setError(undefined);
-                    }}
-                  />
-                  <RoleSelect
-                    value={role}
-                    onChange={setRole}
-                    label="Role for this invite"
-                    className="h-9 w-[120px]"
-                  />
-                  <Button type="submit" className="h-9">
-                    <EnvelopeSimpleIcon data-icon="inline-start" />
-                    Invite
-                  </Button>
-                </div>
-                {error ? <FieldError>{error}</FieldError> : null}
-              </Field>
-            </form>
-            <ul className="grid gap-1.5 text-[12.5px] text-muted-foreground sm:grid-cols-3">
-              {ROLES.map((r) => (
-                <li key={r.id}>
-                  <span className="font-medium text-foreground">{r.label}</span> · {r.description}
-                </li>
-              ))}
-            </ul>
-          </SettingsSection>
-        ) : null}
-
+    <SettingsPage>
+      {manager ? (
         <SettingsSection
-          title="Members"
-          description={manager ? "Change roles or remove access at any time." : undefined}
+          title="Invite people"
+          description="They'll get a link to join. Invites are tied to the email you enter."
         >
-          <ul className="divide-y rounded-lg border">
-            {people.map((person, i) => {
-              const isMe = person.accountId === user.id;
-              const editable = manager && person.role !== "owner" && !isMe;
-              return (
-                <li
-                  key={person.accountId || person.email}
-                  className="flex animate-rise stagger items-center gap-3 px-4 py-3"
-                  style={{ "--i": i } as React.CSSProperties}
-                >
-                  <PersonAvatar name={person.name} className="size-8" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13.5px] font-medium">
-                      {person.name}
-                      {isMe ? <span className="font-normal text-muted-foreground"> (you)</span> : null}
-                    </p>
-                    <p className="truncate text-[12.5px] text-muted-foreground">
-                      {person.email}
-                      {person.role !== "owner" ? ` · joined ${formatDate(person.joinedAt)}` : null}
-                    </p>
-                  </div>
-                  {editable ? (
-                    <>
-                      <RoleSelect
-                        value={person.role as Member["role"]}
-                        label={`Role for ${person.name}`}
-                        onChange={(next) => {
-                          setMemberRole(ws.id, person.accountId, next);
-                          toast.success(`${person.name} is now ${ROLE_LABEL[next].toLowerCase()}`);
-                        }}
-                      />
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
-                          render={
-                            <Button variant="ghost" size="icon-sm" aria-label={`More for ${person.name}`} />
-                          }
-                        >
-                          <DotsThreeIcon />
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuGroup>
-                            <DropdownMenuItem
-                              variant="destructive"
-                              onClick={() => {
-                                removeMember(ws.id, person.accountId);
-                                toast(`${person.name} removed`);
-                              }}
-                            >
-                              <UserMinusIcon />
-                              Remove from workspace
-                            </DropdownMenuItem>
-                          </DropdownMenuGroup>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </>
-                  ) : (
-                    <Badge variant={person.role === "owner" ? "secondary" : "outline"}>
-                      {ROLE_LABEL[person.role]}
-                    </Badge>
-                  )}
-                </li>
-              );
-            })}
+          <form onSubmit={invite} noValidate className="flex flex-col gap-2">
+            <Field data-invalid={error ? true : undefined}>
+              <FieldLabel htmlFor="invite-email" className="sr-only">
+                Email
+              </FieldLabel>
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  id="invite-email"
+                  type="email"
+                  placeholder="name@business.com"
+                  className="h-9 min-w-[200px] flex-1"
+                  aria-invalid={error ? true : undefined}
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setError(undefined);
+                  }}
+                />
+                <RoleSelect
+                  value={role}
+                  onChange={setRole}
+                  label="Role for this invite"
+                  className="h-9 w-[120px]"
+                />
+                <Button type="submit" className="h-9">
+                  <EnvelopeSimpleIcon data-icon="inline-start" />
+                  Invite
+                </Button>
+              </div>
+              {error ? <FieldError>{error}</FieldError> : null}
+            </Field>
+          </form>
+          <ul className="grid gap-1.5 text-[12.5px] text-muted-foreground sm:grid-cols-3">
+            {ROLES.map((r) => (
+              <li key={r.id}>
+                <span className="font-medium text-foreground">{r.label}</span> · {r.description}
+              </li>
+            ))}
           </ul>
         </SettingsSection>
+      ) : null}
 
-        {manager && invites.length ? (
-          <SettingsSection
-            title="Pending invites"
-            description="Links stay valid until someone joins or you revoke them."
-          >
-            <ul className="divide-y rounded-lg border">
-              {invites.map((inv) => (
-                <li key={inv.token} className="enter-up flex flex-wrap items-center gap-3 px-4 py-3">
-                  <span className="flex size-8 items-center justify-center rounded-full border border-dashed text-muted-foreground">
-                    <EnvelopeSimpleIcon className="size-3.5" />
-                  </span>
-                  <div className="min-w-[200px] flex-1">
-                    <p className="truncate text-[13.5px]">{inv.email}</p>
-                    <p className="text-[12.5px] text-muted-foreground">
-                      {ROLE_LABEL[inv.role]} · invited by {inv.invitedBy} ·{" "}
-                      {formatDistanceToNowStrict(new Date(inv.invitedAt), { addSuffix: true })}
-                    </p>
-                  </div>
-                  <div className="ml-11 flex gap-2 sm:ml-0">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => copy(inviteUrl(inv.token), "Invite link copied")}
-                    >
-                      <CopyIcon data-icon="inline-start" />
-                      Copy link
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        revokeInvite(ws.id, inv.token);
-                        toast(`Invite for ${inv.email} revoked`);
+      <SettingsSection
+        title="Members"
+        description={`${people.length} ${people.length === 1 ? "person has" : "people have"} access.${manager ? " Change roles or remove access at any time." : ""}`}
+      >
+        <ul className="divide-y rounded-lg border">
+          {people.map((person, i) => {
+            const isMe = person.accountId === user.id;
+            const editable = manager && person.role !== "owner" && !isMe;
+            return (
+              <li
+                key={person.accountId || person.email}
+                className="flex animate-rise stagger items-center gap-3 px-4 py-3"
+                style={{ "--i": i } as React.CSSProperties}
+              >
+                <PersonAvatar name={person.name} className="size-8" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13.5px] font-medium">
+                    {person.name}
+                    {isMe ? <span className="font-normal text-muted-foreground"> (you)</span> : null}
+                  </p>
+                  <p className="truncate text-[12.5px] text-muted-foreground">
+                    {person.email}
+                    {person.role !== "owner" ? ` · joined ${formatDate(person.joinedAt)}` : null}
+                  </p>
+                </div>
+                {editable ? (
+                  <>
+                    <RoleSelect
+                      value={person.role as Member["role"]}
+                      label={`Role for ${person.name}`}
+                      onChange={(next) => {
+                        setMemberRole(ws.id, person.accountId, next);
+                        toast.success(`${person.name} is now ${ROLE_LABEL[next].toLowerCase()}`);
                       }}
-                    >
-                      Revoke
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </SettingsSection>
-        ) : null}
+                    />
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <Button variant="ghost" size="icon-sm" aria-label={`More for ${person.name}`} />
+                        }
+                      >
+                        <DotsThreeIcon />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuGroup>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => {
+                              removeMember(ws.id, person.accountId);
+                              toast(`${person.name} removed`);
+                            }}
+                          >
+                            <UserMinusIcon />
+                            Remove from workspace
+                          </DropdownMenuItem>
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </>
+                ) : (
+                  <Badge variant={person.role === "owner" ? "secondary" : "outline"}>
+                    {ROLE_LABEL[person.role]}
+                  </Badge>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </SettingsSection>
 
-        {ws.isShared ? (
-          <SettingsSection
-            title="Leave workspace"
-            tone="danger"
-            description="You'll lose access until someone invites you again."
-          >
-            <div>
-              <ConfirmDeleteDialog
-                trigger={
-                  <Button variant="destructive">
-                    <SignOutIcon data-icon="inline-start" />
-                    Leave workspace
+      {manager && invites.length ? (
+        <SettingsSection
+          title="Pending invites"
+          description="Links stay valid until someone joins or you revoke them."
+        >
+          <ul className="divide-y rounded-lg border">
+            {invites.map((inv) => (
+              <li key={inv.token} className="enter-up flex flex-wrap items-center gap-3 px-4 py-3">
+                <span className="flex size-8 items-center justify-center rounded-full border border-dashed text-muted-foreground">
+                  <EnvelopeSimpleIcon className="size-3.5" />
+                </span>
+                <div className="min-w-[200px] flex-1">
+                  <p className="truncate text-[13.5px]">{inv.email}</p>
+                  <p className="text-[12.5px] text-muted-foreground">
+                    {ROLE_LABEL[inv.role]} · invited by {inv.invitedBy} ·{" "}
+                    {formatDistanceToNowStrict(new Date(inv.invitedAt), { addSuffix: true })}
+                  </p>
+                </div>
+                <div className="ml-11 flex gap-2 sm:ml-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copy(inviteUrl(inv.token), "Invite link copied")}
+                  >
+                    <CopyIcon data-icon="inline-start" />
+                    Copy link
                   </Button>
-                }
-                title={`Leave ${ws.name}?`}
-                description="The workspace and its records stay with the owner."
-                label={`Type ${ws.name} to confirm`}
-                expected={ws.name}
-                actionLabel="Leave workspace"
-                onConfirm={() => {
-                  router.replace("/");
-                  leaveWorkspace(ws.id);
-                  toast(`You left ${ws.name}`);
-                  return undefined;
-                }}
-              />
-            </div>
-          </SettingsSection>
-        ) : null}
-      </SettingsPage>
-    </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      revokeInvite(ws.id, inv.token);
+                      toast(`Invite for ${inv.email} revoked`);
+                    }}
+                  >
+                    Revoke
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </SettingsSection>
+      ) : null}
+
+      {ws.isShared ? (
+        <SettingsSection
+          title="Leave workspace"
+          tone="danger"
+          description="You'll lose access until someone invites you again."
+        >
+          <div>
+            <ConfirmDeleteDialog
+              trigger={
+                <Button variant="destructive">
+                  <SignOutIcon data-icon="inline-start" />
+                  Leave workspace
+                </Button>
+              }
+              title={`Leave ${ws.name}?`}
+              description="The workspace and its records stay with the owner."
+              label={`Type ${ws.name} to confirm`}
+              expected={ws.name}
+              actionLabel="Leave workspace"
+              onConfirm={() => {
+                router.replace("/");
+                leaveWorkspace(ws.id);
+                toast(`You left ${ws.name}`);
+                return undefined;
+              }}
+            />
+          </div>
+        </SettingsSection>
+      ) : null}
+    </SettingsPage>
   );
 }

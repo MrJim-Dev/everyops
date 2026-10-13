@@ -6,8 +6,6 @@ import {
   GearSixIcon,
   MagnifyingGlassIcon,
   SparkleIcon,
-  UploadSimpleIcon,
-  UsersThreeIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -75,24 +73,6 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
             >
               History
             </SidebarLink>
-            <SidebarLink
-              href={`${ws.basePath}/team`}
-              active={isActive(`${ws.basePath}/team`)}
-              icon={<UsersThreeIcon />}
-              onNavigate={onNavigate}
-            >
-              Team
-            </SidebarLink>
-            {manager ? (
-              <SidebarLink
-                href={`${ws.basePath}/publish`}
-                active={isActive(`${ws.basePath}/publish`)}
-                icon={<UploadSimpleIcon />}
-                onNavigate={onNavigate}
-              >
-                Publish
-              </SidebarLink>
-            ) : null}
             <SidebarLink
               href={`${ws.basePath}/settings`}
               active={isActive(`${ws.basePath}/settings`)}

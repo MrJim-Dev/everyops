@@ -116,14 +116,17 @@ export function CommandMenu() {
                   <ClockCounterClockwiseIcon />
                   Open history
                 </CommandItem>
-                <CommandItem value="team members invite roles" onSelect={() => go(`${ws.basePath}/team`)}>
+                <CommandItem
+                  value="team members invite roles"
+                  onSelect={() => go(`${ws.basePath}/settings/team`)}
+                >
                   <UsersThreeIcon />
                   Team and invites
                 </CommandItem>
                 {canManage(ws.role) ? (
                   <CommandItem
                     value="publish community share template"
-                    onSelect={() => go(`${ws.basePath}/publish`)}
+                    onSelect={() => go(`${ws.basePath}/settings/publish`)}
                   >
                     <UploadSimpleIcon />
                     Publish to Community
