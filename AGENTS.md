@@ -57,7 +57,7 @@ Use pnpm only. `pnpm build` matters: `cacheComponents` errors (below) only show 
 
 ## Git
 
-Deploy with `pnpm deploy` (Cloud Run service `everyops-web`, scripts/deploy.sh). Live URL: https://everyops-web-223724593768.asia-southeast1.run.app. After a deploy, verify the live URL (sign-in, protected redirects) and check `gcloud logging read` for errors; a successful build is not proof.
+Deploy with `pnpm deploy:run` (Cloud Run service `everyops-web`, scripts/deploy.sh). Live URL: https://everyops-web-223724593768.asia-southeast1.run.app. After a deploy, verify the live URL (sign-in, protected redirects) and check `gcloud logging read` for errors; a successful build is not proof.
 
 ## Git workflow
 

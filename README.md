@@ -25,7 +25,7 @@ The first visit seeds four demo workspaces: Court House PH, Tita Nena's Canteen,
 
 **Live:** https://everyops-web-223724593768.asia-southeast1.run.app
 
-EveryOps runs on Cloud Run as the service `everyops-web` (project `everyops-prod`, `asia-southeast1`). `pnpm deploy` builds the `Dockerfile` (Next.js standalone, Node 22) with Cloud Build and deploys it as `everyops-run`, attached to Cloud SQL, with `DATABASE_URL` and `BETTER_AUTH_SECRET` from Secret Manager and `BETTER_AUTH_URL` set to the service URL. It scales to zero by default; run `MIN_INSTANCES=1 pnpm deploy` to keep one warm instance during judging. Password reset links appear in Cloud Run logs until email is connected.
+EveryOps runs on Cloud Run as the service `everyops-web` (project `everyops-prod`, `asia-southeast1`). `pnpm deploy:run` builds the `Dockerfile` (Next.js standalone, Node 22) with Cloud Build and deploys it as `everyops-run`, attached to Cloud SQL, with `DATABASE_URL` and `BETTER_AUTH_SECRET` from Secret Manager and `BETTER_AUTH_URL` set to the service URL. It scales to zero by default; run `MIN_INSTANCES=1 pnpm deploy:run` to keep one warm instance during judging. Password reset links appear in Cloud Run logs until email is connected.
 
 ## Database and auth details
 
