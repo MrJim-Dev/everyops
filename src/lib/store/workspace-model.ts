@@ -47,6 +47,10 @@ export type ChangeEntry = {
   recordChanges: RecordChange[];
   appliedAt: string;
   undoneAt?: string;
+  /** Records the change added, removed again on undo. */
+  createdRecordIds?: string[];
+  /** Records as they were before the change edited them, restored on undo. */
+  replacedRecords?: DataRecord[];
 };
 
 export type Workspace = {

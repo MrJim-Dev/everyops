@@ -2,8 +2,12 @@ import { findEntity } from "@/lib/blueprint/lookup";
 import type {
   Blueprint,
   DataRecord,
+  Entity,
   Field,
   FieldValue,
+  RecordData,
+  Rule,
+  System,
   View,
   Widget,
   WorkspaceData,
@@ -13,14 +17,22 @@ import { computeAll } from "./compute";
 import { recordContext } from "./context";
 import { run, truthy } from "./expr";
 
-/** The only edits a change plan may make. Removing a field never deletes data. */
+/** The only edits a change plan may make to the design. Nothing here deletes data. */
 export type ChangeOp =
   | { op: "add_field"; entityId: string; field: Field }
   | { op: "update_field"; entityId: string; fieldId: string; patch: Partial<Omit<Field, "id">> }
   | { op: "add_view"; systemId: string; view: View }
   | { op: "add_view_field"; viewId: string; fieldId: string }
   | { op: "add_widget"; systemId: string; widget: Widget }
-  | { op: "rename_workspace"; name: string };
+  | { op: "rename_workspace"; name: string }
+  | { op: "add_entity"; entity: Entity }
+  | { op: "add_system"; system: System }
+  | { op: "add_rule"; rule: Rule };
+
+/** Data edits a plan may make after its design changes: add records or change field values. */
+export type RecordOp =
+  | { op: "create_record"; id: string; entityId: string; data: RecordData }
+  | { op: "update_record"; recordId: string; patch: RecordData };
 
 export type PlanStep = { kind: "add" | "change"; label: string; detail: string };
 
@@ -31,6 +43,8 @@ export type ChangePlan = {
   facts: { label: string; value: string }[];
   steps: PlanStep[];
   ops: ChangeOp[];
+  /** Applied after `ops`, through the same validation and rules as editing by hand. */
+  recordOps?: RecordOp[];
 };
 
 export type RecordChange = {
@@ -80,6 +94,15 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       }
       case "rename_workspace":
         next.workspaceName = op.name;
+        break;
+      case "add_entity":
+        if (!next.entities.some((e) => e.id === op.entity.id)) next.entities.push(op.entity);
+        break;
+      case "add_system":
+        if (!next.systems.some((s) => s.id === op.system.id)) next.systems.push(op.system);
+        break;
+      case "add_rule":
+        if (!next.rules.some((r) => r.id === op.rule.id)) next.rules.push(op.rule);
         break;
     }
   }

@@ -40,10 +40,10 @@ const FIELD_TYPES = [
   "rollup",
 ] as const;
 
-const option = z.object({ id: z.string(), label: z.string(), tone: z.enum(TONES) });
+export const option = z.object({ id: z.string(), label: z.string(), tone: z.enum(TONES) });
 const sort = z.object({ fieldId: z.string(), dir: z.enum(["asc", "desc"]) });
 
-const field = z.object({
+export const field = z.object({
   id: z.string().describe("snake_case, unique within the record type"),
   name: z.string(),
   type: z.enum(FIELD_TYPES),
@@ -74,7 +74,7 @@ const field = z.object({
     .describe("rollup only"),
 });
 
-const entity = z.object({
+export const entity = z.object({
   id: z.string().describe("snake_case singular, e.g. task"),
   name: z.string(),
   pluralName: z.string(),
@@ -101,7 +101,7 @@ const entity = z.object({
     .describe("Bookable resources only (courts, rooms): opening hours HH:MM and slot length 15/30/60/90/120"),
 });
 
-const view = z.object({
+export const view = z.object({
   id: z.string(),
   entityId: z.string(),
   name: z.string(),
@@ -124,7 +124,7 @@ const view = z.object({
   detailFieldIds: z.array(z.string()).optional().describe("approval_queue"),
 });
 
-const widget = z.object({
+export const widget = z.object({
   id: z.string(),
   title: z.string(),
   entityId: z.string(),
@@ -151,7 +151,7 @@ const widget = z.object({
 });
 
 const target = z.object({ kind: z.enum(["self", "relation"]), fieldId: z.string().optional() });
-const rule = z.object({
+export const rule = z.object({
   id: z.string(),
   name: z.string(),
   trigger: z.object({
@@ -173,7 +173,7 @@ const rule = z.object({
   ),
 });
 
-const system = z.object({
+export const system = z.object({
   id: z.string(),
   name: z.string(),
   icon: z.enum(ICONS),

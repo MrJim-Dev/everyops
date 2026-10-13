@@ -32,6 +32,7 @@ Use pnpm only. `pnpm build` matters: `cacheComponents` errors (below) only show 
 - Nothing is stored in localStorage. Workspaces live in Postgres (`workspace` JSON documents plus `workspace_member`/`workspace_invite`); the browser store (`src/lib/store/workspaces.ts`) loads them from `/api/workspaces` and saves changed workspaces back. Access rules are enforced in `src/server/workspaces.ts`, never only in the UI.
 - Starter templates (official community systems, demo workspaces) are database rows refreshed by `pnpm db:seed` from `src/lib/catalog`. Schema changes go in a new `src/server/migrations/NNNN_name.sql` applied by `pnpm db:migrate`.
 - Ask EveryOps setup: `src/server/ai/interview*.ts` (conversation) and `src/server/ai/design*.ts` (blueprint + samples, tidied and validated, up to two repairs).
+- Workspace assistant: `src/server/ai/assistant*.ts` → `/api/ai/assistant` → `src/components/assistant/assistant-panel.tsx`. It returns an answer, a question, or a `ChangePlan` (`ops` plus `recordOps`) that the browser applies through `applyChange` only after the person presses Apply. Role checks happen in the route (`canManage` for design ops, `canEdit` for record ops) and again on save in `src/server/workspaces.ts`. New plan op types go in `src/lib/engine/changes.ts` with undo support, then in the assistant schema and `toDesignOps`.
 - Server-only code lives in `src/server` (database, auth, session). Never import it from a `"use client"` file.
 
 ## Database and auth
@@ -52,7 +53,7 @@ Use pnpm only. `pnpm build` matters: `cacheComponents` errors (below) only show 
 - Gemini is called only from server code in `src/server/ai` (Vertex AI, `asia-southeast1`, model from `GEMINI_MODEL`, default `gemini-3.5-flash`). Never call it from the browser and never add API keys; Cloud Run uses the `everyops-run` service account and local dev uses gcloud ADC.
 - Every AI feature returns structured JSON through `generateJson` with a Zod schema, and its output must pass the same validation the app already uses (`validateBlueprint`, op checks) before the user sees it. Nothing is applied without the owner's approval.
 - AI routes check the session and `takeAiToken`. Keep prompts in a `*-prompt.ts` module next to the feature so they can be tested directly.
-- Don't lower temperature or force a thinking level on Gemini 3 models (they loop), and don't use the `global` location (it stalls).
+- Don't lower temperature on Gemini 3 models (they loop), and don't use the `global` location (it stalls). Only the designer and the assistant set `thinking: "LOW"`.
 
 
 - `cacheComponents` is on: anything reading `headers()`, `cookies()` or awaited `params` on the server must sit inside `<Suspense>`.

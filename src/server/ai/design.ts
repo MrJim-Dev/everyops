@@ -22,7 +22,7 @@ const pick = <T extends object>(source: T, keys: (keyof T)[]) =>
   Object.fromEntries(keys.filter((k) => source[k] !== undefined).map((k) => [k, source[k]])) as Partial<T>;
 
 /** Turns the model's view (optional keys) into the strict view type for its kind. */
-function toView(v: Design["views"][number]): View {
+export function toView(v: Design["views"][number]): View {
   const base = { id: v.id, entityId: v.entityId, name: v.name };
   switch (v.type) {
     case "table":
@@ -68,7 +68,7 @@ function toView(v: Design["views"][number]): View {
   }
 }
 
-function toEntity(e: Design["entities"][number]): Entity {
+export function toEntity(e: Design["entities"][number]): Entity {
   const fields = e.fields.map((f) => {
     const out: Field = {
       id: f.id,
@@ -95,6 +95,33 @@ function toEntity(e: Design["entities"][number]): Entity {
   };
 }
 
+export function toRule(r: Design["rules"][number]): Rule {
+  const target = (t?: { kind: "self" | "relation"; fieldId?: string }) =>
+    t?.kind === "relation"
+      ? { kind: "relation" as const, fieldId: t.fieldId ?? "" }
+      : { kind: "self" as const };
+  return {
+    ...r,
+    actions: r.actions.map((a) =>
+      a.type === "notify"
+        ? { type: "notify" as const, message: a.message ?? "" }
+        : a.type === "set_field"
+          ? {
+              type: "set_field" as const,
+              target: target(a.target),
+              fieldId: a.fieldId ?? "",
+              value: a.value ?? "null",
+            }
+          : {
+              type: "adjust_number" as const,
+              target: target(a.target),
+              fieldId: a.fieldId ?? "",
+              delta: a.delta ?? "0",
+            },
+    ),
+  };
+}
+
 function toBlueprint(d: Design): Blueprint {
   return {
     version: 1,
@@ -103,32 +130,7 @@ function toBlueprint(d: Design): Blueprint {
     entities: d.entities.map(toEntity),
     views: d.views.map(toView),
     widgets: d.widgets as Widget[],
-    rules: d.rules.map((r) => ({
-      ...r,
-      actions: r.actions.map((a) =>
-        a.type === "notify"
-          ? { type: "notify", message: a.message ?? "" }
-          : a.type === "set_field"
-            ? {
-                type: "set_field",
-                target:
-                  a.target?.kind === "relation"
-                    ? { kind: "relation", fieldId: a.target.fieldId ?? "" }
-                    : { kind: "self" },
-                fieldId: a.fieldId ?? "",
-                value: a.value ?? "null",
-              }
-            : {
-                type: "adjust_number",
-                target:
-                  a.target?.kind === "relation"
-                    ? { kind: "relation", fieldId: a.target.fieldId ?? "" }
-                    : { kind: "self" },
-                fieldId: a.fieldId ?? "",
-                delta: a.delta ?? "0",
-              },
-      ),
-    })) as Rule[],
+    rules: d.rules.map(toRule),
   };
 }
 
@@ -137,7 +139,7 @@ function toBlueprint(d: Design): Blueprint {
  * record name, status fields without stages, links to record types that don't exist, screens and
  * widgets that point at missing fields, and empty sidebar sections.
  */
-function tidy(bp: Blueprint): Blueprint {
+export function tidy(bp: Blueprint): Blueprint {
   // Resolve loose references ("projects", "Project") to the real record type id.
   const norm = (x: string) =>
     x
@@ -272,77 +274,83 @@ function extraChecks(bp: Blueprint): string[] {
   return errors;
 }
 
+const toIso = (v: string) => {
+  const t = v.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const withZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t.length === 16 ? `${t}:00` : t}+08:00`;
+  const ms = Date.parse(withZone);
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+};
+
+/**
+ * Turns a value Gemini wrote as text into the field's stored type. Returns undefined when it doesn't
+ * fit (unknown option, unparseable date). `ref` resolves relation values to record ids.
+ */
+export function toFieldValue(
+  field: Field,
+  value: string,
+  ref: (v: string) => string | undefined,
+): FieldValue | undefined {
+  const v = value.trim();
+  switch (field.type) {
+    case "formula":
+    case "rollup":
+      return undefined;
+    case "number":
+    case "money":
+    case "percent": {
+      if (v === "") return null;
+      const n = Number(v.replace(/[₱,%\s]/g, ""));
+      return Number.isFinite(n) ? n : undefined;
+    }
+    case "checkbox":
+      return /^(true|yes|1)$/i.test(v);
+    case "relation":
+      return v === "" ? null : ref(v);
+    case "select":
+    case "status": {
+      const opt = field.options?.find((o) => o.id === v || o.label.toLowerCase() === v.toLowerCase());
+      return opt?.id;
+    }
+    case "multi_select":
+      return v
+        .split(",")
+        .map(
+          (x) =>
+            field.options?.find((o) => o.id === x.trim() || o.label.toLowerCase() === x.trim().toLowerCase())
+              ?.id,
+        )
+        .filter((x): x is string => !!x);
+    case "date": {
+      const iso = toIso(v);
+      return iso ? iso.slice(0, 10) : undefined;
+    }
+    case "datetime":
+      return toIso(v) ?? undefined;
+    case "time_range": {
+      const [a, b] = v.split("/").map((x) => (x ? toIso(x) : null));
+      if (!a || !b) return undefined;
+      return field.range === "dates" ? { start: a.slice(0, 10), end: b.slice(0, 10) } : { start: a, end: b };
+    }
+    default:
+      return v;
+  }
+}
+
 /** Converts sample values (strings) into typed record data, dropping anything that doesn't fit. */
 function toRecords(bp: Blueprint, samples: Design["samples"], now: Date): DataRecord[] {
   const stamp = now.toISOString();
   const ids = new Map<string, string>();
   for (const [i, s] of samples.entries()) ids.set(s.ref, `${s.entityId}_${i + 1}`);
-  const toIso = (v: string) => {
-    const t = v.trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
-    const withZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t.length === 16 ? `${t}:00` : t}+08:00`;
-    const ms = Date.parse(withZone);
-    return Number.isNaN(ms) ? null : new Date(ms).toISOString();
-  };
   return samples.flatMap((s, i) => {
     const entity = bp.entities.find((e) => e.id === s.entityId);
     if (!entity) return [];
     const data: Record<string, FieldValue> = {};
     for (const { fieldId, value } of s.values) {
       const field = entity.fields.find((f) => f.id === fieldId);
-      if (!field || field.type === "formula" || field.type === "rollup") continue;
-      const v = value.trim();
-      switch (field.type) {
-        case "number":
-        case "money":
-        case "percent": {
-          const n = Number(v.replace(/[₱,\s]/g, ""));
-          if (Number.isFinite(n)) data[field.id] = n;
-          break;
-        }
-        case "checkbox":
-          data[field.id] = /^(true|yes|1)$/i.test(v);
-          break;
-        case "relation":
-          if (ids.has(v)) data[field.id] = ids.get(v) as string;
-          break;
-        case "select":
-        case "status": {
-          const opt = field.options?.find((o) => o.id === v || o.label.toLowerCase() === v.toLowerCase());
-          if (opt) data[field.id] = opt.id;
-          break;
-        }
-        case "multi_select":
-          data[field.id] = v
-            .split(",")
-            .map(
-              (x) =>
-                field.options?.find(
-                  (o) => o.id === x.trim() || o.label.toLowerCase() === x.trim().toLowerCase(),
-                )?.id,
-            )
-            .filter((x): x is string => !!x);
-          break;
-        case "date": {
-          const iso = toIso(v);
-          if (iso) data[field.id] = iso.slice(0, 10);
-          break;
-        }
-        case "datetime": {
-          const iso = toIso(v);
-          if (iso) data[field.id] = iso;
-          break;
-        }
-        case "time_range": {
-          const [a, b] = v.split("/").map((x) => (x ? toIso(x) : null));
-          if (a && b)
-            data[field.id] =
-              field.range === "dates" ? { start: a.slice(0, 10), end: b.slice(0, 10) } : { start: a, end: b };
-          break;
-        }
-        default:
-          data[field.id] = v;
-      }
+      if (!field) continue;
+      const converted = toFieldValue(field, value, (v) => ids.get(v));
+      if (converted !== undefined) data[field.id] = converted;
     }
     if (!data[entity.primaryFieldId]) return [];
     return [{ id: `${s.entityId}_${i + 1}`, entityId: entity.id, data, createdAt: stamp, updatedAt: stamp }];

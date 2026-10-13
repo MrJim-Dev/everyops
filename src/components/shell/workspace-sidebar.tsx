@@ -2,6 +2,7 @@
 
 import {
   ArrowLeftIcon,
+  ChatsCircleIcon,
   ClockCounterClockwiseIcon,
   GearSixIcon,
   MagnifyingGlassIcon,
@@ -15,6 +16,7 @@ import { UseSystemButton } from "@/components/community/use-system-dialog";
 import { SystemIcon } from "@/components/system-icon";
 import { Kbd } from "@/components/ui/kbd";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { useAssistant } from "@/lib/assistant/panel-store";
 import { canManage } from "@/lib/store/workspaces";
 import { useCommandMenu } from "./command-menu";
 import { SidebarLink, SidebarSection } from "./sidebar-link";
@@ -24,6 +26,8 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const ws = useWorkspace();
   const pathname = usePathname();
   const { setOpen } = useCommandMenu();
+  const assistantOpen = useAssistant((s) => s.open);
+  const toggleAssistant = useAssistant((s) => s.toggle);
   const manager = canManage(ws.role);
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
@@ -55,6 +59,19 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
         </button>
         {ws.mode === "live" ? (
           <>
+            <button
+              type="button"
+              aria-pressed={assistantOpen}
+              onClick={() => {
+                toggleAssistant();
+                onNavigate?.();
+              }}
+              className="flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px] text-sidebar-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 aria-pressed:bg-sidebar-accent aria-pressed:text-foreground"
+            >
+              <ChatsCircleIcon className="size-4 text-muted-foreground" />
+              <span className="flex-1 text-left">Assistant</span>
+              <Kbd>⌘J</Kbd>
+            </button>
             {manager ? (
               <SidebarLink
                 href={`${ws.basePath}/ask`}

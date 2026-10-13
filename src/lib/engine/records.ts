@@ -10,6 +10,7 @@ import type {
 } from "@/lib/blueprint/types";
 import { formatRange, isTimeRange } from "@/lib/format";
 import { findConflict, resourceLabel } from "./availability";
+import type { RecordOp } from "./changes";
 import { computeAll } from "./compute";
 import { recordContext } from "./context";
 import { run, truthy } from "./expr";
@@ -142,6 +143,8 @@ export function createRecord(
   entityId: string,
   input: RecordData,
   now: Date = new Date(),
+  /** Lets a plan reserve ids up front so its records can link to each other. */
+  id?: string,
 ): MutationResult {
   const bp = ws.blueprint;
   const entity = getEntity(bp, entityId);
@@ -150,7 +153,7 @@ export function createRecord(
 
   const stamp = now.toISOString();
   const record: DataRecord = {
-    id: newId(entity.id),
+    id: id ?? newId(entity.id),
     entityId,
     data: { ...input },
     createdAt: stamp,
@@ -226,4 +229,33 @@ export function createWithLines(
   }
   const record = data.records.find((r) => r.id === parent.record.id) ?? parent.record;
   return { ok: true, data, record, notices };
+}
+
+/**
+ * Applies a plan's record edits in order, each through the same validation, rules and formulas as
+ * editing by hand. Returns what changed so the plan can be undone, and why any edit was skipped.
+ */
+export function applyRecordOps(ws: WorkspaceData, ops: RecordOp[], now: Date = new Date()) {
+  let data = ws;
+  const created: string[] = [];
+  const replaced: DataRecord[] = [];
+  const errors: string[] = [];
+  for (const op of ops) {
+    if (op.op === "create_record") {
+      const result = createRecord(data, op.entityId, op.data, now, op.id);
+      if (result.ok) {
+        data = result.data;
+        created.push(result.record.id);
+      } else errors.push(`New ${op.entityId}: ${result.errors.map((e) => e.message).join("; ")}`);
+    } else {
+      const before = findRecord(data.records, op.recordId);
+      const result = updateRecord(data, op.recordId, op.patch, now);
+      if (result.ok) {
+        data = result.data;
+        if (before && !created.includes(before.id) && !replaced.some((r) => r.id === before.id))
+          replaced.push(before);
+      } else errors.push(`${op.recordId}: ${result.errors.map((e) => e.message).join("; ")}`);
+    }
+  }
+  return { data, created, replaced, errors };
 }

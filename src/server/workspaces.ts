@@ -135,6 +135,18 @@ export async function listWorkspaces(userId: string): Promise<Workspace[]> {
 
 export type SaveResult = { ok: true } | { ok: false; status: number; message: string };
 
+/** One workspace the caller can open, with their role in it. */
+export async function loadWorkspace(
+  id: string,
+  userId: string,
+): Promise<{ workspace: Workspace; role: Role } | null> {
+  const access = await roleIn(id, userId);
+  if (!access) return null;
+  const { rows } = await sql<{ doc: WorkspaceDoc }>`select doc from workspace where id = ${id}`.execute(db);
+  if (!rows[0]) return null;
+  return { workspace: { ...rows[0].doc, slug: id, ownerId: access.ownerId }, role: access.role };
+}
+
 /**
  * Saves a workspace from the browser. Owners and admins save the whole document and the team;
  * staff only save records; viewers can't save. New ids create a workspace owned by the caller.

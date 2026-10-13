@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { create } from "zustand";
 import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { applyOps, type ChangePlan, commitChange, revertChange } from "@/lib/engine/changes";
+import { computeAll } from "@/lib/engine/compute";
+import { applyRecordOps } from "@/lib/engine/records";
 import {
   blueprintOf,
   type ChangeEntry,
@@ -254,10 +256,13 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
     applyChange: (slug, plan) => {
       const ws = get().workspaces[slug];
       if (!ws) return null;
-      const next = { ...applyOps(blueprintOf(ws), plan.ops), version: ws.versions.length + 1 };
-      const { data, changes } = commitChange(dataOf(ws), next);
+      const redesign = plan.ops.length > 0;
+      const current = blueprintOf(ws);
+      const next = redesign ? { ...applyOps(current, plan.ops), version: ws.versions.length + 1 } : current;
+      const { data, changes } = redesign ? commitChange(dataOf(ws), next) : { data: dataOf(ws), changes: [] };
+      const edits = plan.recordOps?.length ? applyRecordOps(data, plan.recordOps) : null;
       const entry: ChangeEntry = {
-        id: `change_${next.version}`,
+        id: `change_${Date.now().toString(36)}`,
         request: plan.request,
         title: plan.title,
         steps: plan.steps,
@@ -265,13 +270,14 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
         toVersion: next.version,
         recordChanges: changes,
         appliedAt: new Date().toISOString(),
+        ...(edits ? { createdRecordIds: edits.created, replacedRecords: edits.replaced } : {}),
       };
       update(slug, (w) => ({
         ...w,
         name: next.workspaceName,
-        versions: [...w.versions, next],
+        versions: redesign ? [...w.versions, next] : w.versions,
         currentVersion: next.version,
-        records: data.records,
+        records: (edits?.data ?? data).records,
         changes: [entry, ...w.changes],
       }));
       return entry;
@@ -281,8 +287,15 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
       update(slug, (ws) => {
         const entry = ws.changes.find((c) => c.id === changeId);
         if (!entry || entry.undoneAt || ws.currentVersion !== entry.toVersion) return ws;
+        // Data edits first: drop the records it added and put back the ones it changed.
+        const created = new Set(entry.createdRecordIds ?? []);
+        const before = new Map((entry.replacedRecords ?? []).map((r) => [r.id, r]));
+        const records = ws.records.filter((r) => !created.has(r.id)).map((r) => before.get(r.id) ?? r);
         const previous = ws.versions[entry.fromVersion - 1];
-        const restored = revertChange(dataOf(ws), previous, entry.recordChanges);
+        const restored =
+          entry.fromVersion !== entry.toVersion
+            ? revertChange({ blueprint: blueprintOf(ws), records }, previous, entry.recordChanges)
+            : { blueprint: previous, records: computeAll(previous, records) };
         return {
           ...ws,
           name: previous.workspaceName,

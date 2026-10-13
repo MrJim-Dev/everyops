@@ -90,8 +90,11 @@ Gemini runs only on the server, through Vertex AI in `asia-southeast1`, signed i
 | `src/server/ai/interview*.ts` | Setup conversation: asks short follow-up questions with tap-to-send suggestions, keeps a profile of the business, and decides when to design |
 | `src/server/ai/design*.ts` | Designs the workspace (blueprint plus sample records) from the conversation's brief, tidies small slips, validates it, and repairs up to twice |
 | `src/app/api/ai/interview`, `src/app/api/ai/design` | The setup endpoints used by `src/components/setup/setup-interview.tsx` |
+| `src/server/ai/assistant*.ts` | The workspace assistant: answers questions from the workspace's own data, asks one short question when a request is unclear, or returns a change plan (design ops plus record creates and updates), validated and rehearsed on a copy, with one repair attempt |
+| `src/app/api/ai/assistant/route.ts` | `POST` endpoint: loads the workspace from the database with the caller's role. Owners and admins can change the design, staff can add and update records, viewers can only ask |
+| `src/components/assistant/assistant-panel.tsx`, `src/lib/assistant/panel-store.ts` | The collapsible side panel (⌘J, the sidebar's Assistant entry, or Ask AI on any system page; a sheet on phones). Plans show as cards with Apply, Not now and Undo, and land in History |
 
-The model is `gemini-3.5-flash` (`GEMINI_MODEL`). Conversation turns take 3–10 seconds and a design about 20. Leave temperature at its default and only lower thinking for the designer: lowering them elsewhere made Gemini 3 models loop, and the `global` endpoint stalled often, which is why the regional endpoint is used.
+The model is `gemini-3.5-flash` (`GEMINI_MODEL`). Conversation turns take 3–10 seconds and a design about 20. Leave temperature at its default and only lower thinking for the designer and the assistant: lowering them elsewhere made Gemini 3 models loop, and the `global` endpoint stalled often, which is why the regional endpoint is used.
 
 ## Design rules
 
@@ -105,7 +108,8 @@ The model is `gemini-3.5-flash` (`GEMINI_MODEL`). Conversation turns take 3–10
 
 - Saves are last-write-wins per workspace: two people editing the same workspace at the same moment can overwrite each other.
 - The interviewer guides booking businesses. Other business types are pointed to a matching community system.
-- The change planner understands pricing changes, adding a field, and renaming a workspace.
+- The assistant can add fields, record types, views, dashboard widgets, sections and rules, and create or update records. It doesn't delete fields, systems or records; it says so and points to Settings.
+- Assistant conversations live in the browser tab's memory; the changes they make are saved with the workspace and listed in History.
 - Official community systems keep their sample authors and usage counts. Invites are links; email isn't sent yet.
 
 ## Accounts
