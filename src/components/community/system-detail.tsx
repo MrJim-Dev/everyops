@@ -2,37 +2,79 @@
 
 import { CheckIcon, CodeIcon, EyeIcon } from "@phosphor-icons/react";
 import Link from "next/link";
+import { SystemIcon } from "@/components/system-icon";
 import { Button } from "@/components/ui/button";
-import type { CatalogSystem } from "@/lib/catalog";
+import { CATEGORIES, type CatalogSystem } from "@/lib/catalog";
 import { BlueprintDialog } from "./blueprint-dialog";
+import { formatUses } from "./system-card";
 import { SystemThumbnail } from "./system-thumbnail";
 import { UseSystemButton } from "./use-system-dialog";
 
+/** Everything needed to decide on a system, laid out top to bottom in the side sheet. */
 export function SystemDetail({ system }: { system: CatalogSystem }) {
+  const facts = [
+    ["Used by", system.uses ? `${formatUses(system.uses)} businesses` : "New"],
+    ["Category", CATEGORIES.find((c) => c.id === system.category)?.label ?? "Other"],
+    ["Version", system.version],
+    ["License", system.license],
+  ];
   return (
-    <div className="flex flex-col gap-5">
-      <SystemThumbnail system={system} />
-      <div className="flex flex-col gap-1">
-        <h2 className="text-[17px] font-semibold tracking-tight">{system.name}</h2>
-        <p className="text-[12.5px] text-muted-foreground">
-          By {system.author} · {system.license} license · Version {system.version}
-        </p>
+    <div className="flex min-h-full flex-col">
+      <div className="relative overflow-hidden border-b bg-shell px-6 pt-14">
+        <div aria-hidden="true" className="bg-grid absolute inset-0" />
+        <SystemThumbnail system={system} className="relative translate-y-1.5 rounded-b-none border-b-0" />
       </div>
-      <p className="text-[13.5px] leading-relaxed">{system.summary}</p>
-      <section>
-        <h3 className="mb-2 text-[12px] font-medium text-muted-foreground">Included</h3>
-        <ul className="flex flex-col gap-1.5 text-[13px]">
-          {system.includes.map((item) => (
-            <li key={item} className="flex items-center gap-2">
-              <CheckIcon className="size-3.5 text-primary" />
-              {item}
-            </li>
+      <div className="flex flex-1 flex-col gap-7 p-6">
+        <div className="flex items-start gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
+            <SystemIcon name={system.icon} className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-[20px] font-semibold leading-tight tracking-[-0.02em]">{system.name}</h2>
+            <p className="mt-1 text-[13px] text-muted-foreground">By {system.author}</p>
+          </div>
+        </div>
+        <p className="text-[14px] leading-relaxed">{system.summary}</p>
+        <dl className="grid grid-cols-2 overflow-hidden rounded-xl border">
+          {facts.map(([label, value], i) => (
+            <div
+              key={label}
+              className={`flex flex-col gap-0.5 p-3.5 ${i % 2 ? "border-l" : ""} ${i > 1 ? "border-t" : ""}`}
+            >
+              <dt className="text-[12px] text-muted-foreground">{label}</dt>
+              <dd className="text-[13.5px] font-medium">{value}</dd>
+            </div>
           ))}
-        </ul>
-      </section>
-      <div className="flex flex-col gap-2">
-        <UseSystemButton systemId={system.id} />
-        <Button variant="outline" render={<Link href={`/preview/${system.id}`} />} nativeButton={false}>
+        </dl>
+        <section className="flex flex-col gap-2.5">
+          <h3 className="text-[13px] font-medium">What's included</h3>
+          <ul className="flex flex-col gap-2 text-[13.5px] text-muted-foreground">
+            {system.includes.map((item) => (
+              <li key={item} className="flex items-center gap-2.5">
+                <CheckIcon weight="bold" className="size-3.5 text-primary" />
+                {item}
+              </li>
+            ))}
+          </ul>
+        </section>
+        <BlueprintDialog
+          system={system}
+          trigger={
+            <Button variant="ghost" size="sm" className="-ml-2 self-start text-muted-foreground">
+              <CodeIcon data-icon="inline-start" />
+              View the blueprint
+            </Button>
+          }
+        />
+      </div>
+      <div className="sticky bottom-0 flex flex-col gap-2 border-t bg-popover/90 p-4 backdrop-blur-xl">
+        <UseSystemButton systemId={system.id} className="h-10 w-full" />
+        <Button
+          variant="outline"
+          className="h-10"
+          render={<Link href={`/preview/${system.id}`} />}
+          nativeButton={false}
+        >
           <EyeIcon data-icon="inline-start" />
           {system.authorId ? "Preview" : "Preview with sample data"}
         </Button>
@@ -40,15 +82,6 @@ export function SystemDetail({ system }: { system: CatalogSystem }) {
           Creates your own copy. Your business data stays private.
         </p>
       </div>
-      <BlueprintDialog
-        system={system}
-        trigger={
-          <Button variant="ghost" size="sm" className="self-start text-muted-foreground">
-            <CodeIcon data-icon="inline-start" />
-            View blueprint
-          </Button>
-        }
-      />
     </div>
   );
 }
