@@ -26,7 +26,6 @@ export function TableView({ view }: { view: TableViewConfig }) {
   const fresh = useFreshStore((s) => s.ids);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort[] | undefined>(view.sort);
-  useReportView({ viewId: view.id, search: query.trim() || undefined });
 
   const rows = useMemo(() => {
     const filtered = applyFilter(blueprint, entity, records, view.filter);
@@ -35,6 +34,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
     );
     return sortRecords(searched, sort);
   }, [blueprint, entity, records, view.filter, query, sort, fields]);
+  useReportView({ viewId: view.id, search: query.trim() || undefined });
 
   const toggleSort = (fieldId: string) =>
     setSort((s) =>
