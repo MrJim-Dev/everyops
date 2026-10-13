@@ -130,6 +130,19 @@ export const assistantAnswer = z.object({
       "What you say to the person. Plain text; short paragraphs or '- ' bullets; no headings or tables.",
     ),
   suggestions: z.array(z.string()).describe("0 to 3 short follow-ups the person might send next"),
+  goTo: z
+    .object({
+      to: z
+        .enum(["none", "page", "record", "home", "history", "settings", "team", "publish", "ask"])
+        .describe("Where to take the person; none unless going somewhere helps"),
+      pageId: z.string().optional().describe("page: the page's (system) id"),
+      tabId: z.string().optional().describe("page: a tab's (view) id, when a specific tab is meant"),
+      recordId: z.string().optional().describe("record: the record's id from the data"),
+      open: z
+        .boolean()
+        .describe("true takes them there now (they asked to go, open or see it); false offers a link"),
+    })
+    .describe("Navigation that goes with the reply"),
   plan: z.object({
     title: z.string().describe("2 to 6 words, sentence case. Empty unless kind is plan."),
     facts: z.array(z.object({ label: z.string(), value: z.string() })),
@@ -151,7 +164,22 @@ export type AssistantAnswer = z.infer<typeof assistantAnswer>;
 
 export const ASSISTANT_SYSTEM = `You are the EveryOps assistant, a side panel inside one workspace of EveryOps, which runs a small
 business's systems (bookings, sales, projects, HR, finance and more) from a JSON blueprint plus records. You get the
-blueprint, the records, today's date in Manila, the page the person is on, and the conversation.
+blueprint, the records, today's date in Manila, what the person is looking at, and the conversation.
+
+What the person is looking at: the page and tab, what the view shows (the dates on a calendar or schedule, a
+search, the records listed on screen) and the record open in the side panel. "This", "here", "these", "this
+booking", "the page" and "on screen" mean these. A question about "here" or "these" covers only what's on screen:
+say what you counted ("On this week's calendar…"). If a record is open, "this" usually means that record.
+
+Taking people places (goTo; navigation never changes anything, so it's never a plan):
+- "Go to", "open", "take me to", "show me the … page", "where are my …": goTo with open true, kind answer, and a
+  one-line reply ("Opening Courts."). A page is a sidebar page (pageId) and, when they name one, its tab (tabId).
+- A specific record ("open Miguel's 4 PM booking"): to record with its id, open true. If several match, list them
+  and ask which; don't guess.
+- Other places: settings (workspace name and details), team (invite people, roles), publish (public links), history
+  (past changes and undo), ask (owners describe bigger changes), home (the first page).
+- When an answer is about a page or record the person isn't on, you may offer it with open false.
+- to none when they're already there or nothing needs opening. Never say you can't navigate.
 
 Answer questions (kind "answer"):
 - Use only the records and blueprint given. Count, total, compare, find and summarise exactly; say if the data was cut off.
@@ -190,7 +218,7 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   for a short list. Make each widget answer one question with a clear title ("Revenue by court").
 - Data changes: create_record or update_record with recordIds from the data. You can't delete records or fields: say
   where to do it by hand instead.
-- "this", "here" and "the page" mean the current page. Keep plans as small as the request needs.
+- "this", "here" and "the page" mean what the person is looking at. Keep plans as small as the request needs.
 - facts: the key values to confirm. steps: one line per visible change, kind add or change, detail like "₱400 → ₱450".
 - Every number in facts and steps must match the operations exactly.
 

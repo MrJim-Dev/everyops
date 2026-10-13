@@ -2,6 +2,7 @@
 
 import {
   ArrowClockwiseIcon,
+  ArrowRightIcon,
   ArrowUpIcon,
   ArrowUUpLeftIcon,
   CheckIcon,
@@ -11,7 +12,7 @@ import {
   SparkleIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AttachmentTray, ComposerTools, MessageFiles } from "@/components/ai/composer-tools";
@@ -29,6 +30,8 @@ import {
 import { Kbd } from "@/components/ui/kbd";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { type AssistantTurn, useAssistant } from "@/lib/assistant/panel-store";
+import type { Navigation, Screen } from "@/lib/assistant/screen";
+import { useScreen } from "@/lib/assistant/screen-store";
 import type { ChangePlan } from "@/lib/engine/changes";
 import { markFresh } from "@/lib/motion/fresh";
 import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
@@ -55,32 +58,71 @@ function Rich({ text }: { text: string }) {
   );
 }
 
-/** Where the person is, in words, so "this" and "here" mean something to the assistant. */
-function usePageLabel() {
+/** Where the person is and what's on screen, so "this" and "here" mean something to the assistant. */
+function useCurrentScreen(): Screen {
   const ws = useWorkspace();
   const pathname = usePathname();
+  const recordId = useScreen((s) => s.recordId);
+  const view = useScreen((s) => s.view);
   return useMemo(() => {
-    const [systemId, viewId] = pathname.slice(ws.basePath.length).split("/").filter(Boolean);
-    if (!systemId) return "Workspace home";
-    if (["ask", "history", "settings"].includes(systemId))
-      return systemId[0].toUpperCase() + systemId.slice(1);
-    const system = ws.blueprint.systems.find((s) => s.id === systemId);
-    const view = ws.blueprint.views.find((v) => v.id === (viewId ?? system?.viewIds[0]));
-    return (
-      [system?.name, view && `${view.name} (${view.type} of ${view.entityId})`].filter(Boolean).join(" > ") ||
-      "Workspace"
-    );
-  }, [pathname, ws.basePath, ws.blueprint]);
+    const [first, second] = pathname.slice(ws.basePath.length).split("/").filter(Boolean);
+    let base: Screen;
+    if (!first) base = { area: "home" };
+    else if (first === "ask" || first === "history") base = { area: first };
+    else if (first === "settings")
+      base = {
+        area: "settings",
+        settingsTab: second === "team" || second === "publish" ? second : "general",
+      };
+    else {
+      const system = ws.blueprint.systems.find((s) => s.id === first);
+      const viewId = second ?? system?.viewIds[0];
+      base = { area: "page", systemId: first, ...(viewId ? { viewId } : {}) };
+    }
+    const shown = view && view.viewId === base.viewId ? view : undefined;
+    const open = recordId && ws.records.some((r) => r.id === recordId) ? recordId : shown?.selectedId;
+    return {
+      ...base,
+      ...(open ? { recordId: open } : {}),
+      ...(shown?.search ? { search: shown.search } : {}),
+      ...(shown?.from && shown.to ? { from: shown.from, to: shown.to } : {}),
+      ...(shown?.status ? { status: shown.status } : {}),
+    };
+  }, [pathname, ws.basePath, ws.blueprint, ws.records, recordId, view]);
 }
 
-/** Opening suggestions, built around the record type the workspace uses most. */
-function starters(names: string[], manager: boolean) {
+/** Opening suggestions, built around the page the person is on and the record type the workspace uses most. */
+function starters(names: string[], manager: boolean, onPage: boolean) {
   const first = names[0]?.toLowerCase() ?? "records";
   return [
-    "What needs my attention today?",
+    onPage ? "Summarize what's on this page" : "What needs my attention today?",
     `Give me a summary of my ${first}`,
     ...(manager ? [`Add a notes field to ${first}`, "I also want to manage my clients"] : []),
   ];
+}
+
+/** The first page a plan adds, so it can be opened once the plan is applied. */
+function newPageOf(plan: ChangePlan): Navigation | undefined {
+  for (const op of plan.ops) {
+    if (op.op === "add_system") return { path: `/${op.system.id}`, label: op.system.name, open: false };
+    if (op.op === "add_view")
+      return { path: `/${op.systemId}/${op.view.id}`, label: op.view.name, open: false };
+  }
+  return undefined;
+}
+
+/** A link under a reply: the page or record the assistant opened or suggests. */
+function GoToLink({ nav, onGo }: { nav: Navigation; onGo: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onGo}
+      className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[12.5px] text-muted-foreground outline-none transition-colors hover:border-foreground/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+    >
+      <ArrowRightIcon className="size-3.5 shrink-0" />
+      <span className="truncate">{nav.label}</span>
+    </button>
+  );
 }
 
 function PlanCard({
@@ -89,12 +131,14 @@ function PlanCard({
   onApply,
   onDismiss,
   onUndo,
+  onOpenPage,
 }: {
   plan: ChangePlan;
   state: AssistantTurn["planState"];
   onApply: () => void;
   onDismiss: () => void;
   onUndo: () => void;
+  onOpenPage?: () => void;
 }) {
   const created = plan.recordOps?.filter((o) => o.op === "create_record").length ?? 0;
   const updated = plan.recordOps?.filter((o) => o.op === "update_record").length ?? 0;
@@ -149,6 +193,12 @@ function PlanCard({
             <span className="flex flex-1 items-center gap-1.5 text-primary">
               <CheckIcon className="size-3.5" /> Applied
             </span>
+            {onOpenPage ? (
+              <Button size="sm" variant="ghost" onClick={onOpenPage}>
+                <ArrowRightIcon data-icon="inline-start" />
+                Open
+              </Button>
+            ) : null}
             <Button size="sm" variant="ghost" onClick={onUndo}>
               <ArrowUUpLeftIcon data-icon="inline-start" />
               Undo
@@ -183,7 +233,9 @@ function PlanCard({
  */
 export function AssistantPanel({ onClose, className }: { onClose: () => void; className?: string }) {
   const ws = useWorkspace();
-  const page = usePageLabel();
+  const screen = useCurrentScreen();
+  const router = useRouter();
+  const pathname = usePathname();
   const turns = useAssistant((s) => s.threads[ws.id] ?? EMPTY);
   const { push, patch, clear } = useAssistant.getState();
   const applyChange = useWorkspaces((s) => s.applyChange);
@@ -199,6 +251,14 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
   const textarea = useRef<HTMLTextAreaElement>(null);
   const manager = canManage(ws.role);
   const editor = canEdit(ws.role);
+
+  /** Opens a page (and a record on it). On phones the panel covers the page, so it closes to show it. */
+  const go = (nav: Navigation) => {
+    const href = `${ws.basePath}${nav.path}`;
+    if (href !== pathname) router.push(href);
+    useScreen.getState().openRecord(nav.recordId ?? null);
+    if (window.matchMedia("(max-width: 767px)").matches) onClose();
+  };
 
   const count = turns.length;
   useEffect(() => {
@@ -227,7 +287,13 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
       .slice(-12)
       .map((t) => ({
         role: t.role,
-        text: t.plan ? `${t.text}\n(Plan "${t.plan.title}" — ${t.planState ?? "pending"})` : t.text,
+        text: [
+          t.text,
+          t.plan && `(Plan "${t.plan.title}" — ${t.planState ?? "pending"})`,
+          t.navigate && `(${t.navigate.open ? "Opened" : "Linked to"} ${t.navigate.label})`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
         ...(t.attachments?.length ? { attachments: t.attachments } : {}),
       }));
     try {
@@ -236,20 +302,29 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
       const res = await fetch("/api/ai/assistant", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workspaceId: ws.id, page, messages }),
+        body: JSON.stringify({ workspaceId: ws.id, screen, messages }),
       });
       const body = (await res.json().catch(() => null)) as
-        | { ok: true; kind: string; reply: string; suggestions: string[]; plan?: ChangePlan }
+        | {
+            ok: true;
+            kind: string;
+            reply: string;
+            suggestions: string[];
+            plan?: ChangePlan;
+            navigate?: Navigation;
+          }
         | { ok: false; message: string }
         | null;
-      if (body?.ok)
+      if (body?.ok) {
         push(ws.id, {
           role: "assistant",
           text: body.reply,
           suggestions: body.suggestions,
           ...(body.plan ? { plan: body.plan, planState: "pending" as const } : {}),
+          ...(body.navigate ? { navigate: body.navigate } : {}),
         });
-      else
+        if (body.navigate?.open) go(body.navigate);
+      } else
         push(ws.id, {
           role: "assistant",
           text: body?.message ?? "Something went wrong. Try again.",
@@ -311,6 +386,7 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
               )
               .map((e) => e.pluralName),
             manager,
+            screen.area === "page",
           )
         : [];
 
@@ -363,6 +439,7 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
                 <p className={cn("whitespace-pre-line", t.error && "text-warning")}>
                   <Rich text={t.text} />
                 </p>
+                {t.navigate ? <GoToLink nav={t.navigate} onGo={() => go(t.navigate as Navigation)} /> : null}
                 {t.plan ? (
                   <PlanCard
                     plan={t.plan}
@@ -370,6 +447,10 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
                     onApply={() => apply(i, t.plan as ChangePlan)}
                     onDismiss={() => patch(ws.id, i, { planState: "dismissed" })}
                     onUndo={() => undo(i, t.changeId)}
+                    onOpenPage={(() => {
+                      const page = newPageOf(t.plan);
+                      return page ? () => go(page) : undefined;
+                    })()}
                   />
                 ) : null}
               </div>
