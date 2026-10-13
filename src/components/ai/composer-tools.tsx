@@ -3,9 +3,11 @@
 import {
   CircleNotchIcon,
   FileAudioIcon,
+  FileDocIcon,
   FilePdfIcon,
   FileTextIcon,
   FileVideoIcon,
+  FileXlsIcon,
   MicrophoneIcon,
   PaperclipIcon,
   StopIcon,
@@ -13,7 +15,12 @@ import {
 } from "@phosphor-icons/react";
 import { useRef } from "react";
 import { InputGroupButton } from "@/components/ui/input-group";
-import { ATTACHMENT_ACCEPT, type AttachmentKind, type AttachmentRef } from "@/lib/assistant/attachments";
+import {
+  ATTACHMENT_ACCEPT,
+  type AttachmentKind,
+  type AttachmentRef,
+  officeKind,
+} from "@/lib/assistant/attachments";
 import { cn } from "@/lib/utils";
 import type { Attachments } from "./use-attachments";
 import type { VoiceInput } from "./use-voice-input";
@@ -24,6 +31,12 @@ const KIND_ICONS: Record<Exclude<AttachmentKind, "image">, typeof FileTextIcon> 
   video: FileVideoIcon,
   text: FileTextIcon,
 };
+
+/** The icon for a non-image file; Excel and Word files are stored as text but keep their own icon. */
+function fileIcon(kind: Exclude<AttachmentKind, "image">, name: string) {
+  const office = officeKind(name);
+  return office === "sheet" ? FileXlsIcon : office === "doc" ? FileDocIcon : KIND_ICONS[kind];
+}
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
@@ -125,7 +138,14 @@ export function AttachmentTray({ attachments, className }: { attachments: Attach
   return (
     <ul className={cn("flex w-full flex-wrap gap-1.5", className)} aria-label="Attached files">
       {attachments.items.map((f) => {
-        const Icon = f.ref && f.ref.kind !== "image" ? KIND_ICONS[f.ref.kind] : FileTextIcon;
+        const Icon =
+          f.ref && f.ref.kind !== "image"
+            ? fileIcon(f.ref.kind, f.name)
+            : officeKind(f.name) === "sheet"
+              ? FileXlsIcon
+              : officeKind(f.name) === "doc"
+                ? FileDocIcon
+                : FileTextIcon;
         return (
           <li
             key={f.key}
@@ -185,7 +205,7 @@ export function MessageFiles({ files, className }: { files?: AttachmentRef[]; cl
               </a>
             </li>
           );
-        const Icon = KIND_ICONS[f.kind];
+        const Icon = fileIcon(f.kind as Exclude<AttachmentKind, "image">, f.name);
         return (
           <li
             key={f.id}

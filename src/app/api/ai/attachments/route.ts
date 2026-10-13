@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       {
         ok: false,
         message:
-          "Attach an image, PDF, audio clip, or a text, CSV or JSON file. Save Word or Excel files as PDF or CSV first.",
+          "Attach an image, PDF, audio clip, Excel or Word file, or a text, CSV or JSON file. Save older .xls or .doc files as .xlsx or .docx first.",
       },
       { status: 415 },
     );

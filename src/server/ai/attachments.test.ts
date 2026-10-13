@@ -27,7 +27,7 @@ describe("detectFile", () => {
     expect(
       detectFile(bytes("<svg xmlns='http://www.w3.org/2000/svg'/>"), "logo.svg", "image/svg+xml"),
     ).toBeNull();
-    expect(detectFile(bytes("PK", [3, 4, 0, 0]), "rates.xlsx", "")).toBeNull();
+    expect(detectFile(bytes([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), "roster.doc", "")).toBeNull();
     expect(detectFile(bytes("a,b", [0], "c"), "fake.csv", "text/csv")).toBeNull();
   });
 });

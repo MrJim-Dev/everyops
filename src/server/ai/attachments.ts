@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Part } from "@google/genai";
 import { Storage } from "@google-cloud/storage";
 import { ATTACHMENT_ID, type AttachmentKind, type AttachmentRef } from "@/lib/assistant/attachments";
+import { officeText } from "./office";
 
 const BUCKET = process.env.UPLOAD_BUCKET ?? "everyops-prod-uploads";
 /** Gemini takes inline files up to about 20 MB per request; stay under it with room for the prompt. */
@@ -15,7 +16,8 @@ const bucket = () => {
   return client.bucket(BUCKET);
 };
 
-export type FileType = { kind: AttachmentKind; mime: string; ext: string };
+/** `convert` marks Office files: they're stored as the text Gemini reads (CSV for Excel, plain text for Word). */
+export type FileType = { kind: AttachmentKind; mime: string; ext: string; convert?: "xlsx" | "docx" };
 
 const TEXT_TYPES: Record<string, string> = {
   txt: "text/plain",
@@ -27,7 +29,8 @@ const TEXT_TYPES: Record<string, string> = {
 
 /**
  * What a file really is, from its first bytes. The name and the browser's claimed type only decide between
- * look-alikes (audio or video in an MP4/WebM box, which text format). SVG, Office files and programs are refused.
+ * look-alikes (audio or video in an MP4/WebM box, which text format, which Office file in a zip). SVG, older
+ * Office formats (.xls, .doc) and programs are refused.
  */
 export function detectFile(bytes: Uint8Array, name: string, claimed: string): FileType | null {
   const at = (offset: number, ...sig: number[]) => sig.every((b, i) => bytes[offset + i] === b);
@@ -55,6 +58,14 @@ export function detectFile(bytes: Uint8Array, name: string, claimed: string): Fi
     return { kind: "video", mime: "video/mp4", ext: "mp4" };
   }
   const ext = /\.([a-z]+)$/i.exec(name)?.[1]?.toLowerCase() ?? "";
+  // .xlsx and .docx are zip archives; whether one really is a workbook or document is settled by converting it.
+  if (at(0, 0x50, 0x4b, 0x03, 0x04)) {
+    if (ext === "xlsx" || claimed.includes("spreadsheetml"))
+      return { kind: "text", mime: "text/csv", ext: "csv", convert: "xlsx" };
+    if (ext === "docx" || claimed.includes("wordprocessingml"))
+      return { kind: "text", mime: "text/plain", ext: "txt", convert: "docx" };
+    return null;
+  }
   const textExt = ext in TEXT_TYPES ? ext : claimed.startsWith("text/") ? "txt" : null;
   if (textExt && readText(bytes) !== null) return { kind: "text", mime: TEXT_TYPES[textExt], ext: textExt };
   return null;
@@ -91,16 +102,22 @@ export async function saveAttachment(
 ): Promise<AttachmentRef | null> {
   const type = detectFile(bytes, name, claimed);
   if (!type) return null;
+  let stored = bytes;
+  if (type.convert) {
+    const text = await officeText(bytes, type.convert);
+    if (!text) return null;
+    stored = new TextEncoder().encode(text);
+  }
   const id = `${randomUUID()}.${type.ext}`;
   const original = safeName(name);
   await bucket()
     .file(`${ownerFolder(userId)}/${id}`)
-    .save(Buffer.from(bytes), {
+    .save(Buffer.from(stored), {
       contentType: type.mime,
       resumable: false,
       metadata: { cacheControl: "private", metadata: { name: original, kind: type.kind } },
     });
-  return { id, name: original, mime: type.mime, kind: type.kind, size: bytes.byteLength };
+  return { id, name: original, mime: type.mime, kind: type.kind, size: stored.byteLength };
 }
 
 /** Reads one of the account's own attachments. Another account's files can't be named: the folder is the account. */
