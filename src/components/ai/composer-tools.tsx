@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import { InputGroupButton } from "@/components/ui/input-group";
 import {
   ATTACHMENT_ACCEPT,
+  ATTACHMENT_RETENTION_DAYS,
   type AttachmentKind,
   type AttachmentRef,
   officeKind,
@@ -195,7 +196,7 @@ export function ComposerTools({
           <InputGroupButton
             size="icon-sm"
             aria-label="Attach files"
-            title="Attach photos, PDFs or files"
+            title={`Attach photos, PDFs or files (kept for ${ATTACHMENT_RETENTION_DAYS} days)`}
             disabled={disabled}
             onClick={() => (onAttachClick ? onAttachClick() : input.current?.click())}
           >
@@ -265,44 +266,62 @@ export function AttachmentTray({ attachments, className }: { attachments: Attach
   );
 }
 
+/** A named chip for a file, dimmed with "expired" once the file has been deleted. */
+function FileChip({ name, Icon, expired }: { name: string; Icon: typeof FileTextIcon; expired?: boolean }) {
+  return (
+    <li
+      className={cn(
+        "flex h-8 max-w-[220px] items-center gap-1.5 rounded-md border bg-card px-2 text-[12px]",
+        expired && "text-muted-foreground",
+      )}
+      title={expired ? `Deleted ${ATTACHMENT_RETENTION_DAYS} days after upload` : name}
+    >
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 truncate">{name}</span>
+      {expired ? <span className="shrink-0">· expired</span> : null}
+    </li>
+  );
+}
+
+/** A photo's thumbnail; once the photo has expired it becomes a named chip instead of a broken image. */
+function ImageThumb({ file }: { file: AttachmentRef }) {
+  const [missing, setMissing] = useState(false);
+  const src = `/api/ai/attachments/${file.id}`;
+  if (missing) return <FileChip name={file.name} Icon={ImageIcon} expired />;
+  return (
+    <li>
+      <a
+        href={src}
+        target="_blank"
+        rel="noreferrer"
+        title={file.name}
+        className="block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      >
+        {/* biome-ignore lint/performance/noImgElement: the sender's own upload, served privately */}
+        <img
+          src={src}
+          alt={file.name}
+          onError={() => setMissing(true)}
+          className="h-20 w-auto max-w-40 rounded-lg border bg-muted object-cover"
+        />
+      </a>
+    </li>
+  );
+}
+
 /** The files on a sent message: image thumbnails (the sender's own files) and named chips for the rest. */
 export function MessageFiles({ files, className }: { files?: AttachmentRef[]; className?: string }) {
   if (!files?.length) return null;
   return (
     <ul className={cn("flex flex-wrap justify-end gap-1.5", className)}>
-      {files.map((f) => {
-        const src = `/api/ai/attachments/${f.id}`;
+      {files.map((f) =>
         // HEIC photos uploaded before photos were converted can't be shown by most browsers: list them by name.
-        if (f.kind === "image" && f.mime !== "image/heic")
-          return (
-            <li key={f.id}>
-              <a
-                href={src}
-                target="_blank"
-                rel="noreferrer"
-                title={f.name}
-                className="block outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded-lg"
-              >
-                {/* biome-ignore lint/performance/noImgElement: the sender's own upload, served privately */}
-                <img
-                  src={src}
-                  alt={f.name}
-                  className="h-20 w-auto max-w-40 rounded-lg border bg-muted object-cover"
-                />
-              </a>
-            </li>
-          );
-        const Icon = f.kind === "image" ? ImageIcon : fileIcon(f.kind, f.name);
-        return (
-          <li
-            key={f.id}
-            className="flex h-8 max-w-[220px] items-center gap-1.5 rounded-md border bg-card px-2 text-[12px]"
-          >
-            <Icon className="size-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 truncate">{f.name}</span>
-          </li>
-        );
-      })}
+        f.kind === "image" && f.mime !== "image/heic" ? (
+          <ImageThumb key={f.id} file={f} />
+        ) : (
+          <FileChip key={f.id} name={f.name} Icon={f.kind === "image" ? ImageIcon : fileIcon(f.kind, f.name)} />
+        ),
+      )}
     </ul>
   );
 }

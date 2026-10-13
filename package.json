@@ -15,6 +15,7 @@
     "db:seed": "tsx --conditions=react-server --env-file=.env.local scripts/db-seed.ts",
     "demo:snapshot": "tsx --conditions=react-server --env-file=.env.local scripts/demo-snapshot.ts",
     "db:proxy": "cloud-sql-proxy everyops-prod:asia-southeast1:everyops-db --port 5433",
+    "storage:lifecycle": "bash scripts/storage-lifecycle.sh",
     "deploy:run": "bash scripts/deploy.sh"
   },
   "dependencies": {

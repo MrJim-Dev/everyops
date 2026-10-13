@@ -22,6 +22,8 @@ export type AttachmentRef = z.infer<typeof attachmentRef>;
 /** Per file. Uploads go through Cloud Run, which takes requests up to 32 MB. */
 export const MAX_ATTACHMENT_BYTES = 30_000_000;
 export const MAX_ATTACHMENT_MB = 30;
+/** Attached files are deleted this long after upload (Cloud Storage lifecycle rule, infra/uploads-lifecycle.json). */
+export const ATTACHMENT_RETENTION_DAYS = 90;
 /** Files per message. */
 export const MAX_ATTACHMENTS = 5;
 /** What the file picker offers; the server checks the bytes again. */
