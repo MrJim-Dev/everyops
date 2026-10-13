@@ -1,6 +1,8 @@
 import { betterAuth } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 import { db } from "./db";
+import { resetPasswordEmail } from "./emails";
+import { sendMail } from "./mail";
 
 const google =
   process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
@@ -9,9 +11,16 @@ const google =
 
 export const googleEnabled = Boolean(google);
 
+/** Extra origins allowed to call the auth API, e.g. the run.app URL next to the custom domain. */
+const trustedOrigins = (process.env.BETTER_AUTH_TRUSTED_ORIGINS ?? "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 export const auth = betterAuth({
   appName: "EveryOps",
   baseURL: process.env.BETTER_AUTH_URL,
+  trustedOrigins,
   secret: process.env.BETTER_AUTH_SECRET,
   database: { db, type: "postgres" },
   emailAndPassword: {
@@ -21,9 +30,8 @@ export const auth = betterAuth({
     maxPasswordLength: 128,
     resetPasswordTokenExpiresIn: 30 * 60,
     revokeSessionsOnPasswordReset: true,
-    // Email isn't connected yet. The link goes to the server log so it can be used during development.
     sendResetPassword: async ({ user, url }) => {
-      console.info(`[auth] Password reset requested for ${user.email}: ${url}`);
+      await sendMail(resetPasswordEmail({ to: user.email, name: user.name, url }));
     },
   },
   socialProviders: google ? { google } : {},

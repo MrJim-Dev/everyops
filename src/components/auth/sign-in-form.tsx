@@ -20,7 +20,7 @@ export function SignInForm() {
   const params = useSearchParams();
   const next = params.get("next");
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(params.get("email") ?? "");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [failure, setFailure] = useState<{ message: string; attempt: number } | null>(null);

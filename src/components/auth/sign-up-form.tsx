@@ -20,7 +20,7 @@ export function SignUpForm() {
   const params = useSearchParams();
   const next = params.get("next");
   const router = useRouter();
-  const [values, setValues] = useState({ name: "", email: "", password: "" });
+  const [values, setValues] = useState({ name: "", email: params.get("email") ?? "", password: "" });
   const [errors, setErrors] = useState<FormErrors>({});
   const [pending, setPending] = useState(false);
   const set = (key: keyof typeof values) => (value: string) => {

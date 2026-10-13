@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 PROJECT="${GCP_PROJECT:-everyops-prod}"
 DB_PASSWORD="$(gcloud secrets versions access latest --secret=everyops-db-password --project="$PROJECT")"
 AUTH_SECRET="$(gcloud secrets versions access latest --secret=everyops-better-auth-secret --project="$PROJECT")"
-DB_PASSWORD="$DB_PASSWORD" AUTH_SECRET="$AUTH_SECRET" APP_URL="${BETTER_AUTH_URL:-http://localhost:3000}" python3 - <<'PY'
+SMTP_PASSWORD="$(gcloud secrets versions access latest --secret=everyops-smtp-password --project="$PROJECT")"
+DB_PASSWORD="$DB_PASSWORD" AUTH_SECRET="$AUTH_SECRET" SMTP_PASSWORD="$SMTP_PASSWORD" APP_URL="${BETTER_AUTH_URL:-http://localhost:3000}" python3 - <<'PY'
 import os, urllib.parse
 pw = urllib.parse.quote(os.environ["DB_PASSWORD"], safe="")
 lines = [
@@ -15,6 +16,11 @@ lines = [
     f"DATABASE_URL=postgres://everyops_runtime:{pw}@127.0.0.1:5433/everyops",
     f"BETTER_AUTH_SECRET={os.environ['AUTH_SECRET']}",
     f"BETTER_AUTH_URL={os.environ['APP_URL']}",
+    "SMTP_HOST=smtp.hostinger.com",
+    "SMTP_PORT=465",
+    "SMTP_USER=notify@everyops.app",
+    f"SMTP_PASSWORD={os.environ['SMTP_PASSWORD']}",
+    'MAIL_FROM="EveryOps <notify@everyops.app>"',
 ]
 with open(".env.local", "w") as f:
     f.write("\n".join(lines) + "\n")

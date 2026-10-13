@@ -2,7 +2,7 @@
 
 import { UsersThreeIcon } from "@phosphor-icons/react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { use, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AuthLink, AuthShell } from "@/components/auth/auth-shell";
@@ -23,12 +23,15 @@ type InviteInfo = {
 export function AcceptInvite({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const router = useRouter();
+  // Invite emails carry the invited address so sign-in and sign-up can fill it in.
+  const invitedEmail = useSearchParams().get("email");
   const ready = useAuthReady();
   const user = useCurrentUser();
   const [invite, setInvite] = useState<InviteInfo | null | undefined>(undefined);
   const [error, setError] = useState<string>();
   const [joining, setJoining] = useState(false);
   const next = encodeURIComponent(`/invite/${token}`);
+  const prefill = invitedEmail ? `&email=${encodeURIComponent(invitedEmail)}` : "";
 
   useEffect(() => {
     if (!ready || !user) return;
@@ -48,12 +51,16 @@ export function AcceptInvite({ params }: { params: Promise<{ token: string }> })
     return (
       <AuthShell
         title="You've been invited"
-        description="Sign in or create an account with the invited email to join."
+        description={
+          invitedEmail
+            ? `Sign in or create an account with ${invitedEmail} to join.`
+            : "Sign in or create an account with the invited email to join."
+        }
       >
         <div className="flex flex-col gap-3">
           <Button
             className="h-10 w-full"
-            render={<Link href={`/sign-up?next=${next}`} />}
+            render={<Link href={`/sign-up?next=${next}${prefill}`} />}
             nativeButton={false}
           >
             Create an account to join
@@ -61,7 +68,7 @@ export function AcceptInvite({ params }: { params: Promise<{ token: string }> })
           <Button
             variant="outline"
             className="h-10 w-full"
-            render={<Link href={`/sign-in?next=${next}`} />}
+            render={<Link href={`/sign-in?next=${next}${prefill}`} />}
             nativeButton={false}
           >
             I already have an account

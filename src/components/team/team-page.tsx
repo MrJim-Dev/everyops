@@ -78,7 +78,7 @@ export function TeamPage() {
     if (!created) return;
     setEmail("");
     setError(undefined);
-    void copy(inviteUrl(created.token), `Invite link for ${address} copied`);
+    void copy(inviteUrl(created.token), `Invite emailed to ${address}. Link copied too`);
   };
 
   const people = [

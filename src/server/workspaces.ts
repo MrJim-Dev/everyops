@@ -14,6 +14,8 @@ import {
   workspaceFrom,
 } from "@/lib/store/workspace-model";
 import { db } from "./db";
+import { inviteEmail } from "./emails";
+import { appUrl, sendMail } from "./mail";
 
 const ID = /^[a-z0-9][a-z0-9-]{1,79}$/;
 export const MAX_DOC_BYTES = 4_000_000;
@@ -175,6 +177,7 @@ export async function saveWorkspace(userId: string, ws: Workspace): Promise<Save
     return { ok: true };
   }
 
+  const newInvites: Invite[] = [];
   await db.transaction().execute(async (trx) => {
     await sql`update workspace set doc = ${JSON.stringify(doc)}::jsonb, updated_at = now() where id = ${ws.slug}`.execute(
       trx,
@@ -194,11 +197,37 @@ export async function saveWorkspace(userId: string, ws: Workspace): Promise<Save
     await sql`delete from workspace_invite where workspace_id = ${ws.slug} and not (token = any(${tokens}))`.execute(
       trx,
     );
-    for (const i of invites)
-      await sql`insert into workspace_invite (token, workspace_id, email, role, invited_by, invited_at)
+    for (const i of invites) {
+      // xmax = 0 only for a freshly inserted row, so each invite is emailed once, not on every save.
+      const { rows } = await sql<{
+        inserted: boolean;
+      }>`insert into workspace_invite (token, workspace_id, email, role, invited_by, invited_at)
         values (${i.token}, ${ws.slug}, ${i.email.toLowerCase()}, ${i.role}, ${i.invitedBy}, ${i.invitedAt})
-        on conflict (token) do update set role = excluded.role`.execute(trx);
+        on conflict (token) do update set role = excluded.role
+        returning (xmax = 0) as inserted`.execute(trx);
+      if (rows[0]?.inserted) newInvites.push(i);
+    }
   });
+  // After the commit, so an email never points at an invite that was rolled back. The sender's name
+  // comes from their account, not from the browser.
+  const sender = newInvites.length
+    ? (await sql<{ name: string }>`select name from "user" where id = ${userId}`.execute(db)).rows[0]?.name
+    : undefined;
+  await Promise.all(
+    newInvites.map((i) =>
+      sendMail(
+        inviteEmail({
+          to: i.email.toLowerCase(),
+          workspaceName: ws.name,
+          invitedBy: sender ?? i.invitedBy,
+          role: i.role,
+          url: appUrl(
+            `/invite/${encodeURIComponent(i.token)}?email=${encodeURIComponent(i.email.toLowerCase())}`,
+          ),
+        }),
+      ),
+    ),
+  );
   return { ok: true };
 }
 
