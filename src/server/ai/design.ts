@@ -274,8 +274,8 @@ export function tidy(bp: Blueprint): Blueprint {
   bp.systems = bp.systems
     .map((sys) => ({
       ...sys,
-      viewIds: sys.viewIds.filter((id) => viewIds.has(id)),
-      widgetIds: sys.widgetIds.filter((id) => widgetIds.has(id)),
+      viewIds: [...new Set(sys.viewIds.filter((id) => viewIds.has(id)))],
+      widgetIds: [...new Set(sys.widgetIds.filter((id) => widgetIds.has(id)))],
     }))
     .filter((sys) => sys.viewIds.length + sys.widgetIds.length > 0);
   bp.rules = bp.rules.filter((r) => entityIds.has(r.trigger.entityId));

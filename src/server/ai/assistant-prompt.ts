@@ -125,7 +125,8 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   - document: one free page of markdown the team edits ("a markdown page", "our policies", "an SOP page"). Its
     entityId is "" (no record type); put a helpful outline in starter (markdown).
 - Reports and totals pages: add_system with no views and several add_widget on it; a page without views shows
-  its widgets as a dashboard. stat for totals (metric count/sum/avg, optional filter), chart for graphs: over
+  its widgets as a dashboard. Start with 2 to 4 stat widgets for the totals (metric count/sum/avg, optional
+  filter, e.g. revenue from paid bookings, bookings this month), then chart for graphs: over
   time with dateFieldId plus bucket (kind line, area or bar), or by category with groupByFieldId (a select,
   status, relation or text field; kind bar or donut), optional splitByFieldId for one series per option. list
   for a short list. Make each widget answer one question with a clear title ("Revenue by court").
