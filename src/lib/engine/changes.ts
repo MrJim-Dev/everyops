@@ -33,7 +33,11 @@ export type ChangeOp =
   | { op: "move_view"; viewId: string; systemId: string }
   | { op: "rename_system"; systemId: string; name: string }
   | { op: "rename_view"; viewId: string; name: string }
-  /** Form and landing settings: who can see it, its intro, button and questions. */
+  /**
+   * View settings. Forms and landing pages: who can see them, the intro, the button. fieldIds sets which fields
+   * a view shows and in what order: a form's questions, a table's columns, a board's card fields or an approval
+   * queue's details.
+   */
   | {
       op: "update_view";
       viewId: string;
@@ -73,6 +77,26 @@ export type Impact = {
   frozenRecordIds: string[];
   errors: string[];
 };
+
+/** Which fields a view shows, in order. Unknown ids and repeats are dropped; an empty list leaves it as it was. */
+function setViewFields(view: View, entity: Entity | undefined, fieldIds: string[]) {
+  if (!entity) return;
+  const ids = [...new Set(fieldIds)].filter((id) => entity.fields.some((f) => f.id === id));
+  switch (view.type) {
+    case "table":
+      if (ids.length) view.fieldIds = ids;
+      break;
+    case "form":
+      view.fieldIds = ids;
+      break;
+    case "kanban":
+      view.cardFieldIds = ids.filter((id) => id !== view.statusFieldId);
+      break;
+    case "approval_queue":
+      view.detailFieldIds = ids;
+      break;
+  }
+}
 
 export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
   const next: Blueprint = structuredClone(bp);
@@ -143,8 +167,11 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       }
       case "update_view": {
         const view = next.views.find((v) => v.id === op.viewId);
-        if (view?.type === "form") Object.assign(view, op.patch);
-        else if (view?.type === "landing" && op.patch.public !== undefined) view.public = op.patch.public;
+        if (!view) break;
+        const { fieldIds, ...settings } = op.patch;
+        if (view.type === "form") Object.assign(view, settings);
+        else if (view.type === "landing" && settings.public !== undefined) view.public = settings.public;
+        if (fieldIds) setViewFields(view, findEntity(next, view.entityId), fieldIds);
         break;
       }
       case "add_block": {

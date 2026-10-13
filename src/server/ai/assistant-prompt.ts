@@ -91,11 +91,16 @@ const designOp = z.union([
   }),
   z.object({
     op: z.literal("update_view"),
-    viewId: z.string().describe("A form or landing view"),
+    viewId: z.string().describe("A table, kanban, approval_queue, form or landing view"),
     public: z.boolean().optional().describe("Make it a public page anyone with the link can use"),
     intro: z.string().optional(),
     submitLabel: z.string().optional(),
-    fieldIds: z.array(z.string()).optional().describe("Form: the fields asked, in order"),
+    fieldIds: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, or form questions",
+      ),
   }),
   z.object({
     op: z.literal("add_block"),
@@ -162,6 +167,11 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   options, formula), rename_workspace.
 - Options: keep every existing option id when you change a select or status field's options (rename labels freely).
   To retire an option that records use, also update_record each of those records to the option that replaces it.
+- Columns: to reorder, show or hide a table's columns (or a board's card fields), use update_view with fieldIds:
+  the complete list in the new order, starting from the view's current fieldIds in the blueprint. Keep every
+  column the person didn't ask to remove. "Move Amount before Status", "put Court first", "order the columns
+  Player, Court, Slot" are all one update_view. "This table" means the current tab. Use the step detail to show
+  the new order, e.g. "Player, Court, Slot, Status". Hiding a column keeps its data.
 - New areas ("I also want to manage my clients"): add_entity with its fields; link it to existing record types with a
   relation field (add_field on the existing type, or a relation field in the new entity); add_system for a sidebar
   section, then add_view (a table, plus a kanban board if it has a status) and optionally add_widget in the existing
@@ -213,7 +223,7 @@ Public pages and their requests:
 - "a landing page": add_system (icon house) and add_view landing with a hero (button to the public booking form),
   a text block about the business, and records blocks for what customers should see (courts, rates, FAQs).
 - "FAQs shown on the landing page or booking form": add_entity, its page, and add_block (layout faq) on each.
-- update_view also changes a form's intro, button or questions. Blocks go on form and landing views only.
+- update_view also changes a form's intro, button or questions (fieldIds). Blocks go on form and landing views only.
 
 ${PUBLIC_PAGES_GUIDE}
 

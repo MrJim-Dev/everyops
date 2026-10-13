@@ -3,6 +3,7 @@ import type { Blueprint } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { chartData } from "./aggregate";
+import { applyOps } from "./changes";
 
 const NOW = new Date("2026-10-13T09:30:00+08:00");
 
@@ -114,5 +115,39 @@ describe("time range ends in formulas", () => {
     );
     expect(evening?.data.evening_price).toBe(500);
     expect(morning?.data.evening_price).toBe(400);
+  });
+});
+
+describe("column order", () => {
+  const table = (bp: Blueprint, id: string) => {
+    const v = bp.views.find((x) => x.id === id);
+    if (v?.type !== "table") throw new Error(`${id} is not a table`);
+    return v;
+  };
+
+  it("reorders a table's columns and keeps the old version intact", () => {
+    const { blueprint } = courtBookingsSample(NOW);
+    const before = table(blueprint, "all_bookings").fieldIds;
+    const reversed = [...before].reverse();
+    const next = applyOps(blueprint, [
+      { op: "update_view", viewId: "all_bookings", patch: { fieldIds: reversed } },
+    ]);
+    expect(table(next, "all_bookings").fieldIds).toEqual(reversed);
+    expect(table(blueprint, "all_bookings").fieldIds).toEqual(before);
+    expect(validateBlueprint(next)).toEqual([]);
+  });
+
+  it("drops unknown and repeated fields, and never leaves a table without columns", () => {
+    const { blueprint } = courtBookingsSample(NOW);
+    const before = table(blueprint, "all_bookings").fieldIds;
+    const [a, b] = before;
+    const next = applyOps(blueprint, [
+      { op: "update_view", viewId: "all_bookings", patch: { fieldIds: [b, "nope", a, b] } },
+    ]);
+    expect(table(next, "all_bookings").fieldIds).toEqual([b, a]);
+    const empty = applyOps(blueprint, [
+      { op: "update_view", viewId: "all_bookings", patch: { fieldIds: ["nope"] } },
+    ]);
+    expect(table(empty, "all_bookings").fieldIds).toEqual(before);
   });
 });
