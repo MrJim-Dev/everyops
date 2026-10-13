@@ -1,11 +1,13 @@
 "use client";
 
 import { create } from "zustand";
+import type { AttachmentRef } from "@/lib/assistant/attachments";
 import type { ChangePlan } from "@/lib/engine/changes";
 
 export type AssistantTurn = {
   role: "user" | "assistant";
   text: string;
+  attachments?: AttachmentRef[];
   suggestions?: string[];
   plan?: ChangePlan;
   /** What happened to the plan: still waiting, applied (with its history entry), dismissed or undone. */

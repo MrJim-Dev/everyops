@@ -3,6 +3,8 @@
  * document (blueprint versions, records, change history, setup conversation); its owner, members
  * and invites live in their own tables so access can be checked in SQL.
  */
+
+import type { AttachmentRef } from "@/lib/assistant/attachments";
 import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { DEMO_WORKSPACES } from "@/lib/catalog/demo-workspaces";
 import type { ChangePlan, RecordChange } from "@/lib/engine/changes";
@@ -21,6 +23,8 @@ export type Invite = { token: string; email: string; role: MemberRole; invitedAt
 export type ChatTurn = {
   role: "user" | "assistant";
   text: string;
+  /** Files the owner sent with this message (stored under their account). */
+  attachments?: AttachmentRef[];
   suggestions?: string[];
   /** Set on the turn where Gemini decided to design, so an interrupted design can resume. */
   brief?: string;
@@ -75,7 +79,7 @@ export type Workspace = {
   /** Only sent to owners and admins. */
   invites?: Invite[];
   /** Set while Ask EveryOps is still setting the workspace up. */
-  setup?: { prompt: string; progress?: SetupProgress };
+  setup?: { prompt: string; attachments?: AttachmentRef[]; progress?: SetupProgress };
   /**
    * Server time when this copy was read. Saves keep records the server created after it (public bookings)
    * instead of treating them as deleted. Never stored in the document.

@@ -1,10 +1,16 @@
 import { z } from "zod";
+import { attachmentRef } from "@/lib/assistant/attachments";
 import { blueprintPreview } from "@/lib/assistant/preview";
 import { designWorkspace } from "@/server/ai/design";
 import { takeAiToken } from "@/server/ai/rate-limit";
 import { apiUser, sameOrigin } from "@/server/session-api";
 
-const body = z.object({ brief: z.string().min(20).max(8000), workspaceName: z.string().max(80).default("") });
+const body = z.object({
+  brief: z.string().min(20).max(8000),
+  workspaceName: z.string().max(80).default(""),
+  /** The files from the setup conversation, so real items and prices end up in the workspace. */
+  attachments: z.array(attachmentRef).max(12).default([]),
+});
 
 export async function POST(request: Request) {
   const { user, error } = await apiUser(request);
@@ -16,7 +22,10 @@ export async function POST(request: Request) {
   const limit = takeAiToken(user.id);
   if (!limit.ok)
     return Response.json({ ok: false, message: "Wait a few minutes and try again." }, { status: 429 });
-  const result = await designWorkspace(parsed.data.brief, parsed.data.workspaceName);
+  const result = await designWorkspace(parsed.data.brief, parsed.data.workspaceName, {
+    userId: user.id,
+    attachments: parsed.data.attachments,
+  });
   if (!result.ok) return Response.json(result, { status: 502 });
   return Response.json({
     ok: true,

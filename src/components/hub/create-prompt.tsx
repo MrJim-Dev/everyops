@@ -3,6 +3,10 @@
 import { ArrowUpIcon, SparkleIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { AttachmentTray, ComposerTools } from "@/components/ai/composer-tools";
+import { useAttachments } from "@/components/ai/use-attachments";
+import { useVoiceInput } from "@/components/ai/use-voice-input";
+import type { AttachmentRef } from "@/lib/assistant/attachments";
 import { useAuthReady, useCurrentUser } from "@/lib/auth/client";
 import type { WorkspaceData } from "@/lib/blueprint/types";
 import { useHydrated } from "@/lib/store/use-hydrated";
@@ -44,29 +48,38 @@ export function CreatePrompt() {
   const storeReady = useHydrated() && !!user && loadedOwner === user.id;
   const [prompt, setPrompt] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+  const files = useAttachments();
+  const voice = useVoiceInput((said) => {
+    setPrompt((v) => (v.trim() ? `${v.trimEnd()} ${said}` : said));
+    ref.current?.focus();
+  });
 
-  const create = (text: string) => {
+  const create = (text: string, attachments: AttachmentRef[] = []) => {
     const slug = createWorkspace({
       name: "New workspace",
       summary: "Setting up",
       data: EMPTY,
-      setup: { prompt: text },
+      setup: { prompt: text, ...(attachments.length ? { attachments } : {}) },
     });
     router.push(`/w/${slug}/ask`);
   };
 
+  /** Visitors sign in first, then come back here and the setup continues with this prompt. */
+  const signInFirst = () => {
+    try {
+      if (prompt.trim()) sessionStorage.setItem(PENDING_KEY, prompt.trim());
+    } catch {}
+    router.push(`/sign-in?next=${encodeURIComponent("/")}`);
+  };
+
   const start = () => {
-    const text = prompt.trim();
-    if (!text || !authReady) return;
+    const text = prompt.trim() || (files.refs.length ? "Set up my workspace from the attached files." : "");
+    if (!text || !authReady || files.uploading) return;
     if (!user) {
-      // Visitors sign in first, then come back here and the setup continues with this prompt.
-      try {
-        sessionStorage.setItem(PENDING_KEY, text);
-      } catch {}
-      router.push(`/sign-in?next=${encodeURIComponent("/")}`);
+      signInFirst();
       return;
     }
-    create(text);
+    create(text, files.refs);
   };
 
   // Back from sign-in: put the prompt back, and continue once the account's workspaces have loaded.
@@ -88,8 +101,11 @@ export function CreatePrompt() {
           e.preventDefault();
           start();
         }}
+        onDragOver={files.onDragOver}
+        onDrop={user ? files.onDrop : undefined}
       >
         <div className="rounded-2xl border border-foreground/10 bg-card/80 text-left shadow-[0_24px_70px_-36px_rgba(0,0,0,0.9)] backdrop-blur-md transition-[border-color,box-shadow] duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklab,var(--primary)_12%,transparent),0_24px_70px_-30px_color-mix(in_oklab,var(--primary)_40%,transparent)]">
+          <AttachmentTray attachments={files} className="px-3 pt-3" />
           <textarea
             ref={ref}
             id={PROMPT_ID}
@@ -97,6 +113,7 @@ export function CreatePrompt() {
             placeholder="I need a system to…"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            onPaste={user ? files.onPaste : undefined}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -106,10 +123,20 @@ export function CreatePrompt() {
             rows={3}
             className="block min-h-[104px] w-full resize-none bg-transparent px-4 pt-4 pb-2 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/80"
           />
-          <div className="flex items-center justify-between gap-3 px-3 pb-3 pl-4">
-            <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
-              <SparkleIcon weight="fill" className="size-3.5 shrink-0 text-primary" />
-              <span className="truncate">Ask EveryOps asks a few questions, then builds it</span>
+          <div className="flex items-center justify-between gap-3 px-3 pb-3 pl-2">
+            <span className="flex min-w-0 items-center gap-2">
+              <ComposerTools
+                attachments={files}
+                voice={voice}
+                onAttachClick={user ? undefined : signInFirst}
+                onVoiceClick={user ? undefined : signInFirst}
+              />
+              {voice.state === "idle" ? (
+                <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
+                  <SparkleIcon weight="fill" className="size-3.5 shrink-0 text-primary" />
+                  <span className="truncate">Ask EveryOps asks a few questions, then builds it</span>
+                </span>
+              ) : null}
             </span>
             <span className="flex shrink-0 items-center gap-3">
               <span className="hidden text-[11.5px] text-muted-foreground sm:inline">
@@ -119,7 +146,7 @@ export function CreatePrompt() {
               <button
                 type="submit"
                 aria-label="Build workspace"
-                disabled={!prompt.trim()}
+                disabled={(!prompt.trim() && !files.refs.length) || files.uploading}
                 className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-none transition-[background-color,color,transform] duration-150 hover:bg-glow focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-[0.97] disabled:bg-secondary disabled:text-muted-foreground"
               >
                 <ArrowUpIcon weight="bold" className="size-4" />

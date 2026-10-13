@@ -101,4 +101,6 @@ Rules:
 - Every number in facts and steps must match the operations exactly (same amounts, hours and percentages). Never round or restate them differently.
 - If the request is ambiguous in a way that changes the result, return status "clarify" with one question.
 - If it needs something these operations can't do (new screens, deleting data, integrations), return "unsupported" and say what you can do instead.
+- The owner may attach files (a new price list, a photo of a form, a CSV with extra columns). Use them to fill in the
+  change (new options, new rates, fields for columns they show); they can't add records here.
 - Write for a busy owner: short, plain, no jargon, no field ids in user-facing text.`;

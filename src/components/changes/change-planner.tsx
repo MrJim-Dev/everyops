@@ -3,6 +3,9 @@
 import { ArrowRightIcon, MinusIcon, PencilSimpleIcon, PlusIcon } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { AttachmentTray, ComposerTools } from "@/components/ai/composer-tools";
+import { useAttachments } from "@/components/ai/use-attachments";
+import { useVoiceInput } from "@/components/ai/use-voice-input";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,13 +34,21 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
   const [result, setResult] = useState<AiPlanResult | null>(null);
   const [pending, setPending] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const files = useAttachments();
+  const voice = useVoiceInput((said) => {
+    setRequest((v) => (v.trim() ? `${v.trimEnd()} ${said}` : said));
+    setResult(null);
+  });
 
   const review = async () => {
-    if (!request.trim() || pending) return;
+    const text =
+      request.trim() || (files.refs.length ? "Update the workspace to match the attached files." : "");
+    if (!text || pending || files.uploading) return;
     setPending(true);
-    const next = await requestPlan(ws.blueprint, request.trim());
+    const next = await requestPlan(ws.blueprint, text, files.refs);
     setPending(false);
     setResult(next);
+    if (next.ok) files.clear();
   };
   const plan = result?.ok ? result.plan : null;
 
@@ -115,7 +126,10 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
           e.preventDefault();
           void review();
         }}
+        onDragOver={files.onDragOver}
+        onDrop={files.onDrop}
       >
+        <AttachmentTray attachments={files} />
         <Textarea
           autoFocus={autoFocus}
           value={request}
@@ -124,6 +138,7 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
             setRequest(e.target.value);
             setResult(null);
           }}
+          onPaste={files.onPaste}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
@@ -155,11 +170,15 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
             </button>
           ))}
         </div>
-        <div className="flex items-center justify-end gap-3">
-          <span className="hidden text-[12px] text-muted-foreground sm:inline">
+        <div className="flex items-center gap-3">
+          <ComposerTools attachments={files} voice={voice} disabled={pending} />
+          <span className="ml-auto hidden text-[12px] text-muted-foreground sm:inline">
             <Kbd>⌘</Kbd> <Kbd>↵</Kbd> to review
           </span>
-          <Button type="submit" disabled={!request.trim() || pending}>
+          <Button
+            type="submit"
+            disabled={(!request.trim() && !files.refs.length) || pending || files.uploading}
+          >
             {pending ? "Planning with Gemini…" : "Review change"}
           </Button>
         </div>

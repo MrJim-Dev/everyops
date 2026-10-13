@@ -14,6 +14,9 @@ import {
 import { usePathname } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AttachmentTray, ComposerTools, MessageFiles } from "@/components/ai/composer-tools";
+import { useAttachments } from "@/components/ai/use-attachments";
+import { useVoiceInput } from "@/components/ai/use-voice-input";
 import { LogoMark } from "@/components/brand/logo";
 import { TypingIndicator } from "@/components/motion/typing-indicator";
 import { Button } from "@/components/ui/button";
@@ -187,6 +190,11 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
   const undoChange = useWorkspaces((s) => s.undoChange);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
+  const files = useAttachments();
+  const voice = useVoiceInput((said) => {
+    setInput((v) => (v.trim() ? `${v.trimEnd()} ${said}` : said));
+    textarea.current?.focus();
+  });
   const scroller = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const manager = canManage(ws.role);
@@ -201,12 +209,18 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
     textarea.current?.focus();
   }, []);
 
-  const send = async (text: string, history = turns) => {
+  const send = async (text: string, history = turns, withFiles = true) => {
     const clean = text.trim();
-    if (!clean || pending) return;
-    const userTurn: AssistantTurn = { role: "user", text: clean };
+    const sent = withFiles ? files.refs : [];
+    if ((!clean && !sent.length) || pending || (withFiles && files.uploading)) return;
+    const userTurn: AssistantTurn = {
+      role: "user",
+      text: clean,
+      ...(sent.length ? { attachments: sent } : {}),
+    };
     push(ws.id, userTurn);
     setInput("");
+    if (withFiles) files.clear();
     setPending(true);
     const messages = [...history, userTurn]
       .filter((t) => !t.error)
@@ -214,6 +228,7 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
       .map((t) => ({
         role: t.role,
         text: t.plan ? `${t.text}\n(Plan "${t.plan.title}" — ${t.planState ?? "pending"})` : t.text,
+        ...(t.attachments?.length ? { attachments: t.attachments } : {}),
       }));
     try {
       // Unsaved edits reach the server first, so the assistant sees what's on screen.
@@ -334,10 +349,13 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
           {turns.map((t, i) =>
             t.role === "user" ? (
               // biome-ignore lint/suspicious/noArrayIndexKey: turns only grow
-              <div key={i} data-role="user" className="flex justify-end">
-                <p className="max-w-[88%] rounded-2xl rounded-br-md bg-secondary px-3 py-2 text-[13.5px] leading-relaxed whitespace-pre-line">
-                  {t.text}
-                </p>
+              <div key={i} data-role="user" className="flex flex-col items-end gap-1.5">
+                <MessageFiles files={t.attachments} />
+                {t.text ? (
+                  <p className="max-w-[88%] rounded-2xl rounded-br-md bg-secondary px-3 py-2 text-[13.5px] leading-relaxed whitespace-pre-line">
+                    {t.text}
+                  </p>
+                ) : null}
               </div>
             ) : (
               // biome-ignore lint/suspicious/noArrayIndexKey: turns only grow
@@ -365,7 +383,7 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
               <button
                 key={s}
                 type="button"
-                onClick={() => void send(s)}
+                onClick={() => void send(s, turns, false)}
                 className="rounded-full border px-2.5 py-1 text-left text-[12px] text-muted-foreground outline-none transition-colors hover:border-foreground/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 {s}
@@ -381,8 +399,15 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
           e.preventDefault();
           void send(input);
         }}
+        onDragOver={files.onDragOver}
+        onDrop={files.onDrop}
       >
         <InputGroup className="h-auto">
+          {files.items.length ? (
+            <InputGroupAddon align="block-start" className="px-2.5 pt-2.5">
+              <AttachmentTray attachments={files} />
+            </InputGroupAddon>
+          ) : null}
           <InputGroupTextarea
             ref={textarea}
             aria-label="Message the assistant"
@@ -391,6 +416,7 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
             rows={2}
             className="max-h-36 min-h-14 px-3 py-2.5 text-[13.5px]"
             onChange={(e) => setInput(e.target.value)}
+            onPaste={files.onPaste}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -398,15 +424,20 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
               }
             }}
           />
-          <InputGroupAddon align="block-end" className="justify-between px-2.5 pb-2">
-            <span className="text-[11.5px] text-muted-foreground">
-              <Kbd>⌘</Kbd> <Kbd>J</Kbd> to close
+          <InputGroupAddon align="block-end" className="justify-between px-2 pb-2">
+            <span className="flex items-center gap-2">
+              <ComposerTools attachments={files} voice={voice} disabled={pending} />
+              {voice.state === "idle" ? (
+                <span className="hidden text-[11.5px] text-muted-foreground xl:inline">
+                  <Kbd>⌘</Kbd> <Kbd>J</Kbd> to close
+                </span>
+              ) : null}
             </span>
             <InputGroupButton
               type="submit"
               size="icon-sm"
               aria-label="Send"
-              disabled={!input.trim() || pending}
+              disabled={(!input.trim() && !files.refs.length) || pending || files.uploading}
             >
               <ArrowUpIcon />
             </InputGroupButton>

@@ -87,7 +87,11 @@ export function AskRoute() {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <PageHeader title="Ask EveryOps" description="Set up your workspace" className="border-b pb-3" />
-        <SetupInterview prompt={workspace.setup.prompt} progress={workspace.setup.progress} />
+        <SetupInterview
+          prompt={workspace.setup.prompt}
+          attachments={workspace.setup.attachments}
+          progress={workspace.setup.progress}
+        />
       </div>
     );
   }

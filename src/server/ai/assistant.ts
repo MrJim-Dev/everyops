@@ -1,4 +1,6 @@
 import "server-only";
+import type { Part } from "@google/genai";
+import { type AttachmentRef, attachmentNames, attachmentsIn } from "@/lib/assistant/attachments";
 import type {
   Block,
   Blueprint,
@@ -16,10 +18,11 @@ import { isPublic } from "@/lib/public/resolve";
 import { randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
 import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer } from "./assistant-prompt";
+import { attachmentParts } from "./attachments";
 import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
 import { generateJsonHedged } from "./gemini";
 
-export type AssistantMessage = { role: "user" | "assistant"; text: string };
+export type AssistantMessage = { role: "user" | "assistant"; text: string; attachments?: AttachmentRef[] };
 export type AssistantResult =
   | { ok: true; kind: "answer" | "plan" | "clarify"; reply: string; suggestions: string[]; plan?: ChangePlan }
   | { ok: false; message: string };
@@ -429,6 +432,8 @@ export async function assistantTurn(input: {
   page: string;
   canDesign: boolean;
   canEditRecords: boolean;
+  /** The signed-in person; attachments are read from their own files only. */
+  userId: string;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
   const permissions = input.canDesign
@@ -472,9 +477,17 @@ Records:
 ${recordContext(bp, records)}
 
 Conversation:
-${input.messages.map((m) => `${m.role === "user" ? "Person" : "You"}: ${m.text}`).join("\n\n")}`;
+${input.messages
+  .map((m) => {
+    const files = m.attachments?.length ? `\n[Attached: ${attachmentNames(m.attachments)}]` : "";
+    return `${m.role === "user" ? "Person" : "You"}: ${m.text || "(sent files)"}${files}`;
+  })
+  .join("\n\n")}`;
 
-  let prompt = context;
+  // Files the person attached follow the text on every attempt, including a repair.
+  const fileParts = await attachmentParts(input.userId, attachmentsIn(input.messages));
+  const withFiles = (text: string): string | Part[] => (fileParts.length ? [{ text }, ...fileParts] : text);
+  let prompt = withFiles(context);
   let repaired = false;
   for (let attempt = 0; attempt < 3; attempt++) {
     // Answers take 3–8 s and plans with pages 10–25 s. A stalled call gets a parallel twin after 28 s.
@@ -549,7 +562,9 @@ ${input.messages.map((m) => `${m.role === "user" ? "Person" : "You"}: ${m.text}`
       errors.push(
         'Every select and status field needs "options": [{ "id": "lead", "label": "Lead", "tone": "neutral" }, …] with the choices the person described, or sensible ones.',
       );
-    prompt = `${context}\n\nYour previous plan:\n${JSON.stringify(a.plan)}\n\nIt was rejected:\n- ${errors.length ? errors.slice(0, 15).join("\n- ") : "it had no operations"}\nReturn a corrected answer. The person never saw the rejected plan, so write the reply as your first answer: don't mention corrections or errors.`;
+    prompt = withFiles(
+      `${context}\n\nYour previous plan:\n${JSON.stringify(a.plan)}\n\nIt was rejected:\n- ${errors.length ? errors.slice(0, 15).join("\n- ") : "it had no operations"}\nReturn a corrected answer. The person never saw the rejected plan, so write the reply as your first answer: don't mention corrections or errors.`,
+    );
   }
   return {
     ok: false,

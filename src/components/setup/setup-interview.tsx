@@ -4,6 +4,9 @@ import { ArrowClockwiseIcon, ArrowUpIcon, SparkleIcon } from "@phosphor-icons/re
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AttachmentTray, ComposerTools, MessageFiles } from "@/components/ai/composer-tools";
+import { useAttachments } from "@/components/ai/use-attachments";
+import { useVoiceInput } from "@/components/ai/use-voice-input";
 import { TypingIndicator } from "@/components/motion/typing-indicator";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +16,7 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import {
   type ChatTurn,
   type ProfileLine,
@@ -59,19 +63,31 @@ type InterviewReply = {
  * then designs the workspace; nothing is created until the owner reviews it and presses Create.
  * The conversation is saved with the workspace, so it continues after a refresh or on another device.
  */
-export function SetupInterview({ prompt, progress }: { prompt: string; progress?: SetupProgress }) {
+export function SetupInterview({
+  prompt,
+  attachments: initialFiles,
+  progress,
+}: {
+  prompt: string;
+  attachments?: AttachmentRef[];
+  progress?: SetupProgress;
+}) {
   const ws = useWorkspace();
   const router = useRouter();
   const saveSetup = useWorkspaces((s) => s.saveSetup);
   const finishSetup = useWorkspaces((s) => s.finishSetup);
   const [messages, setMessages] = useState<ChatTurn[]>(() =>
-    progress?.messages?.length ? progress.messages : [{ role: "user", text: prompt }],
+    progress?.messages?.length
+      ? progress.messages
+      : [{ role: "user", text: prompt, ...(initialFiles?.length ? { attachments: initialFiles } : {}) }],
   );
   const [profile, setProfile] = useState<ProfileLine[]>(progress?.profile ?? []);
   const [draft, setDraft] = useState<SetupDraft | undefined>(progress?.draft);
   const [phase, setPhase] = useState<Phase>("idle");
   const [failure, setFailure] = useState<Failure | null>(null);
   const [input, setInput] = useState("");
+  const files = useAttachments();
+  const voice = useVoiceInput((said) => setInput((v) => (v.trim() ? `${v.trimEnd()} ${said}` : said)));
   const scroller = useRef<HTMLDivElement>(null);
   const busy = phase !== "idle";
 
@@ -89,7 +105,11 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
   const design = useCallback(async (history: ChatTurn[], brief: string, workspaceName: string) => {
     setPhase("designing");
     setFailure(null);
-    const result = await post<{ draft: SetupDraft }>("/api/ai/design", { brief, workspaceName });
+    const result = await post<{ draft: SetupDraft }>("/api/ai/design", {
+      brief,
+      workspaceName,
+      attachments: attachmentsIn(history).slice(-12),
+    });
     setPhase("idle");
     if (!result.ok)
       return setFailure({ message: result.message, retry: () => void design(history, brief, workspaceName) });
@@ -109,7 +129,7 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
       setPhase("thinking");
       setFailure(null);
       const result = await post<InterviewReply>("/api/ai/interview", {
-        messages: history.map(({ role, text }) => ({ role, text })),
+        messages: history.map(({ role, text, attachments }) => ({ role, text, attachments })),
       });
       if (!result.ok) {
         setPhase("idle");
@@ -141,12 +161,17 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
     else if (last?.brief && !draft) void design(messages, last.brief, last.workspaceName ?? "");
   }, [ask, design, messages, draft]);
 
-  const send = (text: string) => {
+  const send = (text: string, withFiles = true) => {
     const clean = text.trim();
-    if (!clean || busy) return;
-    const next: ChatTurn[] = [...messages, { role: "user", text: clean }];
+    const sent = withFiles ? files.refs : [];
+    if ((!clean && !sent.length) || busy || (withFiles && files.uploading)) return;
+    const next: ChatTurn[] = [
+      ...messages,
+      { role: "user", text: clean, ...(sent.length ? { attachments: sent } : {}) },
+    ];
     setMessages(next);
     setInput("");
+    if (withFiles) files.clear();
     void ask(next);
   };
 
@@ -168,7 +193,10 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
             {messages.map((m, i) =>
               m.role === "user" ? (
                 // biome-ignore lint/suspicious/noArrayIndexKey: messages only grow
-                <UserMessage key={i}>{m.text}</UserMessage>
+                <div key={i} className="flex flex-col gap-1.5">
+                  <MessageFiles files={m.attachments} />
+                  {m.text ? <UserMessage>{m.text}</UserMessage> : null}
+                </div>
               ) : (
                 // biome-ignore lint/suspicious/noArrayIndexKey: messages only grow
                 <AssistantMessage key={i}>
@@ -233,7 +261,7 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
                   <button
                     key={s}
                     type="button"
-                    onClick={() => send(s)}
+                    onClick={() => send(s, false)}
                     className="animate-rise rounded-full border px-3 py-1.5 text-[12.5px] text-muted-foreground outline-none transition-colors hover:border-foreground/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
                   >
                     {s}
@@ -251,8 +279,15 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
               e.preventDefault();
               send(input);
             }}
+            onDragOver={files.onDragOver}
+            onDrop={files.onDrop}
           >
             <InputGroup className="h-auto">
+              {files.items.length ? (
+                <InputGroupAddon align="block-start" className="px-2.5 pt-2.5">
+                  <AttachmentTray attachments={files} />
+                </InputGroupAddon>
+              ) : null}
               <InputGroupTextarea
                 aria-label="Message Ask EveryOps"
                 placeholder={draft ? "Ask for changes before you create it…" : "Reply to EveryOps…"}
@@ -260,6 +295,7 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
                 rows={1}
                 className="max-h-40 min-h-11 px-3.5 py-3 text-[14px]"
                 onChange={(e) => setInput(e.target.value)}
+                onPaste={files.onPaste}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -267,12 +303,13 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
                   }
                 }}
               />
-              <InputGroupAddon align="inline-end">
+              <InputGroupAddon align="block-end" className="justify-between px-2 pb-2">
+                <ComposerTools attachments={files} voice={voice} disabled={busy} />
                 <InputGroupButton
                   type="submit"
                   size="icon-sm"
                   aria-label="Send"
-                  disabled={!input.trim() || busy}
+                  disabled={(!input.trim() && !files.refs.length) || busy || files.uploading}
                 >
                   <ArrowUpIcon />
                 </InputGroupButton>

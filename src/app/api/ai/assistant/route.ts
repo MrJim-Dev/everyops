@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { attachmentRef } from "@/lib/assistant/attachments";
 import { blueprintOf, canEdit, canManage } from "@/lib/store/workspace-model";
 import { assistantTurn } from "@/server/ai/assistant";
 import { takeAiToken } from "@/server/ai/rate-limit";
@@ -9,9 +10,16 @@ const body = z.object({
   workspaceId: z.string().min(1),
   page: z.string().max(200).default("Workspace"),
   messages: z
-    .array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(4000) }))
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        text: z.string().max(4000),
+        attachments: z.array(attachmentRef).max(5).optional(),
+      }),
+    )
     .min(1)
-    .max(30),
+    .max(30)
+    .refine((m) => m.reduce((n, t) => n + (t.attachments?.length ?? 0), 0) <= 12, "Too many files"),
 });
 
 /** The workspace assistant. It reads the workspace from the database, so it sees what the person can see. */
@@ -36,6 +44,7 @@ export async function POST(request: Request) {
     page: parsed.data.page,
     canDesign: canManage(found.role),
     canEditRecords: canEdit(found.role),
+    userId: user.id,
   });
   return Response.json(result, { status: result.ok ? 200 : 502 });
 }

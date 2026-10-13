@@ -1,7 +1,9 @@
 import "server-only";
+import type { AttachmentRef } from "@/lib/assistant/attachments";
 import type { Blueprint, Field } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { applyOps, type ChangeOp, type ChangePlan } from "@/lib/engine/changes";
+import { attachmentParts } from "./attachments";
 import { generateJson } from "./gemini";
 import { type Answer, answer, SYSTEM } from "./plan-change-prompt";
 
@@ -94,9 +96,15 @@ function clip(text: string, max: number) {
   return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), max - 15)).replace(/[\s,.;:–-]+$/, "")}…`;
 }
 
-export async function planChangeWithGemini(bp: Blueprint, request: string): Promise<PlanChangeResult> {
+export async function planChangeWithGemini(
+  bp: Blueprint,
+  request: string,
+  files?: { userId: string; attachments: AttachmentRef[] },
+): Promise<PlanChangeResult> {
   const context = `Blueprint (JSON):\n${JSON.stringify(bp)}\n\nOwner's request: ${request}`;
-  let prompt = context;
+  const fileParts = files ? await attachmentParts(files.userId, files.attachments) : [];
+  const withFiles = (text: string) => (fileParts.length ? [{ text }, ...fileParts] : text);
+  let prompt = withFiles(context);
   let repaired = false;
   // Up to three calls: transient failures (timeouts, malformed JSON) are retried, invalid plans get one repair.
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -130,7 +138,9 @@ export async function planChangeWithGemini(bp: Blueprint, request: string): Prom
     console.warn(JSON.stringify({ event: "plan_rejected", attempt, errors }));
     if (repaired) break;
     repaired = true;
-    prompt = `${context}\n\nYour previous plan was rejected:\n- ${errors.length ? errors.join("\n- ") : "it had no operations"}\nReturn a corrected plan.`;
+    prompt = withFiles(
+      `${context}\n\nYour previous plan was rejected:\n- ${errors.length ? errors.join("\n- ") : "it had no operations"}\nReturn a corrected plan.`,
+    );
   }
   return { ok: false, kind: "error", message: "I couldn't make a valid plan for that. Try rephrasing it." };
 }

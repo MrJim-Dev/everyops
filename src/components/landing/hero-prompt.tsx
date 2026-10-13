@@ -3,6 +3,7 @@
 import { ArrowUpIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { ComposerTools } from "@/components/ai/composer-tools";
 import { PENDING_KEY, StarterChips } from "@/components/hub/starters";
 import { useCurrentUser } from "@/lib/auth/client";
 
@@ -65,6 +66,12 @@ export function HeroPrompt() {
     router.push(user ? "/" : "/sign-up?next=/");
   };
 
+  /** Files and voice need an account (they go to Gemini and storage), so keep what's typed and continue there. */
+  const continueWithAccount = () => {
+    if (value.trim()) sessionStorage.setItem(PENDING_KEY, value.trim());
+    router.push(user ? "/" : "/sign-up?next=/");
+  };
+
   return (
     <div className="flex w-full flex-col items-center gap-4">
       <form
@@ -92,6 +99,9 @@ export function HeroPrompt() {
             }}
             className="min-h-[52px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/80"
           />
+          <span className="flex h-10 shrink-0 items-center">
+            <ComposerTools onAttachClick={continueWithAccount} onVoiceClick={continueWithAccount} />
+          </span>
           <button
             type="submit"
             aria-label="Build it"

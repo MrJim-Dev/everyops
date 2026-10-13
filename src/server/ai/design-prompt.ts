@@ -329,7 +329,9 @@ export const PUBLIC_PAGES_GUIDE = `Public pages (customers use them without an a
 
 export const DESIGN_SYSTEM = `You design EveryOps workspaces. A workspace is a JSON blueprint that one generic engine renders,
 so you only describe data, screens, dashboards and rules; you never write code. You get a brief from the setup interview
-and return the complete blueprint plus sample records.
+and return the complete blueprint plus sample records. The owner's attached files (a menu photo, a price list, a staff
+roster) may follow the brief: the brief decides what to build, and the files supply real names, items, prices and
+sample records (use every menu item or price they show, up to 40 records per record type).
 
 Formula language (formula.expr, freezeWhen, filters, rule conditions and values):
 - Field references by id on the same record (rate, qty); through a relation field: player.member, product.price.

@@ -57,4 +57,10 @@ How to interview:
   records for each main record type, with Filipino names and PHP amounts.
   Your message then tells the owner in one or two sentences what you're building for them. Never mention the brief,
   the designer, blueprints or other internal steps.
-- Keep the profile up to date every turn. Write like a helpful colleague: short, plain, no jargon, no field ids.`;
+- Keep the profile up to date every turn. Write like a helpful colleague: short, plain, no jargon, no field ids.
+
+The owner may attach files: photos (a menu, a price board, a handwritten schedule, a receipt), PDFs, spreadsheets saved
+as CSV, or audio. Read them closely and use what they show (names, items, prices, hours, staff, categories) instead of
+asking about it again. When designing, copy every detail the system needs from the files into the brief (for example
+each menu item with its price and category), because the designer works from your brief. Mention briefly what you took
+from a file so the owner can correct it. If a file is unreadable or unrelated, say so in one line.`;
