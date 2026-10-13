@@ -20,6 +20,8 @@ export const attachmentRef = z.object({
 export type AttachmentRef = z.infer<typeof attachmentRef>;
 
 export const MAX_ATTACHMENT_BYTES = 10_000_000;
+/** Attached files are deleted this long after upload (Cloud Storage lifecycle rule, infra/uploads-lifecycle.json). */
+export const ATTACHMENT_RETENTION_DAYS = 90;
 /** Files per message. */
 export const MAX_ATTACHMENTS = 5;
 /** What the file picker offers; the server checks the bytes again. */
