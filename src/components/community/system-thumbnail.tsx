@@ -31,12 +31,12 @@ export function SystemThumbnail({ system, className }: { system: CatalogSystem; 
     >
       <div className="flex w-[22%] flex-col gap-1 border-r p-2">
         <div className="mb-1 h-1.5 w-3/4 rounded-full bg-foreground/25" />
-        {data.blueprint.systems.map((s, i) => (
+        {data.blueprint.systems.map((s) => (
           <div
             key={s.id}
             className={cn(
               "truncate rounded-[2px] px-1 py-0.5 text-muted-foreground",
-              i === 0 && "bg-secondary text-foreground",
+              s.id === first?.id && "bg-secondary text-foreground",
             )}
           >
             {s.name}

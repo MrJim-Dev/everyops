@@ -1,7 +1,8 @@
 "use client";
 
 import { CopyIcon } from "@phosphor-icons/react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { type ReactElement, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -16,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { useCurrentUser } from "@/lib/auth/store";
 import { getCatalogSystem } from "@/lib/catalog";
 import { useWorkspaces } from "@/lib/store/workspaces";
 
@@ -112,7 +114,21 @@ export function UseSystemDialog({
   );
 }
 
+/** Signed-out visitors are sent to create an account first, then come back to this system. */
 export function UseSystemButton({ systemId, className }: { systemId: string; className?: string }) {
+  const user = useCurrentUser();
+  const pathname = usePathname();
+  if (!user) {
+    return (
+      <Button
+        className={className ?? "w-full"}
+        render={<Link href={`/sign-up?next=${encodeURIComponent(pathname)}`} />}
+        nativeButton={false}
+      >
+        Use in my workspace
+      </Button>
+    );
+  }
   return (
     <UseSystemDialog
       systemId={systemId}

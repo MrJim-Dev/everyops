@@ -72,6 +72,8 @@
   --animate-swap: swap 240ms cubic-bezier(0.23, 1, 0.32, 1);
   /* "Live" indicator on the schedule's current-time dot. */
   --animate-live: live 2400ms cubic-bezier(0.23, 1, 0.32, 1) infinite;
+  /* A failed attempt (wrong password): a small, quick shake. */
+  --animate-shake: shake 320ms cubic-bezier(0.36, 0.07, 0.19, 0.97);
   /* Assistant typing dots. */
   --animate-typing: typing 1100ms ease-in-out infinite;
 
@@ -120,6 +122,16 @@
     70%,
     100% {
       box-shadow: 0 0 0 6px transparent;
+    }
+  }
+  @keyframes shake {
+    20%,
+    60% {
+      transform: translateX(-4px);
+    }
+    40%,
+    80% {
+      transform: translateX(4px);
     }
   }
   @keyframes typing {

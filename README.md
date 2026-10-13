@@ -53,3 +53,18 @@ blueprint (JSON) ──► engine (src/lib/engine) ──► views (src/componen
 - The interviewer guides booking businesses. Other business types are pointed to a matching community system.
 - The change planner understands pricing changes, adding a field, and renaming a workspace.
 - Community authors and usage counts are sample catalog data.
+
+## Accounts
+
+Workspaces need an account. Community systems and their previews stay public.
+
+| Page | What it does |
+|---|---|
+| `/sign-in` | Email and password, a "Fill in the demo account" shortcut, and a return to the page you were on (`?next=`) |
+| `/sign-up` | Name, email and password with a strength meter. Duplicate emails are rejected |
+| `/forgot-password` | Always shows the same confirmation. Email isn't connected yet, so the page shows the reset link directly |
+| `/reset-password` | Single-use link, valid for 30 minutes, with a confirmation field |
+
+Demo account: `james@hulma.app` / `hulma2026`.
+
+In this frontend build, accounts live in the browser (`src/lib/auth/store.ts`) with salted SHA-256 hashes. Pages only call `signIn`, `signUp`, `requestReset`, `resetPassword` and `signOut`, so Firebase Auth can replace that one file. Google sign-in arrives with Firebase.

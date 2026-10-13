@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { UserMenu } from "@/components/auth/user-menu";
 import { LogoMark } from "@/components/brand/logo";
 import { UseSystemButton } from "@/components/community/use-system-dialog";
 import { SystemIcon } from "@/components/system-icon";
@@ -15,7 +16,6 @@ import { Kbd } from "@/components/ui/kbd";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useCommandMenu } from "./command-menu";
 import { SidebarLink, SidebarSection } from "./sidebar-link";
-import { UserRow } from "./user-row";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
 export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -105,7 +105,7 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
           </div>
         ) : null}
         <div className="flex items-center justify-between gap-2">
-          <UserRow />
+          <UserMenu variant="sidebar" />
           <Link
             href="/"
             aria-label="Hulma home"

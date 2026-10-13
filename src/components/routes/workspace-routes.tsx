@@ -2,10 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { type ReactNode, use, useEffect } from "react";
+import { RequireAuth } from "@/components/auth/auth-guards";
 import { ChangePlanner } from "@/components/changes/change-planner";
 import { HistoryList } from "@/components/changes/history-list";
 import { SetupInterview } from "@/components/setup/setup-interview";
 import { PageHeader } from "@/components/shell/page-header";
+import { ShellSkeleton } from "@/components/shell/shell-skeleton";
 import { WorkspaceShell } from "@/components/shell/workspace-shell";
 import { SystemPage } from "@/components/system/system-page";
 import { LiveWorkspace } from "@/components/workspace/live-workspace";
@@ -24,9 +26,11 @@ export function LiveWorkspaceLayout({
 }) {
   const { workspace } = use(params);
   return (
-    <LiveWorkspace slug={workspace}>
-      <WorkspaceShell>{children}</WorkspaceShell>
-    </LiveWorkspace>
+    <RequireAuth fallback={<ShellSkeleton />}>
+      <LiveWorkspace slug={workspace}>
+        <WorkspaceShell>{children}</WorkspaceShell>
+      </LiveWorkspace>
+    </RequireAuth>
   );
 }
 

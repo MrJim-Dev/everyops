@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { UserMenu } from "@/components/auth/user-menu";
 import { Logo } from "@/components/brand/logo";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
@@ -38,12 +38,7 @@ export function TopNav() {
             );
           })}
         </nav>
-        <div className="flex items-center gap-2">
-          <Avatar className="size-7">
-            <AvatarFallback className="text-[10px]">JO</AvatarFallback>
-          </Avatar>
-          <span className="hidden text-[13px] sm:inline">James Ocampo</span>
-        </div>
+        <UserMenu variant="topbar" />
       </div>
     </header>
   );
