@@ -82,13 +82,14 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
     } catch {
       return { ok: false, error: "Gemini returned malformed JSON.", retryable: true };
     }
-    const parsed = schema.safeParse(json);
+    const parsed = schema.safeParse(withoutNulls(json));
     if (!parsed.success) {
       console.warn(
         JSON.stringify({
           event: "gemini_schema_mismatch",
           task: input.task,
           issues: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`),
+          sample: text.slice(0, 1500),
         }),
       );
       return {
@@ -108,4 +109,16 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       retryable: timedOut,
     };
   }
+}
+
+/** Gemini sometimes writes null for an optional field it means to leave out; drop those keys before validating. */
+function withoutNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutNulls);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, v]) => v !== null)
+        .map(([k, v]) => [k, withoutNulls(v)]),
+    );
+  return value;
 }

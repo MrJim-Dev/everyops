@@ -107,8 +107,8 @@ function toDesignOps(
   const defaultSystem = newSystems.length === 1 ? newSystems[0] : undefined;
   for (const [i, o] of raw.entries()) {
     const at = `ops[${i}] ${o.op}`;
-    const systemId = o.systemId ?? defaultSystem;
-    const newName = (o.name ?? "").trim();
+    const systemId = ("systemId" in o ? o.systemId : undefined) || defaultSystem;
+    const newName = "name" in o ? o.name.trim() : "";
     switch (o.op) {
       case "add_field":
         if (o.entityId && o.field)
@@ -173,6 +173,22 @@ function toDesignOps(
         ops.push({ op: "add_view_field", viewId: v.id, fieldId: op.field.id });
   }
   // New views get sensible defaults for anything Gemini left blank (columns, the date or status to use).
+  // Loose record type names ("bookings", "Booking") are pointed at the real id first.
+  const allEntities = [...bp.entities, ...ops.flatMap((x) => (x.op === "add_entity" ? [x.entity] : []))];
+  const norm = (x: string) =>
+    x
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .replace(/(es|s)$/, "");
+  const resolveEntity = (id: string) =>
+    allEntities.some((e) => e.id === id)
+      ? id
+      : (allEntities.find((e) => [e.id, e.name, e.pluralName].some((k) => norm(k) === norm(id)))?.id ?? id);
+  for (const op of ops) {
+    if (op.op === "add_widget") op.widget.entityId = resolveEntity(op.widget.entityId);
+    if (op.op === "add_view" && op.view.type !== "document")
+      op.view.entityId = resolveEntity(op.view.entityId);
+  }
   const entityFor = (id: string) => {
     const created = ops.flatMap((x) => (x.op === "add_entity" && x.entity.id === id ? [x.entity] : []))[0];
     return { entity: created ?? bp.entities.find((e) => e.id === id), isNew: !!created };

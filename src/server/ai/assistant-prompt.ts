@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { FUNCTIONS } from "@/lib/engine/expr";
-import { entity, field, option, rule, system, view, widget } from "./design-prompt";
+import { entity, field, option, rule, system, view } from "./design-prompt";
 
 const patch = z.object({
   name: z.string().optional(),
@@ -17,37 +17,76 @@ const patch = z.object({
     .optional(),
 });
 
-const designOp = z.object({
-  op: z.enum([
-    "add_field",
-    "update_field",
-    "add_view_field",
-    "rename_workspace",
-    "add_entity",
-    "add_view",
-    "add_widget",
-    "add_system",
-    "add_rule",
-    "move_view",
-  ]),
-  entityId: z.string().optional().describe("add_field, update_field: the record type"),
-  fieldId: z.string().optional().describe("update_field, add_view_field"),
-  viewId: z
-    .string()
-    .optional()
-    .describe("add_view_field: an existing or new table view; move_view: the view to move"),
-  systemId: z.string().optional().describe("add_view, add_widget, move_view: the page it goes on"),
-  name: z.string().optional().describe("rename_workspace: the new name"),
-  field: field.optional().describe("add_field"),
-  patch: patch.optional().describe("update_field; the type can't change"),
-  entity: entity.optional().describe("add_entity: a new record type"),
-  view: view.optional().describe("add_view"),
-  widget: widget.optional().describe("add_widget"),
-  system: system
-    .optional()
-    .describe("add_system: a new sidebar section; add its views and widgets with add_view/add_widget"),
-  rule: rule.optional().describe("add_rule"),
+// Widgets the same way: one shape per widget type, so a stat doesn't come back with an empty chart and list.
+const widgetBase = {
+  id: z.string(),
+  title: z.string(),
+  entityId: z.string(),
+  filter: z.string().optional().describe("Formula that keeps matching records, e.g. status == 'paid'"),
+};
+const metric = z.object({
+  op: z.enum(["count", "sum", "avg"]),
+  fieldId: z.string().optional().describe("sum and avg: a number or money field"),
 });
+const assistantWidget = z.union([
+  z.object({ ...widgetBase, type: z.literal("stat"), metric }),
+  z.object({
+    ...widgetBase,
+    type: z.literal("chart"),
+    metric,
+    chart: z.object({
+      kind: z.enum(["line", "area", "bar", "donut"]),
+      dateFieldId: z.string().optional().describe("Over time: the date field"),
+      bucket: z.enum(["day", "month"]).describe("Over time: days of this month or the last six months"),
+      groupByFieldId: z
+        .string()
+        .optional()
+        .describe("By category instead: a select, status, relation or text field"),
+    }),
+  }),
+  z.object({
+    ...widgetBase,
+    type: z.literal("list"),
+    metric,
+    list: z.object({ fieldIds: z.array(z.string()), limit: z.number() }),
+  }),
+  z.object({ ...widgetBase, type: z.literal("progress"), metric, target: z.number() }),
+]);
+
+// One small shape per operation. A single object with every part optional made Gemini fill all of them for every
+// operation (thousands of wasted tokens, and stray widgets on renames).
+const designOp = z.union([
+  z.object({ op: z.literal("add_field"), entityId: z.string(), field }),
+  z.object({
+    op: z.literal("update_field"),
+    entityId: z.string(),
+    fieldId: z.string(),
+    patch: patch.describe("The type can't change"),
+  }),
+  z.object({
+    op: z.literal("add_view_field"),
+    viewId: z.string().describe("An existing or new table view"),
+    fieldId: z.string(),
+  }),
+  z.object({ op: z.literal("rename_workspace"), name: z.string() }),
+  z.object({ op: z.literal("add_entity"), entity: entity.describe("A new record type") }),
+  z.object({
+    op: z.literal("add_system"),
+    system: system.describe("A new sidebar page; add its views and widgets with add_view/add_widget"),
+  }),
+  z.object({ op: z.literal("add_view"), systemId: z.string().describe("The page it goes on"), view }),
+  z.object({
+    op: z.literal("add_widget"),
+    systemId: z.string().describe("The page it goes on"),
+    widget: assistantWidget,
+  }),
+  z.object({ op: z.literal("add_rule"), rule }),
+  z.object({
+    op: z.literal("move_view"),
+    viewId: z.string().describe("The view (tab) to move"),
+    systemId: z.string().describe("The page it moves to"),
+  }),
+]);
 
 const recordOp = z.object({
   op: z.enum(["create_record", "update_record"]),
