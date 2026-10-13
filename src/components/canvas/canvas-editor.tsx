@@ -327,7 +327,7 @@ export function CanvasEditor({ viewId, name }: { viewId: string; name: string })
             <input
               ref={fileInput}
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
+              accept="image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif,.heic,.heif"
               className="sr-only"
               aria-label="Picture to add"
               onChange={(e) => void addImage(e.target.files?.[0])}
