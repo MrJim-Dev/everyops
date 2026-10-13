@@ -63,7 +63,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
         responseMimeType: "application/json",
         responseJsonSchema: responseSchema(schema),
         ...(input.thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel[input.thinking] } } : {}),
-        abortSignal: AbortSignal.timeout(input.timeoutMs ?? 25_000),
+        abortSignal: AbortSignal.timeout(input.timeoutMs ?? 20_000),
       },
     });
     const ms = Date.now() - started;
@@ -83,12 +83,20 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       return { ok: false, error: "Gemini returned malformed JSON.", retryable: true };
     }
     const parsed = schema.safeParse(json);
-    if (!parsed.success)
+    if (!parsed.success) {
+      console.warn(
+        JSON.stringify({
+          event: "gemini_schema_mismatch",
+          task: input.task,
+          issues: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`),
+        }),
+      );
       return {
         ok: false,
         error: `Gemini's answer didn't match the schema: ${parsed.error.message}`,
         retryable: true,
       };
+    }
     return { ok: true, data: parsed.data, model: GEMINI_MODEL, ms, tokens };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

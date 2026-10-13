@@ -89,10 +89,12 @@ function toOps(bp: Blueprint, raw: NonNullable<Answer["ops"]>): { ops: ChangeOp[
 export async function planChangeWithGemini(bp: Blueprint, request: string): Promise<PlanChangeResult> {
   const context = `Blueprint (JSON):\n${JSON.stringify(bp)}\n\nOwner's request: ${request}`;
   let prompt = context;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let repaired = false;
+  // Up to three calls: transient failures (timeouts, malformed JSON) are retried, invalid plans get one repair.
+  for (let attempt = 0; attempt < 3; attempt++) {
     const result = await generateJson(answer, { system: SYSTEM, prompt, task: "plan-change" });
     if (!result.ok) {
-      if (result.retryable && attempt === 0) continue;
+      if (result.retryable && attempt < 2) continue;
       return { ok: false, kind: "error", message: result.error };
     }
     const a = result.data;
@@ -116,6 +118,8 @@ export async function planChangeWithGemini(bp: Blueprint, request: string): Prom
         },
       };
     console.warn(JSON.stringify({ event: "plan_rejected", attempt, errors }));
+    if (repaired) break;
+    repaired = true;
     prompt = `${context}\n\nYour previous plan was rejected:\n- ${errors.length ? errors.join("\n- ") : "it had no operations"}\nReturn a corrected plan.`;
   }
   return { ok: false, kind: "error", message: "I couldn't make a valid plan for that. Try rephrasing it." };
