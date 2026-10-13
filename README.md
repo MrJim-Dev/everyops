@@ -80,11 +80,13 @@ In this frontend build, accounts live in the browser (`src/lib/auth/store.ts`) w
 
 ## Team and Community publishing
 
+Both are tabs in workspace Settings, next to General. Publish only shows for owners and admins.
+
 | Page | What it does |
 |---|---|
-| `/w/[workspace]/team` | Invite by email with a role, copy or revoke invite links, change roles, remove people, or leave a shared workspace |
+| `/w/[workspace]/settings/team` | Invite by email with a role, copy or revoke invite links, change roles, remove people, or leave a shared workspace |
 | `/invite/[token]` | Shows who invited you and the role, then joins after you sign in or create an account |
-| `/w/[workspace]/publish` | Publish the workspace design to Community, publish new versions, or unpublish. Records, team and history stay private |
+| `/w/[workspace]/settings/publish` | Publish the workspace design to Community, publish new versions, or unpublish. Records, team and history stay private |
 
 | Role | Can do |
 |---|---|
