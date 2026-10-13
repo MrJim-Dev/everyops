@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   const type = detectFile(bytes, "", file.type.startsWith("audio/") ? file.type : "audio/webm");
   if (!type || (type.kind !== "audio" && type.kind !== "video"))
     return Response.json({ ok: false, message: "That recording format isn't supported." }, { status: 415 });
-  if (!takeAiToken(`voice:${user.id}`).ok)
+  if (!(await takeAiToken(`voice:${user.id}`)).ok)
     return Response.json(
       { ok: false, message: "That's a lot of voice messages. Wait a few minutes and try again." },
       { status: 429 },

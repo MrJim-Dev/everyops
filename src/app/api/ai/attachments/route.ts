@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       { ok: false, message: `That file is over ${MAX_ATTACHMENT_MB} MB.` },
       { status: 413 },
     );
-  if (!takeAiToken(`upload:${user.id}`, 60).ok)
+  if (!(await takeAiToken(`upload:${user.id}`, 60)).ok)
     return Response.json(
       { ok: false, message: "That's a lot of files. Wait a few minutes." },
       { status: 429 },
