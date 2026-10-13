@@ -1,0 +1,11 @@
+.git
+.next
+node_modules
+.env*
+!.env.example
+.superpowers
+docs
+coverage
+*.tsbuildinfo
+npm-debug.log*
+.DS_Store

@@ -13,7 +13,8 @@
     "env:pull": "bash scripts/pull-env.sh",
     "db:migrate": "tsx --env-file=.env.local scripts/db-migrate.ts",
     "db:seed": "tsx --env-file=.env.local scripts/db-seed.ts",
-    "db:proxy": "cloud-sql-proxy everyops-prod:asia-southeast1:everyops-db --port 5433"
+    "db:proxy": "cloud-sql-proxy everyops-prod:asia-southeast1:everyops-db --port 5433",
+    "deploy": "bash scripts/deploy.sh"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

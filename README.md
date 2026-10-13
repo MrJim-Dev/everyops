@@ -21,7 +21,13 @@ pnpm build
 
 The first visit seeds four demo workspaces: Court House PH, Tita Nena's Canteen, Kapé Ilaya and Sunrise Bakeshop.
 
-## Database and auth
+## Deployment
+
+**Live:** https://everyops-web-223724593768.asia-southeast1.run.app
+
+EveryOps runs on Cloud Run as the service `everyops-web` (project `everyops-prod`, `asia-southeast1`). `pnpm deploy` builds the `Dockerfile` (Next.js standalone, Node 22) with Cloud Build and deploys it as `everyops-run`, attached to Cloud SQL, with `DATABASE_URL` and `BETTER_AUTH_SECRET` from Secret Manager and `BETTER_AUTH_URL` set to the service URL. It scales to zero by default; run `MIN_INSTANCES=1 pnpm deploy` to keep one warm instance during judging. Password reset links appear in Cloud Run logs until email is connected.
+
+## Database and auth details
 
 The database is `everyops` on the Cloud SQL instance `everyops-db` (PostgreSQL 17, project `everyops-prod`, `asia-southeast1`), reached as `everyops_runtime`, which owns the database. Connections are encrypted end to end: Cloud Run uses its built-in Cloud SQL socket and local development uses the Cloud SQL Auth Proxy, so no IP addresses are allowlisted. Credentials live in Google Secret Manager: `everyops-db-password`, `everyops-database-url` (the Cloud Run socket URL), `everyops-better-auth-secret` and `everyops-db-postgres-password` (admin, for operators only). See `.env.example` for every variable.
 

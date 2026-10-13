@@ -57,5 +57,9 @@ Use pnpm only. `pnpm build` matters: `cacheComponents` errors (below) only show 
 
 ## Git
 
+Deploy with `pnpm deploy` (Cloud Run service `everyops-web`, scripts/deploy.sh). Live URL: https://everyops-web-223724593768.asia-southeast1.run.app. After a deploy, verify the live URL (sign-in, protected redirects) and check `gcloud logging read` for errors; a successful build is not proof.
+
+## Git workflow
+
 - Repo `MrJim-Dev/ai-builder-cup-2026`. Work on `dev` (this checkout, `everyops-build`); `main` is the sibling worktree `../everyops` and is fast-forwarded to `dev` when releasing.
 - Conventional commit messages (`feat(auth): …`, `fix(engine): …`). Never commit `.env.local` or secrets.
