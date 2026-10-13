@@ -30,7 +30,7 @@ const formula = z.object({
 });
 
 /** A flat operation shape is easier for the model to follow than a union; it is checked below. */
-const op = z.object({
+const flatOp = z.object({
   op: z.enum(["add_field", "update_field", "add_view_field", "rename_workspace"]),
   entityId: z.string().optional(),
   fieldId: z.string().optional().describe("Existing field id (update_field, add_view_field)"),
@@ -61,6 +61,16 @@ const op = z.object({
     .describe("What to change on an existing field (update_field). The type cannot change."),
 });
 
+// Column order gets its own shape with everything required: as an optional part of the flat shape, Gemini
+// left fieldIds out every time.
+const setViewFields = z.object({
+  op: z.literal("set_view_fields"),
+  viewId: z.string().describe("Existing table view id"),
+  fieldIds: z.array(z.string()).describe("Every column the table keeps, in the new order"),
+});
+
+const op = z.union([flatOp, setViewFields]);
+
 export const answer = z.object({
   status: z.enum(["plan", "clarify", "unsupported"]),
   message: z.string().optional().describe("For clarify/unsupported: one short sentence to the owner"),
@@ -84,6 +94,9 @@ Operations you may use (nothing else):
 - add_field: add "field" to entity "entityId". Choose a new snake_case id. Then add it to that entity's table views with add_view_field.
 - update_field: change an existing field ("entityId", "fieldId") with "patch": name, description, required, options, or formula. Never change its type.
 - add_view_field: show field "fieldId" in table view "viewId".
+- set_view_fields: set table view "viewId"'s columns to "fieldIds", in that order. Use it to reorder, show or hide
+  columns ("move Amount before Status", "put Court first"). Start from the view's current fieldIds and keep every
+  column the owner didn't ask to remove; the step detail shows the new order.
 - rename_workspace: set the workspace name to "name".
 You can never delete fields, records or views.
 

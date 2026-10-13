@@ -18,7 +18,8 @@ function toOps(bp: Blueprint, raw: NonNullable<Answer["ops"]>): { ops: ChangeOp[
   const added = new Map<string, Set<string>>();
   for (const [i, o] of raw.entries()) {
     const at = `ops[${i}] (${o.op})`;
-    const entity = o.entityId ? bp.entities.find((e) => e.id === o.entityId) : undefined;
+    const entityId = "entityId" in o ? o.entityId : undefined;
+    const entity = entityId ? bp.entities.find((e) => e.id === entityId) : undefined;
     switch (o.op) {
       case "add_field": {
         if (!entity || !o.field) {
@@ -65,6 +66,24 @@ function toOps(bp: Blueprint, raw: NonNullable<Answer["ops"]>): { ops: ChangeOp[
           continue;
         }
         ops.push({ op: "add_view_field", viewId: view.id, fieldId: o.fieldId });
+        continue;
+      }
+      case "set_view_fields": {
+        const view = bp.views.find((v) => v.id === o.viewId);
+        if (!view || view.type !== "table" || !o.fieldIds?.length) {
+          errors.push(`${at}: needs an existing table viewId and fieldIds`);
+          continue;
+        }
+        const own = bp.entities.find((e) => e.id === view.entityId)?.fields.map((f) => f.id) ?? [];
+        const known = new Set([...own, ...(added.get(view.entityId) ?? [])]);
+        const unknown = o.fieldIds.filter((id) => !known.has(id));
+        if (unknown.length) {
+          errors.push(
+            `${at}: ${unknown.join(", ")} aren't fields of that table (fields: ${[...known].join(", ")})`,
+          );
+          continue;
+        }
+        ops.push({ op: "update_view", viewId: view.id, patch: { fieldIds: o.fieldIds } });
         continue;
       }
       case "rename_workspace": {

@@ -167,6 +167,25 @@ function toDesignOps(
         else errors.push(`${at}: needs viewId and systemId`);
         break;
       case "update_view": {
+        const view = bp.views.find((v) => v.id === o.viewId);
+        const entity = view && bp.entities.find((e) => e.id === view.entityId);
+        const unknown = entity
+          ? (o.fieldIds ?? []).filter((id) => !entity.fields.some((f) => f.id === id))
+          : [];
+        if (unknown.length && entity) {
+          errors.push(
+            `${at}: ${unknown.join(", ")} aren't fields of ${entity.id} (fields: ${entity.fields.map((f) => f.id).join(", ")})`,
+          );
+          break;
+        }
+        if (
+          view &&
+          o.fieldIds?.length &&
+          !["table", "kanban", "approval_queue", "form"].includes(view.type)
+        ) {
+          errors.push(`${at}: a ${view.type} view has no columns to order`);
+          break;
+        }
         const patch = {
           ...(o.public !== undefined ? { public: o.public } : {}),
           ...(o.intro ? { intro: o.intro } : {}),
