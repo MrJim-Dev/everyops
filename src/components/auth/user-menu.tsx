@@ -49,7 +49,12 @@ export function UserMenu({ variant }: { variant: "topbar" | "sidebar" }) {
         <Button variant="ghost" size="sm" render={<Link href="/sign-in" />} nativeButton={false}>
           Sign in
         </Button>
-        <Button size="sm" render={<Link href="/sign-up" />} nativeButton={false}>
+        <Button
+          size="sm"
+          className="hidden sm:inline-flex"
+          render={<Link href="/sign-up" />}
+          nativeButton={false}
+        >
           Create account
         </Button>
       </div>

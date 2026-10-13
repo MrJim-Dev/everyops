@@ -1,21 +1,13 @@
 "use client";
 
-import { ArrowUpIcon } from "@phosphor-icons/react";
+import { ArrowUpIcon, SparkleIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupTextarea,
-} from "@/components/ui/input-group";
+import { useEffect, useRef, useState } from "react";
 import { useAuthReady, useCurrentUser } from "@/lib/auth/client";
 import type { WorkspaceData } from "@/lib/blueprint/types";
 import { useHydrated } from "@/lib/store/use-hydrated";
 import { useWorkspaces } from "@/lib/store/workspaces";
-
-/** A visitor's prompt, kept across the sign-in round trip so it can continue afterwards. */
-const PENDING_KEY = "everyops.pending-prompt";
+import { PENDING_KEY, StarterChips } from "./starters";
 
 function readPending(): string | null {
   try {
@@ -25,13 +17,8 @@ function readPending(): string | null {
   }
 }
 
-const STARTERS = [
-  { label: "Booking", prompt: "I run a pickleball venue in Cebu with 4 courts and need a booking system." },
-  { label: "Sales tracker", prompt: "I need to track my bakery's sales, expenses and monthly budget." },
-  { label: "Social media", prompt: "I need to plan our café's Instagram and Facebook posts." },
-  { label: "HRIS", prompt: "I need to manage employee leave requests and balances." },
-  { label: "POS", prompt: "I need a POS for our school canteen with stock tracking." },
-];
+/** The dashboard prompt's textarea; other parts of the page focus it to start a workspace. */
+export const PROMPT_ID = "create-prompt";
 
 const EMPTY: WorkspaceData = {
   blueprint: {
@@ -56,6 +43,7 @@ export function CreatePrompt() {
   const loadedOwner = useWorkspaces((s) => s.owner);
   const storeReady = useHydrated() && !!user && loadedOwner === user.id;
   const [prompt, setPrompt] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
 
   const create = (text: string) => {
     const slug = createWorkspace({
@@ -93,16 +81,18 @@ export function CreatePrompt() {
   }, [user, storeReady]);
 
   return (
-    <div className="flex w-full flex-col items-center gap-4">
+    <div className="flex w-full flex-col items-center gap-5">
       <form
-        className="w-full max-w-[680px]"
+        className="w-full max-w-[720px]"
         onSubmit={(e) => {
           e.preventDefault();
           start();
         }}
       >
-        <InputGroup className="h-auto rounded-xl bg-card has-[textarea:focus-visible]:border-foreground/25">
-          <InputGroupTextarea
+        <div className="rounded-2xl border border-foreground/10 bg-card/80 text-left shadow-[0_24px_70px_-36px_rgba(0,0,0,0.9)] backdrop-blur-md transition-[border-color,box-shadow] duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklab,var(--primary)_12%,transparent),0_24px_70px_-30px_color-mix(in_oklab,var(--primary)_40%,transparent)]">
+          <textarea
+            ref={ref}
+            id={PROMPT_ID}
             aria-label="Describe what your business needs"
             placeholder="I need a system to…"
             value={prompt}
@@ -114,36 +104,36 @@ export function CreatePrompt() {
               }
             }}
             rows={3}
-            className="min-h-[96px] px-4 py-3.5 text-[15px]"
+            className="block min-h-[104px] w-full resize-none bg-transparent px-4 pt-4 pb-2 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/80"
           />
-          <InputGroupAddon align="block-end" className="justify-between px-3 pb-3">
-            <span className="text-[12px] text-muted-foreground">
-              EveryOps asks a few questions, then builds it in your workspace.
+          <div className="flex items-center justify-between gap-3 px-3 pb-3 pl-4">
+            <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
+              <SparkleIcon weight="fill" className="size-3.5 shrink-0 text-primary" />
+              <span className="truncate">Ask EveryOps asks a few questions, then builds it</span>
             </span>
-            <InputGroupButton
-              type="submit"
-              size="icon-sm"
-              variant="default"
-              aria-label="Start"
-              disabled={!prompt.trim()}
-            >
-              <ArrowUpIcon />
-            </InputGroupButton>
-          </InputGroupAddon>
-        </InputGroup>
+            <span className="flex shrink-0 items-center gap-3">
+              <span className="hidden text-[11.5px] text-muted-foreground sm:inline">
+                <kbd className="rounded border bg-background px-1 py-px font-sans text-[11px]">Enter</kbd> to
+                send
+              </span>
+              <button
+                type="submit"
+                aria-label="Build workspace"
+                disabled={!prompt.trim()}
+                className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-none transition-[background-color,color,transform] duration-150 hover:bg-glow focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-[0.97] disabled:bg-secondary disabled:text-muted-foreground"
+              >
+                <ArrowUpIcon weight="bold" className="size-4" />
+              </button>
+            </span>
+          </div>
+        </div>
       </form>
-      <div className="flex flex-wrap justify-center gap-2">
-        {STARTERS.map((s) => (
-          <button
-            key={s.label}
-            type="button"
-            onClick={() => setPrompt(s.prompt)}
-            className="rounded-full border px-3 py-1 text-[12.5px] text-muted-foreground outline-none transition-[color,border-color,transform] duration-150 hover:border-foreground/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.97]"
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
+      <StarterChips
+        onPick={(text) => {
+          setPrompt(text);
+          ref.current?.focus();
+        }}
+      />
     </div>
   );
 }

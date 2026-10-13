@@ -14,8 +14,8 @@ const LINKS = [
 export function TopNav() {
   const pathname = usePathname();
   return (
-    <header className="sticky top-0 z-30 border-b bg-shell/90 backdrop-blur-sm">
-      <div className="mx-auto flex h-14 max-w-[1200px] items-center gap-6 px-5">
+    <header className="sticky top-0 z-30 border-b bg-shell/75 backdrop-blur-xl">
+      <div className="mx-auto flex h-14 max-w-[1200px] items-center gap-3 px-5 sm:gap-6">
         <Link href="/" className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
           <Logo />
         </Link>
@@ -28,8 +28,11 @@ export function TopNav() {
                 href={link.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "rounded-md px-3 py-1.5 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
-                  active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+                  "relative rounded-md px-3 py-1.5 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
+                  "after:absolute after:inset-x-3 after:-bottom-[13px] after:h-px after:bg-primary after:opacity-0 after:transition-opacity after:duration-200",
+                  active
+                    ? "text-foreground after:opacity-100"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 <span className="sm:hidden">{link.short}</span>
