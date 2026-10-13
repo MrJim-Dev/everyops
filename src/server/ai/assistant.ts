@@ -43,8 +43,12 @@ type RawPlan = AssistantAnswer["plan"];
 function toDesignOps(bp: Blueprint, raw: RawPlan["ops"]): { ops: ChangeOp[]; errors: string[] } {
   const ops: ChangeOp[] = [];
   const errors: string[] = [];
+  // A plan that adds one new section usually means its new views and widgets go there.
+  const newSystems = raw.flatMap((o) => (o.op === "add_system" && o.system ? [o.system.id] : []));
+  const defaultSystem = newSystems.length === 1 ? newSystems[0] : undefined;
   for (const [i, o] of raw.entries()) {
     const at = `ops[${i}] ${o.op}`;
+    const systemId = o.systemId ?? defaultSystem;
     switch (o.op) {
       case "add_field":
         if (o.entityId && o.field)
@@ -69,12 +73,11 @@ function toDesignOps(bp: Blueprint, raw: RawPlan["ops"]): { ops: ChangeOp[]; err
         else errors.push(`${at}: needs entity`);
         break;
       case "add_view":
-        if (o.view && o.systemId) ops.push({ op: "add_view", systemId: o.systemId, view: toView(o.view) });
+        if (o.view && systemId) ops.push({ op: "add_view", systemId, view: toView(o.view) });
         else errors.push(`${at}: needs view and systemId`);
         break;
       case "add_widget":
-        if (o.widget && o.systemId)
-          ops.push({ op: "add_widget", systemId: o.systemId, widget: o.widget as Widget });
+        if (o.widget && systemId) ops.push({ op: "add_widget", systemId, widget: o.widget as Widget });
         else errors.push(`${at}: needs widget and systemId`);
         break;
       case "add_system":
@@ -108,7 +111,23 @@ function toDesignOps(bp: Blueprint, raw: RawPlan["ops"]): { ops: ChangeOp[]; err
     created.entity.fields[i] = { ...created.entity.fields[i], ...op.patch } as Field;
     return false;
   });
-  ops.splice(0, ops.length, ...folded);
+  // Things are created before anything that refers to them, whatever order Gemini listed them in.
+  const ORDER: ChangeOp["op"][] = [
+    "rename_workspace",
+    "add_entity",
+    "add_field",
+    "update_field",
+    "add_system",
+    "add_view",
+    "add_view_field",
+    "add_widget",
+    "add_rule",
+  ];
+  const rank = (op: ChangeOp) => {
+    const i = ORDER.indexOf(op.op);
+    return i < 0 ? ORDER.length : i;
+  };
+  ops.splice(0, ops.length, ...folded.sort((a, b) => rank(a) - rank(b)));
   // Existing ids can't be redefined, and every new view or widget must land in a section.
   for (const op of ops) {
     if (op.op === "add_entity" && bp.entities.some((e) => e.id === op.entity.id))
@@ -281,10 +300,21 @@ ${input.messages.map((m) => `${m.role === "user" ? "Person" : "You"}: ${m.text}`
         },
       };
     }
-    console.warn(JSON.stringify({ event: "assistant_plan_rejected", attempt, errors: errors.slice(0, 12) }));
+    console.warn(
+      JSON.stringify({
+        event: "assistant_plan_rejected",
+        attempt,
+        errors: errors.slice(0, 12),
+        ops: JSON.stringify(a.plan.ops).slice(0, 3000),
+      }),
+    );
     if (repaired) break;
     repaired = true;
-    prompt = `${context}\n\nYour previous plan:\n${JSON.stringify(a.plan)}\n\nIt was rejected:\n- ${errors.length ? errors.slice(0, 15).join("\n- ") : "it had no operations"}\nReturn a corrected answer.`;
+    if (errors.some((e) => e.endsWith("needs options")))
+      errors.push(
+        'Every select and status field needs "options": [{ "id": "lead", "label": "Lead", "tone": "neutral" }, …] with the choices the person described, or sensible ones.',
+      );
+    prompt = `${context}\n\nYour previous plan:\n${JSON.stringify(a.plan)}\n\nIt was rejected:\n- ${errors.length ? errors.slice(0, 15).join("\n- ") : "it had no operations"}\nReturn a corrected answer. The person never saw the rejected plan, so write the reply as your first answer: don't mention corrections or errors.`;
   }
   return {
     ok: false,
