@@ -42,6 +42,7 @@
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
   --color-shell: var(--shell);
+  --color-glow: var(--glow);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -179,46 +180,48 @@
 }
 
 /*
- * EveryOps is dark only. One accent (muted teal), warm neutrals, no pure black.
+ * EveryOps is dark only. See docs/system-color-design.md.
+ * One accent (Lagoon teal) on neutrals tinted toward it, so grays and accent read as one family.
  * Light tokens are intentionally absent until a light theme is designed.
  */
 :root {
   color-scheme: dark;
-  --shell: #0e0e10;
-  --background: #141416;
-  --foreground: #ececee;
-  --card: #18181b;
-  --card-foreground: #ececee;
-  --popover: #1a1a1d;
-  --popover-foreground: #ececee;
-  --primary: #3fa796;
-  --primary-foreground: #06110e;
-  --secondary: #1f1f23;
-  --secondary-foreground: #ececee;
-  --muted: #1c1c1f;
-  --muted-foreground: #a0a0a8;
-  --accent: #222226;
-  --accent-foreground: #ececee;
-  --destructive: #e5675a;
-  --warning: #d9a441;
-  --success: #3fa796;
-  --border: #29292d;
-  --input: #2e2e33;
-  --ring: #3fa796;
-  --chart-1: #3fa796;
-  --chart-2: #7c7c86;
-  --chart-3: #d9a441;
-  --chart-4: #5b8fb9;
-  --chart-5: #4a4a52;
+  --shell: #0a0c0d;
+  --background: #0f1213;
+  --foreground: #e8edec;
+  --card: #131718;
+  --card-foreground: #e8edec;
+  --popover: #171c1d;
+  --popover-foreground: #e8edec;
+  --primary: #34c3a6;
+  --primary-foreground: #03130f;
+  --glow: #5be0c2;
+  --secondary: #1a2021;
+  --secondary-foreground: #e8edec;
+  --muted: #161b1c;
+  --muted-foreground: #95a19f;
+  --accent: #1e2526;
+  --accent-foreground: #e8edec;
+  --destructive: #eb6f5f;
+  --warning: #e3a64b;
+  --success: #34c3a6;
+  --border: #232a2b;
+  --input: #2a3233;
+  --ring: #34c3a6;
+  --chart-1: #34c3a6;
+  --chart-2: #7f8b89;
+  --chart-3: #e3a64b;
+  --chart-4: #6b9bd1;
+  --chart-5: #4a5452;
   --radius: 0.5rem;
-  --sidebar: #0e0e10;
-  --sidebar-foreground: #c9c9cf;
-  --sidebar-primary: #3fa796;
-  --sidebar-primary-foreground: #06110e;
-  --sidebar-accent: #1c1c1f;
-  --sidebar-accent-foreground: #ececee;
-  --sidebar-border: #232326;
-  --sidebar-ring: #3fa796;
+  --sidebar: #0a0c0d;
+  --sidebar-foreground: #c5cecc;
+  --sidebar-primary: #34c3a6;
+  --sidebar-primary-foreground: #03130f;
+  --sidebar-accent: #161b1c;
+  --sidebar-accent-foreground: #e8edec;
+  --sidebar-border: #1e2425;
+  --sidebar-ring: #34c3a6;
 }
 
 @layer base {
@@ -240,6 +243,222 @@
 @layer utilities {
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+/*
+ * Marketing motion (landing page only; never on screens people work in all day).
+ * Reveals fire once as a section enters. Parallax and the hero tilt are scroll-driven
+ * animations: they run on the compositor and are skipped when unsupported or reduced.
+ */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 700ms var(--ease-out-strong),
+    transform 700ms var(--ease-out-strong);
+  transition-delay: calc(min(var(--i, 0), 6) * 80ms);
+}
+.reveal[data-visible] {
+  opacity: 1;
+  transform: none;
+}
+@media (scripting: none) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    transform: none;
+  }
+}
+
+/* Faint drafting grid that fades out from the top center. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--foreground) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--foreground) 5%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 25%, transparent 75%);
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* --depth: positive drifts up faster than the page, negative lags behind it. */
+    .parallax {
+      animation: parallax-y linear both;
+      animation-timeline: view();
+      animation-range: cover;
+    }
+    /* The hero product window lies back, then stands up as the page scrolls. */
+    .stage-tilt {
+      transform-origin: 50% 0%;
+      animation: stage-tilt linear both;
+      animation-timeline: scroll(root);
+      animation-range: 0 60vh;
+    }
+  }
+}
+@keyframes parallax-y {
+  from {
+    translate: 0 calc(var(--depth, 0.2) * 110px);
+  }
+  to {
+    translate: 0 calc(var(--depth, 0.2) * -110px);
+  }
+}
+@keyframes stage-tilt {
+  from {
+    transform: perspective(1600px) rotateX(14deg) scale(0.94);
+  }
+  to {
+    transform: perspective(1600px) rotateX(0deg) scale(1);
+  }
+}
+
+/*
+ * Landing parallax, part two. Everything is scroll-linked and runs on the compositor.
+ * Without support (or with reduced motion) these fall back to a static page:
+ * the gallery becomes a swipeable row and the statement shows at full strength.
+ */
+.scroll-progress {
+  display: none;
+}
+.gallery-progress {
+  display: none;
+}
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* Nav hairline that fills with reading progress. */
+    .scroll-progress {
+      display: block;
+      transform-origin: 0 50%;
+      animation: progress-x linear both;
+      animation-timeline: scroll(root);
+    }
+
+    /* Hero copy steps back as the product window comes forward. */
+    .hero-recede {
+      animation: hero-recede linear both;
+      animation-timeline: scroll(root);
+      animation-range: 0 55vh;
+    }
+    /* Grid and glow move at a fraction of the page speed. */
+    .hero-backdrop {
+      animation: backdrop-lag linear both;
+      animation-timeline: scroll(root);
+      animation-range: 0 100vh;
+    }
+
+    /* Statement: each word brightens in reading order. --p is the word's position (0 to 1). */
+    .scrub-words {
+      view-timeline: --words block;
+    }
+    .scrub-word {
+      opacity: 0.16;
+      animation: word-on linear both;
+      animation-timeline: --words;
+      animation-range: cover calc(18% + var(--p) * 36%) cover calc(22% + var(--p) * 36%);
+    }
+
+    /* Footer wordmark rises out of the floor as the footer arrives. */
+    .footer-mark {
+      animation: mark-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 100%;
+    }
+
+    /* Gallery: the section pins while its track slides sideways. */
+    @media (min-width: 768px) {
+      .gallery {
+        height: 340vh;
+        view-timeline: --gallery block;
+      }
+      .gallery-stage {
+        position: sticky;
+        top: 0;
+        height: 100dvh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .gallery-track {
+        width: max-content;
+        overflow: visible;
+        scroll-snap-type: none;
+        animation: gallery-x linear both;
+        animation-timeline: --gallery;
+        animation-range: contain 4% contain 96%;
+      }
+      .gallery-progress {
+        display: block;
+        transform-origin: 0 50%;
+        animation: progress-x linear both;
+        animation-timeline: --gallery;
+        animation-range: contain 4% contain 96%;
+      }
+    }
+  }
+}
+@keyframes progress-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes hero-recede {
+  to {
+    opacity: 0;
+    transform: translateY(-48px) scale(0.97);
+  }
+}
+@keyframes backdrop-lag {
+  to {
+    transform: translateY(180px);
+  }
+}
+@keyframes word-on {
+  from {
+    opacity: 0.16;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes mark-rise {
+  from {
+    transform: translateY(40%);
+    opacity: 0;
+  }
+}
+@keyframes gallery-x {
+  to {
+    transform: translateX(calc(-100% + 100vw));
+  }
+}
+/* Pointer spotlight on catalog cards. Fine pointers only; the card sets --x and --y. */
+.spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    320px circle at var(--x, 50%) var(--y, 50%),
+    color-mix(in oklab, var(--primary) 10%, transparent),
+    transparent 65%
+  );
+  transition: opacity 200ms ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .spotlight:hover::before {
+    opacity: 1;
   }
 }
 
