@@ -2,7 +2,12 @@
 
 import { type ClipboardEvent, type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { type AttachmentRef, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS } from "@/lib/assistant/attachments";
+import {
+  type AttachmentRef,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_MB,
+  MAX_ATTACHMENTS,
+} from "@/lib/assistant/attachments";
 import { isHeic, MAX_SOURCE_BYTES, prepareImage } from "@/lib/prepare-image";
 
 export type PendingFile = {
@@ -62,7 +67,7 @@ export function useAttachments() {
       // Photos are shrunk before upload, so a large one is fine; other files must already fit.
       const photo = file.type.startsWith("image/") || isHeic(file);
       if (file.size > (photo ? MAX_SOURCE_BYTES : MAX_ATTACHMENT_BYTES)) {
-        toast.warning(`"${file.name}" is over ${photo ? 40 : 10} MB.`);
+        toast.warning(`"${file.name}" is over ${photo ? 40 : MAX_ATTACHMENT_MB} MB.`);
         continue;
       }
       const key = `f${++counter}`;

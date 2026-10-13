@@ -6,8 +6,6 @@ import { ATTACHMENT_ID, type AttachmentKind, type AttachmentRef } from "@/lib/as
 import { officeText } from "./office";
 
 const BUCKET = process.env.UPLOAD_BUCKET ?? "everyops-prod-uploads";
-/** Gemini takes inline files up to about 20 MB per request; stay under it with room for the prompt. */
-const MAX_INLINE_BYTES = 18_000_000;
 const MAX_TEXT_CHARS = 200_000;
 
 let client: Storage | null = null;
@@ -137,15 +135,43 @@ export async function readAttachment(
 }
 
 /**
- * Gemini parts for a conversation's files, each labelled with its name so the model can refer to it. Files that
- * are gone or would push the request over Gemini's inline limit are listed in a note instead.
+ * Where a stored attachment lives and what it is, without downloading it. Null when it's gone or isn't the
+ * account's own.
+ */
+async function attachmentInfo(
+  userId: string,
+  id: string,
+): Promise<{ uri: string; mime: string; kind: AttachmentKind } | null> {
+  if (!ATTACHMENT_ID.test(id)) return null;
+  const path = `${ownerFolder(userId)}/${id}`;
+  try {
+    const [meta] = await bucket().file(path).getMetadata();
+    const kind = (meta.metadata?.kind as AttachmentKind | undefined) ?? "image";
+    return { uri: `gs://${BUCKET}/${path}`, mime: meta.contentType ?? "application/octet-stream", kind };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Gemini parts for a conversation's files, each labelled with its name so the model can refer to it. Text files
+ * (including converted Office files) are sent as text; photos, PDFs, audio and video are passed as Cloud Storage
+ * links that Gemini reads directly, so they're never loaded into this server's memory and several large files
+ * fit in one request. Files that are gone are listed in a note instead.
  */
 export async function attachmentParts(userId: string, refs: AttachmentRef[]): Promise<Part[]> {
   if (!refs.length) return [];
-  const files = await Promise.all(refs.map((r) => readAttachment(userId, r.id)));
+  const files = await Promise.all(
+    refs.map(async (r) => {
+      const info = await attachmentInfo(userId, r.id);
+      if (!info) return null;
+      if (info.kind !== "text") return { ...info, text: null };
+      const file = await readAttachment(userId, r.id);
+      return file ? { ...info, text: file.bytes.toString("utf8") } : null;
+    }),
+  );
   const parts: Part[] = [];
   const skipped: string[] = [];
-  let budget = MAX_INLINE_BYTES;
   refs.forEach((ref, i) => {
     const file = files[i];
     const label = `Attached file "${ref.name}"`;
@@ -153,21 +179,13 @@ export async function attachmentParts(userId: string, refs: AttachmentRef[]): Pr
       skipped.push(`${ref.name} (no longer available)`);
       return;
     }
-    if (file.kind === "text") {
-      const text = file.bytes.toString("utf8");
+    if (file.text !== null) {
+      const text = file.text;
       const note = text.length > MAX_TEXT_CHARS ? " (only the start is shown)" : "";
       parts.push({ text: `${label}${note}:\n${text.slice(0, MAX_TEXT_CHARS)}` });
       return;
     }
-    if (file.bytes.byteLength > budget) {
-      skipped.push(`${ref.name} (too large to read with the other files)`);
-      return;
-    }
-    budget -= file.bytes.byteLength;
-    parts.push(
-      { text: `${label}:` },
-      { inlineData: { mimeType: file.mime, data: file.bytes.toString("base64") } },
-    );
+    parts.push({ text: `${label}:` }, { fileData: { fileUri: file.uri, mimeType: file.mime } });
   });
   if (skipped.length)
     parts.push({ text: `Files you can't see: ${skipped.join(", ")}. Say so if they matter.` });
