@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect } from "react";
 import { safeNext } from "@/lib/auth/redirect";
-import { useCurrentUser } from "@/lib/auth/store";
+import { isSigningOut, useCurrentUser } from "@/lib/auth/store";
 import { useAuthReady } from "@/lib/auth/use-auth-ready";
 
 /** Signed-out visitors go to sign-in and come back here afterwards. */
@@ -14,7 +14,10 @@ export function RequireAuth({ children, fallback }: { children: ReactNode; fallb
   const pathname = usePathname();
 
   useEffect(() => {
-    if (ready && !user) router.replace(`/sign-in?next=${encodeURIComponent(pathname)}`);
+    if (!ready || user) return;
+    // After a deliberate sign-out, the sign-out handler decides where to go.
+    if (isSigningOut()) return;
+    router.replace(`/sign-in?next=${encodeURIComponent(pathname)}`);
   }, [ready, user, router, pathname]);
 
   return ready && user ? children : fallback;

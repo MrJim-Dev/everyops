@@ -3,9 +3,11 @@
 import {
   ArrowRightIcon,
   ClockCounterClockwiseIcon,
+  GearSixIcon,
   HouseIcon,
   SparkleIcon,
   SquaresFourIcon,
+  UserCircleIcon,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
@@ -108,6 +110,17 @@ export function CommandMenu() {
                 <CommandItem value="history versions undo" onSelect={() => go(`${ws.basePath}/history`)}>
                   <ClockCounterClockwiseIcon />
                   Open history
+                </CommandItem>
+                <CommandItem
+                  value="settings rename export delete workspace"
+                  onSelect={() => go(`${ws.basePath}/settings`)}
+                >
+                  <GearSixIcon />
+                  Workspace settings
+                </CommandItem>
+                <CommandItem value="account profile password" onSelect={() => go("/account")}>
+                  <UserCircleIcon />
+                  Account settings
                 </CommandItem>
               </CommandGroup>
             ) : null}

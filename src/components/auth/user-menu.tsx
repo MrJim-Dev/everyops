@@ -1,6 +1,12 @@
 "use client";
 
-import { CaretUpDownIcon, HouseIcon, SignOutIcon, SquaresFourIcon } from "@phosphor-icons/react";
+import {
+  CaretUpDownIcon,
+  HouseIcon,
+  SignOutIcon,
+  SquaresFourIcon,
+  UserCircleIcon,
+} from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -108,6 +114,10 @@ export function UserMenu({ variant }: { variant: "topbar" | "sidebar" }) {
           <DropdownMenuItem onClick={() => router.push("/community")}>
             <SquaresFourIcon />
             Community systems
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => router.push("/account")}>
+            <UserCircleIcon />
+            Account settings
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />

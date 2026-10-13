@@ -67,4 +67,12 @@ Workspaces need an account. Community systems and their previews stay public.
 
 Demo account: `james@hulma.app` / `hulma2026`.
 
+Each account has its own workspaces; the demo workspaces are created on an account's first sign-in.
+
+| Page | What it does |
+|---|---|
+| `/account` | Change name and password; delete the account and its workspaces (password required) |
+| `/w/[workspace]/settings` | Rename (versioned and undoable), export the blueprint and records as JSON, delete (type the name to confirm) |
+| `/terms`, `/privacy` | Plain-language policies for the prototype |
+
 In this frontend build, accounts live in the browser (`src/lib/auth/store.ts`) with salted SHA-256 hashes. Pages only call `signIn`, `signUp`, `requestReset`, `resetPassword` and `signOut`, so Firebase Auth can replace that one file. Google sign-in arrives with Firebase.

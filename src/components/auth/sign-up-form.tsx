@@ -102,7 +102,8 @@ export function SignUpForm() {
             </FieldGroup>
             <SubmitButton pending={pending}>{pending ? "Creating account…" : "Create account"}</SubmitButton>
             <p className="text-center text-[12px] leading-relaxed text-muted-foreground">
-              By creating an account you agree to the Terms and Privacy Policy.
+              By creating an account you agree to the <AuthLink href="/terms">Terms</AuthLink> and{" "}
+              <AuthLink href="/privacy">Privacy Policy</AuthLink>.
             </p>
           </form>
         </div>

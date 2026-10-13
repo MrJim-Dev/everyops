@@ -25,6 +25,20 @@ export const resetPasswordSchema = z
   .object({ password: passwordSchema, confirm: z.string() })
   .refine((v) => v.password === v.confirm, { path: ["confirm"], message: "Passwords don't match" });
 
+export const profileSchema = z.object({ name: z.string().trim().min(2, "Enter your full name") });
+
+export const changePasswordSchema = z
+  .object({
+    current: z.string().min(1, "Enter your current password"),
+    password: passwordSchema,
+    confirm: z.string(),
+  })
+  .refine((v) => v.password === v.confirm, { path: ["confirm"], message: "Passwords don't match" })
+  .refine((v) => v.password !== v.current, {
+    path: ["password"],
+    message: "Choose a password you haven't used here",
+  });
+
 export type FormErrors = Partial<Record<string, string>>;
 
 /** First error per field, ready for <FieldError>. */

@@ -34,12 +34,22 @@ type AuthState = {
   signOut: () => void;
   requestReset: (email: string) => Promise<string | null>;
   resetPassword: (token: string, password: string) => Promise<AuthResult>;
+  updateProfile: (name: string) => Promise<AuthResult>;
+  changePassword: (current: string, next: string) => Promise<AuthResult>;
+  /** Removes the signed-in account. Requires the password; returns the removed id. */
+  deleteAccount: (password: string) => Promise<AuthResult & { accountId?: string }>;
 };
 
 export const DEMO_ACCOUNT = { name: "James Ocampo", email: "james@hulma.app", password: "hulma2026" };
 
 const RESET_TTL_MS = 30 * 60 * 1000;
 let seeding = false;
+let signingOut = false;
+
+/** True right after a deliberate sign-out, so guards don't remember the old page as "next". */
+export function isSigningOut() {
+  return signingOut;
+}
 const normalize = (email: string) => email.trim().toLowerCase();
 
 function randomHex(bytes = 16) {
@@ -108,7 +118,13 @@ export const useAuth = create<AuthState>()(
         return { ok: true };
       },
 
-      signOut: () => set({ sessionId: null }),
+      signOut: () => {
+        signingOut = true;
+        set({ sessionId: null });
+        setTimeout(() => {
+          signingOut = false;
+        }, 1000);
+      },
 
       requestReset: async (email) => {
         await settle();
@@ -138,6 +154,42 @@ export const useAuth = create<AuthState>()(
           sessionId: null,
         }));
         return { ok: true };
+      },
+
+      updateProfile: async (name) => {
+        await settle();
+        const id = get().sessionId;
+        if (!id) return { ok: false, message: "You're signed out" };
+        set((s) => ({ accounts: s.accounts.map((a) => (a.id === id ? { ...a, name: name.trim() } : a)) }));
+        return { ok: true };
+      },
+
+      changePassword: async (current, next) => {
+        await settle();
+        const account = get().accounts.find((a) => a.id === get().sessionId);
+        if (!account) return { ok: false, message: "You're signed out" };
+        if ((await hash(current, account.salt)) !== account.passwordHash)
+          return { ok: false, field: "current", message: "That's not your current password" };
+        const salt = randomHex();
+        const passwordHash = await hash(next, salt);
+        set((s) => ({
+          accounts: s.accounts.map((a) => (a.id === account.id ? { ...a, salt, passwordHash } : a)),
+        }));
+        return { ok: true };
+      },
+
+      deleteAccount: async (password) => {
+        await settle();
+        const account = get().accounts.find((a) => a.id === get().sessionId);
+        if (!account) return { ok: false, message: "You're signed out" };
+        if ((await hash(password, account.salt)) !== account.passwordHash)
+          return { ok: false, field: "password", message: "That password isn't right" };
+        set((s) => ({
+          accounts: s.accounts.filter((a) => a.id !== account.id),
+          resets: s.resets.filter((r) => r.accountId !== account.id),
+          sessionId: null,
+        }));
+        return { ok: true, accountId: account.id };
       },
     }),
     {

@@ -3,6 +3,7 @@
 import {
   ArrowLeftIcon,
   ClockCounterClockwiseIcon,
+  GearSixIcon,
   MagnifyingGlassIcon,
   SparkleIcon,
 } from "@phosphor-icons/react";
@@ -67,6 +68,14 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
               onNavigate={onNavigate}
             >
               History
+            </SidebarLink>
+            <SidebarLink
+              href={`${ws.basePath}/settings`}
+              active={isActive(`${ws.basePath}/settings`)}
+              icon={<GearSixIcon />}
+              onNavigate={onNavigate}
+            >
+              Settings
             </SidebarLink>
           </>
         ) : null}
