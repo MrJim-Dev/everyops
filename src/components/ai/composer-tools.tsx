@@ -319,7 +319,11 @@ export function MessageFiles({ files, className }: { files?: AttachmentRef[]; cl
         f.kind === "image" && f.mime !== "image/heic" ? (
           <ImageThumb key={f.id} file={f} />
         ) : (
-          <FileChip key={f.id} name={f.name} Icon={f.kind === "image" ? ImageIcon : fileIcon(f.kind, f.name)} />
+          <FileChip
+            key={f.id}
+            name={f.name}
+            Icon={f.kind === "image" ? ImageIcon : fileIcon(f.kind, f.name)}
+          />
         ),
       )}
     </ul>

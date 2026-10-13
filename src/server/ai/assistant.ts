@@ -1,6 +1,6 @@
 import "server-only";
 import type { Part } from "@google/genai";
-import { type AttachmentRef, attachmentNames, attachmentsIn } from "@/lib/assistant/attachments";
+import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import { describeScreen, type Navigation, resolveGoTo, type Screen } from "@/lib/assistant/screen";
 import type {
   Block,
