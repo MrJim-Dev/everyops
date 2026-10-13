@@ -14,7 +14,7 @@ import {
 import { usePathname } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AttachmentTray, ComposerTools, MessageFiles } from "@/components/ai/composer-tools";
+import { AttachmentTray, ComposerTools, DropOverlay, MessageFiles } from "@/components/ai/composer-tools";
 import { useAttachments } from "@/components/ai/use-attachments";
 import { useVoiceInput } from "@/components/ai/use-voice-input";
 import { LogoMark } from "@/components/brand/logo";
@@ -399,10 +399,10 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
           e.preventDefault();
           void send(input);
         }}
-        onDragOver={files.onDragOver}
-        onDrop={files.onDrop}
+        {...files.dropProps}
       >
-        <InputGroup className="h-auto">
+        <InputGroup className="relative h-auto">
+          <DropOverlay attachments={files} />
           {files.items.length ? (
             <InputGroupAddon align="block-start" className="px-2.5 pt-2.5">
               <AttachmentTray attachments={files} />

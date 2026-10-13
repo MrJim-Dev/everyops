@@ -3,7 +3,7 @@
 import { ArrowRightIcon, MinusIcon, PencilSimpleIcon, PlusIcon } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AttachmentTray, ComposerTools } from "@/components/ai/composer-tools";
+import { AttachmentTray, ComposerTools, DropOverlay } from "@/components/ai/composer-tools";
 import { useAttachments } from "@/components/ai/use-attachments";
 import { useVoiceInput } from "@/components/ai/use-voice-input";
 import { Button } from "@/components/ui/button";
@@ -122,14 +122,14 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
   if (!plan) {
     return (
       <form
-        className="flex flex-col gap-3"
+        className="relative flex flex-col gap-3 rounded-lg"
         onSubmit={(e) => {
           e.preventDefault();
           void review();
         }}
-        onDragOver={files.onDragOver}
-        onDrop={files.onDrop}
+        {...files.dropProps}
       >
+        <DropOverlay attachments={files} />
         <AttachmentTray attachments={files} />
         <Textarea
           autoFocus={autoFocus}
