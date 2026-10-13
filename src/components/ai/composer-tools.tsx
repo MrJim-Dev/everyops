@@ -6,6 +6,7 @@ import {
   FilePdfIcon,
   FileTextIcon,
   FileVideoIcon,
+  ImageIcon,
   MicrophoneIcon,
   PaperclipIcon,
   StopIcon,
@@ -166,7 +167,8 @@ export function MessageFiles({ files, className }: { files?: AttachmentRef[]; cl
     <ul className={cn("flex flex-wrap justify-end gap-1.5", className)}>
       {files.map((f) => {
         const src = `/api/ai/attachments/${f.id}`;
-        if (f.kind === "image")
+        // HEIC photos uploaded before photos were converted can't be shown by most browsers: list them by name.
+        if (f.kind === "image" && f.mime !== "image/heic")
           return (
             <li key={f.id}>
               <a
@@ -185,7 +187,7 @@ export function MessageFiles({ files, className }: { files?: AttachmentRef[]; cl
               </a>
             </li>
           );
-        const Icon = KIND_ICONS[f.kind];
+        const Icon = f.kind === "image" ? ImageIcon : KIND_ICONS[f.kind];
         return (
           <li
             key={f.id}

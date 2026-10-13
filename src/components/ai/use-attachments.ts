@@ -3,6 +3,7 @@
 import { type ClipboardEvent, type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { type AttachmentRef, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS } from "@/lib/assistant/attachments";
+import { isHeic, MAX_SOURCE_BYTES, prepareImage } from "@/lib/prepare-image";
 
 export type PendingFile = {
   key: string;
@@ -56,23 +57,39 @@ export function useAttachments() {
     const room = MAX_ATTACHMENTS - count.current;
     if (files.length > room) toast.warning(`You can attach up to ${MAX_ATTACHMENTS} files to one message.`);
     for (const file of files.slice(0, Math.max(room, 0))) {
-      if (file.size > MAX_ATTACHMENT_BYTES) {
-        toast.warning(`"${file.name}" is over 10 MB.`);
+      // Photos are shrunk before upload, so a large one is fine; other files must already fit.
+      const photo = file.type.startsWith("image/") || isHeic(file);
+      if (file.size > (photo ? MAX_SOURCE_BYTES : MAX_ATTACHMENT_BYTES)) {
+        toast.warning(`"${file.name}" is over ${photo ? 40 : 10} MB.`);
         continue;
       }
       const key = `f${++counter}`;
-      const preview = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
-      if (preview) previews.current.add(preview);
       count.current++;
-      setItems((s) => [...s, { key, name: file.name || "Pasted image", preview, status: "uploading" }]);
-      void upload(file).then((result) => {
+      setItems((s) => [...s, { key, name: file.name || "Pasted image", status: "uploading" }]);
+      void (async () => {
+        const ready = photo ? await prepareImage(file) : file;
+        if (ready.size > MAX_ATTACHMENT_BYTES) {
+          setItems((s) => s.filter((f) => f.key !== key));
+          toast(`"${file.name}" is over 10 MB.`);
+          return;
+        }
+        // Preview the prepared copy: browsers that can't show HEIC can show the JPEG made from it.
+        const preview =
+          ready.type.startsWith("image/") && ready.type !== "image/heic"
+            ? URL.createObjectURL(ready)
+            : undefined;
+        if (preview) {
+          previews.current.add(preview);
+          setItems((s) => s.map((f) => (f.key === key ? { ...f, preview, name: ready.name || f.name } : f)));
+        }
+        const result = await upload(ready);
         if (result.ok)
           setItems((s) => s.map((f) => (f.key === key ? { ...f, status: "ready", ref: result.ref } : f)));
         else {
           setItems((s) => s.filter((f) => f.key !== key));
           toast.error(`Couldn't attach "${file.name || "the image"}"`, { description: result.message });
         }
-      });
+      })();
     }
   }, []);
 

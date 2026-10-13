@@ -52,7 +52,7 @@ export function ImageInput({
           ref={input}
           id={id}
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
+          accept="image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif,.heic,.heif"
           className="sr-only"
           onChange={(e) => void pick(e.target.files?.[0])}
         />
