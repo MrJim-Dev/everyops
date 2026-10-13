@@ -54,10 +54,10 @@ export function useAttachments() {
     const files = [...list];
     if (!files.length) return;
     const room = MAX_ATTACHMENTS - count.current;
-    if (files.length > room) toast(`You can attach up to ${MAX_ATTACHMENTS} files to one message.`);
+    if (files.length > room) toast.warning(`You can attach up to ${MAX_ATTACHMENTS} files to one message.`);
     for (const file of files.slice(0, Math.max(room, 0))) {
       if (file.size > MAX_ATTACHMENT_BYTES) {
-        toast(`"${file.name}" is over 10 MB.`);
+        toast.warning(`"${file.name}" is over 10 MB.`);
         continue;
       }
       const key = `f${++counter}`;
@@ -70,7 +70,7 @@ export function useAttachments() {
           setItems((s) => s.map((f) => (f.key === key ? { ...f, status: "ready", ref: result.ref } : f)));
         else {
           setItems((s) => s.filter((f) => f.key !== key));
-          toast(`Couldn't attach "${file.name || "the image"}"`, { description: result.message });
+          toast.error(`Couldn't attach "${file.name || "the image"}"`, { description: result.message });
         }
       });
     }

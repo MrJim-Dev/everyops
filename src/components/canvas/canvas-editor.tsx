@@ -201,7 +201,7 @@ export function CanvasEditor({ viewId, name }: { viewId: string; name: string })
       };
       img.src = src;
     } catch (error) {
-      toast("Couldn't add the picture", { description: (error as Error).message });
+      toast.error("Couldn't add the picture", { description: (error as Error).message });
     } finally {
       if (fileInput.current) fileInput.current.value = "";
     }
@@ -278,7 +278,7 @@ export function CanvasEditor({ viewId, name }: { viewId: string; name: string })
   const exportPng = () => {
     const st = stage.current;
     const content = st?.findOne<Konva.Layer>("#content");
-    if (!st || !content || !shapes.length) return toast("Add something to the canvas first.");
+    if (!st || !content || !shapes.length) return toast.warning("Add something to the canvas first.");
     const tr = transformer.current;
     tr?.hide();
     const rect = content.getClientRect();

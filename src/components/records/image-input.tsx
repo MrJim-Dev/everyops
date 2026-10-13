@@ -30,7 +30,7 @@ export function ImageInput({
     try {
       onChange(await uploadImage(file, ws));
     } catch (error) {
-      toast("Couldn't upload the image", { description: (error as Error).message });
+      toast.error("Couldn't upload the image", { description: (error as Error).message });
     } finally {
       setBusy(false);
       if (input.current) input.current.value = "";

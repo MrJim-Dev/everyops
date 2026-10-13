@@ -43,10 +43,10 @@ export function useVoiceInput(onText: (text: string) => void) {
         | { ok: false; message: string }
         | null;
       if (body?.ok && body.text) deliver.current(body.text);
-      else if (body?.ok) toast("I didn't catch any words. Try again a little closer to the mic.");
-      else toast("Couldn't turn that into text", { description: body?.message ?? "Try again." });
+      else if (body?.ok) toast.info("I didn't catch any words. Try again a little closer to the mic.");
+      else toast.error("Couldn't turn that into text", { description: body?.message ?? "Try again." });
     } catch {
-      toast("Couldn't turn that into text", { description: "Check your connection and try again." });
+      toast.error("Couldn't turn that into text", { description: "Check your connection and try again." });
     } finally {
       setState("idle");
     }
@@ -63,7 +63,7 @@ export function useVoiceInput(onText: (text: string) => void) {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
       const denied = error instanceof DOMException && error.name === "NotAllowedError";
-      toast(denied ? "Allow microphone access to talk to EveryOps" : "No microphone found", {
+      toast.warning(denied ? "Allow microphone access to talk to EveryOps" : "No microphone found", {
         description: denied ? "Your browser asks for it in the address bar." : undefined,
       });
       return;

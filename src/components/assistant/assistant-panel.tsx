@@ -288,13 +288,13 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
     undoChange(ws.id, changeId);
     const entry = useWorkspaces.getState().workspaces[ws.id]?.changes.find((c) => c.id === changeId);
     if (!entry?.undoneAt) {
-      toast("This can't be undone here", {
+      toast.warning("This can't be undone here", {
         description: "Newer changes came after it. Use History instead.",
       });
       return;
     }
     patch(ws.id, index, { planState: "undone" });
-    toast("Change undone");
+    toast.success("Change undone");
   };
 
   const last = turns.at(-1);

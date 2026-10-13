@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowSquareOutIcon, CheckIcon, ShieldCheckIcon, UploadSimpleIcon } from "@phosphor-icons/react";
+import { ArrowSquareOutIcon, CheckIcon, UploadSimpleIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -22,22 +22,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { ViewEmpty } from "@/components/views/view-empty";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useCurrentUser } from "@/lib/auth/client";
+import { DEMO_LOCKED_MESSAGE, isDemoEmail } from "@/lib/auth/demo";
 import { CATEGORIES, type CatalogCategory } from "@/lib/catalog";
 import { describeBlueprint, toCatalogSystem, usePublished } from "@/lib/community/published";
 import { formatDate } from "@/lib/format";
 import { canManage, useWorkspaces } from "@/lib/store/workspaces";
-
-const LICENSES = { MIT: "MIT", "Apache-2.0": "Apache 2.0" } as const;
-const CATEGORY_ITEMS = Object.fromEntries(CATEGORIES.map((c) => [c.id, c.label]));
-
-/** Guess a category from what the blueprint contains. */
-function guessCategory(views: string[]): CatalogCategory {
-  if (views.includes("checkout")) return "pos";
-  if (views.includes("slot_grid")) return "booking";
-  if (views.includes("approval_queue")) return "hris";
-  if (views.includes("kanban")) return "social";
-  return "finance";
-}
+import { CATEGORY_ITEMS, guessCategory, LICENSES, nextVersion } from "./publish-shared";
 
 export function PublishPage() {
   const ws = useWorkspace();
@@ -53,7 +43,7 @@ export function PublishPage() {
   const [form, setForm] = useState(() => ({
     name: existing?.name ?? ws.name,
     summary: existing?.summary ?? "",
-    category: existing?.category ?? guessCategory(ws.blueprint.views.map((v) => v.type)),
+    category: existing?.category ?? guessCategory(ws.blueprint),
     license: existing?.license ?? ("MIT" as const),
   }));
   const [errors, setErrors] = useState<{ name?: string; summary?: string }>({});
@@ -73,6 +63,14 @@ export function PublishPage() {
         title="Nothing to publish yet"
         description="Finish setting up this workspace with Ask EveryOps first."
       />
+    );
+  }
+
+  if (isDemoEmail(user.email)) {
+    return (
+      <SettingsPage>
+        <SettingsSection title="Publish to Community" description={DEMO_LOCKED_MESSAGE} />
+      </SettingsPage>
     );
   }
 
@@ -114,11 +112,8 @@ export function PublishPage() {
 
   return (
     <SettingsPage>
-      <p className="mt-6 text-[13px] text-muted-foreground">
-        Share this system's design in Community so other businesses can use it.
-      </p>
       {existing ? (
-        <div className="mt-6 flex flex-wrap items-center gap-3 rounded-lg border border-primary/40 bg-primary/[0.06] px-4 py-3 text-[13px]">
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/40 bg-primary/[0.06] px-4 py-3 text-[13px]">
           <CheckIcon className="size-4 text-primary" />
           <span className="flex-1">
             Published as <span className="font-medium">{existing.name}</span> · v{existing.version} · updated{" "}
@@ -136,9 +131,23 @@ export function PublishPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-10 pt-6 lg:grid-cols-[1fr_300px]">
-        <form onSubmit={submit} noValidate className="flex flex-col gap-6">
-          <FieldGroup className="gap-5">
+      <form onSubmit={submit} noValidate>
+        <SettingsSection
+          title={existing ? "Listing" : "Publish to Community"}
+          description="Share this system's design so other businesses can preview it and copy it into their own workspace."
+          footer={`Only the design is shared. Your ${ws.records.length} records, team and history stay private.`}
+          action={
+            <Button type="submit" size="sm" disabled={saving}>
+              <UploadSimpleIcon data-icon="inline-start" />
+              {saving
+                ? "Publishing…"
+                : existing
+                  ? `Publish version ${nextVersion(existing.version)}`
+                  : "Publish"}
+            </Button>
+          }
+        >
+          <FieldGroup className="max-w-[520px] gap-5">
             <Field data-invalid={errors.name ? true : undefined}>
               <FieldLabel htmlFor="pub-name">Name</FieldLabel>
               <Input
@@ -212,51 +221,41 @@ export function PublishPage() {
               </Field>
             </div>
           </FieldGroup>
+        </SettingsSection>
+      </form>
 
-          <section className="flex flex-col gap-3 rounded-lg border p-4">
-            <h2 className="flex items-center gap-2 text-[13.5px] font-semibold">
-              <ShieldCheckIcon className="size-4 text-primary" />
-              What gets published
-            </h2>
-            <ul className="grid gap-1.5 text-[13px] sm:grid-cols-2">
-              {includes.map((item) => (
-                <li key={item} className="flex items-center gap-2">
-                  <CheckIcon className="size-3.5 text-primary" />
-                  {item}
-                </li>
-              ))}
-            </ul>
-            <p className="text-[12.5px] leading-relaxed text-muted-foreground">
-              Only the design is shared: record types, fields, screens and rules. Your {ws.records.length}{" "}
-              records, team and history stay private.
-            </p>
-          </section>
-
-          <div className="flex gap-2">
-            <Button type="submit" disabled={saving}>
-              <UploadSimpleIcon data-icon="inline-start" />
-              {saving ? "Publishing…" : existing ? `Publish version ${bumped(existing.version)}` : "Publish"}
-            </Button>
-          </div>
-        </form>
-
-        <aside className="flex flex-col gap-2">
-          <span className="text-[12px] font-medium text-muted-foreground">Listing preview</span>
-          <div className="pointer-events-none">
+      <SettingsSection
+        title="What gets published"
+        description="Record types, fields, screens and rules. The preview shows how the listing looks in Community."
+      >
+        <div className="grid gap-6 md:grid-cols-[1fr_260px]">
+          <ul className="grid content-start gap-2 text-[13px] sm:grid-cols-2">
+            {includes.map((item) => (
+              <li key={item} className="flex items-center gap-2">
+                <CheckIcon className="size-3.5 shrink-0 text-primary" />
+                {item}
+              </li>
+            ))}
+          </ul>
+          <div className="pointer-events-none" aria-hidden="true">
             <SystemCard system={preview} onSelect={() => {}} />
           </div>
-        </aside>
-      </div>
+        </div>
+      </SettingsSection>
 
       {existing ? (
         <SettingsSection
           title="Unpublish"
           tone="danger"
-          description="Removes the listing. Workspaces that already copied it keep their copy."
-        >
-          <div>
+          description="Removes the listing from Community."
+          footer="Workspaces that already copied it keep their copy."
+          action={
             <ConfirmDeleteDialog
-              trigger={<Button variant="destructive">Unpublish</Button>}
+              trigger={
+                <Button variant="destructive" size="sm">
+                  Unpublish
+                </Button>
+              }
               title={`Unpublish ${existing.name}?`}
               description="It will disappear from Community. You can publish it again later."
               label={`Type ${existing.name} to confirm`}
@@ -264,18 +263,13 @@ export function PublishPage() {
               actionLabel="Unpublish"
               onConfirm={async () => {
                 if (!(await unpublish(existing.id))) return "Couldn't unpublish. Try again.";
-                toast(`${existing.name} unpublished`);
+                toast.success(`${existing.name} unpublished`);
                 return undefined;
               }}
             />
-          </div>
-        </SettingsSection>
+          }
+        />
       ) : null}
     </SettingsPage>
   );
-}
-
-function bumped(version: string) {
-  const [major, minor] = version.split(".").map(Number);
-  return `${major}.${(minor || 0) + 1}`;
 }

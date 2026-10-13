@@ -189,7 +189,7 @@ export function AccountSettings() {
                 if (!result.ok) return result.message;
                 dropOwner(accountId);
                 router.replace("/sign-in");
-                toast("Account deleted");
+                toast.success("Account deleted");
                 return undefined;
               }}
             />

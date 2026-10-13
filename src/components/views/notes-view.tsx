@@ -69,7 +69,7 @@ export function NotesView({ view }: { view: NotesViewConfig }) {
       setQuery("");
       setSelected(result.record.id);
       setMobileOpen(true);
-    } else toast(result.errors[0]?.message ?? `That ${entity.name.toLowerCase()} couldn't be created.`);
+    } else toast.error(result.errors[0]?.message ?? `That ${entity.name.toLowerCase()} couldn't be created.`);
   };
 
   return (
