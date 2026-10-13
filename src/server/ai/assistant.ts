@@ -13,7 +13,9 @@ import type {
   Widget,
 } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
+import { widgetValue } from "@/lib/engine/aggregate";
 import { applyOps, type ChangeOp, type ChangePlan, commitChange, type RecordOp } from "@/lib/engine/changes";
+import { metricFormatter } from "@/lib/engine/metric-format";
 import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
 import { isPublic } from "@/lib/public/resolve";
@@ -130,9 +132,11 @@ function toDesignOps(
   bp: Blueprint,
   raw: RawPlan["ops"],
   renames: RawPlan["renames"] = [],
+  formulas: RawPlan["formulas"] = [],
 ): { ops: ChangeOp[]; errors: string[] } {
   const ops: ChangeOp[] = [];
   const errors: string[] = [];
+  const formulaFor = new Set(formulas.map((f) => f.widgetId));
   // A plan that adds one new section usually means its new views and widgets go there.
   const newSystems = raw.flatMap((o) => (o.op === "add_system" && o.system ? [o.system.id] : []));
   const defaultSystem = newSystems.length === 1 ? newSystems[0] : undefined;
@@ -172,6 +176,24 @@ function toDesignOps(
           ops.push({ op: "add_widget", systemId, widget: structuredClone(o.widget) as Widget });
         else errors.push(`${at}: needs widget and systemId`);
         break;
+      case "update_widget": {
+        const widget = bp.widgets.find((w) => w.id === o.widgetId);
+        if (!widget) {
+          errors.push(
+            `${at}: widget "${o.widgetId}" doesn't exist (widgets: ${bp.widgets.map((w) => w.id).join(", ")})`,
+          );
+          break;
+        }
+        const patch: Extract<ChangeOp, { op: "update_widget" }>["patch"] = {
+          ...(o.title?.trim() ? { title: o.title.trim() } : {}),
+          ...(o.filter !== undefined ? { filter: o.filter } : {}),
+          ...(o.metric ? { metric: o.metric } : {}),
+          ...(o.target !== undefined ? { target: o.target } : {}),
+        };
+        if (Object.keys(patch).length) ops.push({ op: "update_widget", widgetId: widget.id, patch });
+        else if (!formulaFor.has(widget.id)) errors.push(`${at}: nothing to change`);
+        break;
+      }
       case "add_system":
         if (o.system) ops.push({ op: "add_system", system: { ...o.system, viewIds: [], widgetIds: [] } });
         else errors.push(`${at}: needs system`);
@@ -223,6 +245,33 @@ function toDesignOps(
         break;
     }
   }
+  // Formula cards: the formula goes on a card added in this plan, or onto an existing card as an update.
+  for (const [i, f] of formulas.entries()) {
+    const { widgetId, ...rest } = f;
+    const calc = structuredClone(rest);
+    const added = ops.find((x) => x.op === "add_widget" && x.widget.id === widgetId);
+    const existing = bp.widgets.find((w) => w.id === widgetId);
+    const type = added?.op === "add_widget" ? added.widget.type : existing?.type;
+    if (!type) {
+      errors.push(
+        `formulas[${i}]: widget "${widgetId}" doesn't exist; add a stat with add_widget first (existing: ${bp.widgets.map((w) => w.id).join(", ")})`,
+      );
+      continue;
+    }
+    if (type !== "stat" && type !== "progress") {
+      errors.push(
+        `formulas[${i}]: "${widgetId}" is a ${type}; only stat and progress widgets take a formula`,
+      );
+      continue;
+    }
+    if (added?.op === "add_widget") {
+      added.widget.calc = calc;
+      continue;
+    }
+    const update = ops.find((x) => x.op === "update_widget" && x.widgetId === widgetId);
+    if (update?.op === "update_widget") update.patch.calc = calc;
+    else ops.push({ op: "update_widget", widgetId, patch: { calc } });
+  }
   for (const [i, r] of renames.entries()) {
     const name = r.newName.trim();
     if (!name) errors.push(`renames[${i}]: needs newName`);
@@ -253,7 +302,11 @@ function toDesignOps(
       ? id
       : (allEntities.find((e) => [e.id, e.name, e.pluralName].some((k) => norm(k) === norm(id)))?.id ?? id);
   for (const op of ops) {
-    if (op.op === "add_widget") op.widget.entityId = resolveEntity(op.widget.entityId);
+    const calc =
+      op.op === "add_widget" ? op.widget.calc : op.op === "update_widget" ? op.patch.calc : undefined;
+    if (calc) for (const t of calc.terms) t.entityId = resolveEntity(t.entityId);
+    if (op.op === "add_widget")
+      op.widget.entityId = calc?.terms[0] ? calc.terms[0].entityId : resolveEntity(op.widget.entityId);
     if (
       op.op === "add_view" &&
       op.view.type !== "document" &&
@@ -355,6 +408,7 @@ function toDesignOps(
     "add_block",
     "add_view_field",
     "add_widget",
+    "update_widget",
     "add_rule",
     "rename_system",
     "rename_view",
@@ -587,7 +641,7 @@ ${input.messages
     const withNav = navigate ? { navigate } : {};
     if (a.kind !== "plan") return { ok: true, kind: a.kind, reply: a.reply, suggestions, ...withNav };
 
-    const design = toDesignOps(bp, a.plan.ops, a.plan.renames);
+    const design = toDesignOps(bp, a.plan.ops, a.plan.renames, a.plan.formulas);
     const errors = [...design.errors];
     if (design.ops.length && !input.canDesign)
       errors.push("This person can't change the design; plan data changes only or explain who can.");
@@ -614,6 +668,18 @@ ${input.messages
         errors.push(...strandedOptions(bp, next, optionUsage(bp, rehearsal?.data.records ?? staged.records)));
     }
     if (!errors.length && (design.ops.length || recordPart.ops.length)) {
+      // Cards the plan adds or changes show their real new value, worked out on the rehearsed workspace.
+      const cardFacts = design.ops.flatMap((op) => {
+        const id =
+          op.op === "add_widget" ? op.widget.id : op.op === "update_widget" ? op.widgetId : undefined;
+        const w = id ? next.widgets.find((x) => x.id === id) : undefined;
+        if (!w || (w.type !== "stat" && w.type !== "progress")) return [];
+        return [{ label: w.title, value: metricFormatter(next, w)(widgetValue(next, w, records)) }];
+      });
+      const facts = [
+        ...cardFacts,
+        ...a.plan.facts.filter((f) => !cardFacts.some((c) => c.label === f.label)),
+      ];
       return {
         ok: true,
         kind: "plan",
@@ -623,7 +689,7 @@ ${input.messages
         plan: {
           request: input.messages.at(-1)?.text ?? "",
           title: a.plan.title || "Workspace change",
-          facts: a.plan.facts.slice(0, 6),
+          facts: facts.slice(0, 6),
           steps: a.plan.steps.slice(0, 10),
           ops: design.ops,
           recordOps: recordPart.ops,

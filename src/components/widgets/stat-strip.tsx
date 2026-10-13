@@ -4,8 +4,8 @@ import { AnimatedValue } from "@/components/motion/animated-value";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Widget } from "@/lib/blueprint/types";
 import { widgetValue } from "@/lib/engine/aggregate";
+import { metricFormatter } from "@/lib/engine/metric-format";
 import { cn } from "@/lib/utils";
-import { metricFormatter } from "./metric-format";
 
 /** Key numbers in one row, divided by thin vertical rules. */
 export function StatStrip({ widgets }: { widgets: Widget[] }) {

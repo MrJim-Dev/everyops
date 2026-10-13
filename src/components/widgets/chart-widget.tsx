@@ -18,8 +18,8 @@ import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } f
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Widget } from "@/lib/blueprint/types";
 import { chartData } from "@/lib/engine/aggregate";
+import { metricFormatter } from "@/lib/engine/metric-format";
 import { formatNumber, formatPercent } from "@/lib/format";
-import { metricFormatter } from "./metric-format";
 import { WidgetFrame } from "./widget-frame";
 
 const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];

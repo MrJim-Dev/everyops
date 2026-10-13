@@ -1,7 +1,31 @@
 import "server-only";
 import { z } from "zod";
 import { FUNCTIONS } from "@/lib/engine/expr";
-import { block, entity, field, option, PUBLIC_PAGES_GUIDE, rule, system, view } from "./design-prompt";
+import {
+  block,
+  entity,
+  field,
+  option,
+  PUBLIC_PAGES_GUIDE,
+  rule,
+  system,
+  view,
+  widgetCalc,
+} from "./design-prompt";
+
+/*
+ * Gemini rejects an answer schema past a structural budget (properties, optional fields, enum values and union
+ * branches; descriptions don't count), and this one is close to it. Keep shapes from repeating: a form's blocks
+ * are added with add_block, and formula cards live in one plan-level list.
+ */
+type AnyObject = z.ZodObject<z.ZodRawShape>;
+const assistantView = z.union(
+  view.options.map((o) =>
+    ((o as AnyObject).shape.type as z.ZodLiteral<string>).value === "form"
+      ? (o as AnyObject).omit({ blocks: true })
+      : o,
+  ) as unknown as [AnyObject, AnyObject, ...AnyObject[]],
+) as unknown as typeof view; // a form without blocks is still a valid view
 
 const patch = z.object({
   name: z.string().optional(),
@@ -28,6 +52,7 @@ const metric = z.object({
   op: z.enum(["count", "sum", "avg"]),
   fieldId: z.string().optional().describe("sum and avg: a number or money field"),
 });
+
 const assistantWidget = z.union([
   z.object({ ...widgetBase, type: z.literal("stat"), metric }),
   z.object({
@@ -77,11 +102,23 @@ const designOp = z.union([
     op: z.literal("add_system"),
     system: system.describe("A new sidebar page; add its views and widgets with add_view/add_widget"),
   }),
-  z.object({ op: z.literal("add_view"), systemId: z.string().describe("The page it goes on"), view }),
+  z.object({
+    op: z.literal("add_view"),
+    systemId: z.string().describe("The page it goes on"),
+    view: assistantView.describe("A form's blocks are added with add_block"),
+  }),
   z.object({
     op: z.literal("add_widget"),
     systemId: z.string().describe("The page it goes on"),
     widget: assistantWidget,
+  }),
+  z.object({
+    op: z.literal("update_widget"),
+    widgetId: z.string().describe("An existing widget (card, chart or list)"),
+    title: z.string().optional(),
+    filter: z.string().optional().describe("Replaces the filter; empty string removes it"),
+    metric: metric.optional(),
+    target: z.number().optional().describe("Progress only"),
   }),
   z.object({ op: z.literal("add_rule"), rule }),
   z.object({
@@ -163,6 +200,13 @@ export const assistantAnswer = z.object({
       )
       .describe("Pages and tabs to rename"),
     recordOps: z.array(recordOp).describe("Data changes, applied after the design changes"),
+    formulas: z
+      .array(
+        widgetCalc.extend({
+          widgetId: z.string().describe("A stat or progress widget, added in this plan or existing"),
+        }),
+      )
+      .describe("Cards whose value is a formula over named totals"),
   }),
 });
 export type AssistantAnswer = z.infer<typeof assistantAnswer>;
@@ -228,6 +272,24 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   time with dateFieldId plus bucket (kind line, area or bar), or by category with groupByFieldId (a select,
   status, relation or text field; kind bar or donut), optional splitByFieldId for one series per option. list
   for a short list. Make each widget answer one question with a clear title ("Revenue by court").
+- Totals that combine record types or need arithmetic: a formula card. Add (or reuse) a stat or progress widget,
+  then a formulas entry with its widgetId. terms are named totals, each one record type counted or added up with
+  its own filter; expr does the math on the term ids. Examples:
+  - total income: terms { id: "bookings", entityId: "booking", op: "sum", fieldId: "total_amount", filter:
+    "status != 'cancelled'" } and { id: "other_income", entityId: "transaction", op: "sum", fieldId: "amount",
+    filter: "type == 'income'" }, expr "bookings + other_income", format money.
+  - profit: the income terms plus { id: "expenses", … filter "type == 'expense'" }, expr "bookings + other_income
+    - expenses".
+  - collection rate: { id: "paid", op: "count", filter "paid == true" } and { id: "booked", op: "count" } on
+    booking, expr "paid / booked * 100", format percent. Average per court: "revenue / courts".
+  The filter uses that record type's fields. Match it to how records are really stored (check the data), and say
+  in the reply what each part counts. Never say two record types can't be added together: use a formula.
+  Don't work out a new or changed card's value in the reply or facts: the plan shows it, calculated exactly.
+- Changing an existing card, chart or list ("total income should include bookings", "only count paid ones",
+  "rename the revenue card"): update_widget with its id and only what changes. Prefer it over adding a duplicate.
+- Line items (a record type with a parent, e.g. booking rentals under a booking) are added by opening the parent
+  record and pressing "Add …" in its side panel, or by you with create_record (set the parent link and the other
+  links by name). When a list or total of line items is empty, say which records have none and offer to add them.
 - Data changes: create_record or update_record with recordIds from the data. You can't delete records or fields: say
   where to do it by hand instead.
 - "this", "here" and "the page" mean what the person is looking at. Keep plans as small as the request needs.

@@ -208,6 +208,26 @@ export type View =
 
 export type ViewType = View["type"];
 
+/** A named total a summary card's formula uses: one record type, counted or added up, with its own filter. */
+export type WidgetTerm = {
+  id: string;
+  entityId: string;
+  op: "count" | "sum" | "avg";
+  fieldId?: string;
+  filter?: string;
+};
+
+/**
+ * Stat and progress cards: the value is a formula over named totals instead of one metric, so a card can
+ * combine record types or do arithmetic, e.g. "bookings + other_income" or "paid / all * 100".
+ */
+export type WidgetCalc = {
+  expr: string;
+  terms: WidgetTerm[];
+  /** How to show the result. Defaults to money when a term adds up a money field. */
+  format?: "money" | "number" | "percent";
+};
+
 export type Widget = {
   id: string;
   title: string;
@@ -215,6 +235,8 @@ export type Widget = {
   filter?: string;
   type: "stat" | "chart" | "progress" | "list";
   metric: { op: "count" | "sum" | "avg"; fieldId?: string };
+  /** Stat and progress only. When set, it replaces entityId, filter and metric for the value. */
+  calc?: WidgetCalc;
   chart?: {
     kind: "line" | "bar" | "area" | "donut";
     /** Over time: buckets by this date field. */

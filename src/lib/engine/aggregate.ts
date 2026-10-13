@@ -1,12 +1,13 @@
 import { findRecord, getEntity, recordTitle } from "@/lib/blueprint/lookup";
-import type { Blueprint, DataRecord, FieldValue, Widget } from "@/lib/blueprint/types";
+import type { Blueprint, DataRecord, FieldValue, Widget, WidgetTerm } from "@/lib/blueprint/types";
 import { isTimeRange } from "@/lib/format";
 import { addDays, dateKey, manilaParts, startOfMonthKey, todayKey } from "@/lib/time";
+import { run } from "./expr";
 import { applyFilter } from "./query";
 
 const numberOf = (v: FieldValue | undefined) => (typeof v === "number" ? v : Number(v) || 0);
 
-export function metricOf(widget: Widget, rows: DataRecord[]): number {
+export function metricOf(widget: Pick<Widget, "metric">, rows: DataRecord[]): number {
   const { op, fieldId } = widget.metric;
   if (op === "count") return rows.length;
   const values = rows.map((r) => numberOf(fieldId ? r.data[fieldId] : 0));
@@ -19,7 +20,30 @@ export function widgetRows(bp: Blueprint, widget: Widget, records: DataRecord[],
 }
 
 export function widgetValue(bp: Blueprint, widget: Widget, records: DataRecord[], now = new Date()) {
+  if (widget.calc && widget.type !== "chart" && widget.type !== "list")
+    return calcValue(bp, widget, records, now);
   return metricOf(widget, widgetRows(bp, widget, records, now));
+}
+
+/** One named total: its record type's rows, filtered, then counted or added up. */
+export function termValue(bp: Blueprint, term: WidgetTerm, records: DataRecord[], now = new Date()): number {
+  const entity = bp.entities.find((e) => e.id === term.entityId);
+  if (!entity) return 0;
+  const rows = applyFilter(bp, entity, records, term.filter, now);
+  return metricOf({ metric: { op: term.op, fieldId: term.fieldId } }, rows);
+}
+
+/** A card's formula over its named totals. Division by zero and broken formulas show 0. */
+export function calcValue(bp: Blueprint, widget: Widget, records: DataRecord[], now = new Date()): number {
+  const calc = widget.calc;
+  if (!calc) return 0;
+  const values = new Map(calc.terms.map((t) => [t.id, termValue(bp, t, records, now)]));
+  const result = run(calc.expr, {
+    now,
+    get: (path) => (path.length === 1 ? values.get(path[0]) : undefined),
+  });
+  const n = typeof result === "number" ? result : Number(result);
+  return Number.isFinite(n) ? n : 0;
 }
 
 export type ChartSeries = { key: string; label: string };

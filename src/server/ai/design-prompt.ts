@@ -212,6 +212,25 @@ export const view = z.union([
   }),
 ]);
 
+/** A card's formula over named totals; shared with the workspace assistant. */
+export const widgetCalc = z
+  .object({
+    terms: z
+      .array(
+        z.object({
+          id: z.string().describe("snake_case name used in the formula, e.g. bookings"),
+          entityId: z.string(),
+          op: z.enum(["count", "sum", "avg"]),
+          fieldId: z.string().optional().describe("sum and avg: a number or money field of that record type"),
+          filter: z.string().optional().describe("Formula over that record type's fields"),
+        }),
+      )
+      .describe("Named totals, each from one record type"),
+    expr: z.string().describe("Arithmetic over the term ids, e.g. bookings + other_income - expenses"),
+    format: z.enum(["money", "number", "percent"]).optional(),
+  })
+  .describe("A formula over named totals; use it to combine record types or do arithmetic");
+
 export const widget = z.object({
   id: z.string(),
   title: z.string(),
@@ -232,6 +251,7 @@ export const widget = z.object({
     })
     .optional(),
   target: z.number().optional().describe("progress only"),
+  calc: widgetCalc.optional().describe("stat or progress only: combine record types or do arithmetic"),
   list: z
     .object({
       fieldIds: z.array(z.string()),
@@ -368,6 +388,9 @@ Rules for a valid blueprint:
   layout or process map. Use them when asked.
 - Charts plot over time (dateFieldId, bucket; kind line, area or bar) or by category (groupByFieldId; kind bar
   or donut). A reports page is a system with only widgets: stats for totals and several charts.
+- A stat that combines record types or needs arithmetic (total income = bookings + other income, profit,
+  collection rate) uses calc: named terms (count/sum/avg of one record type with its own filter) and expr over
+  their ids, e.g. "bookings + other_income"; format percent for rates.
 - Systems are the sidebar pages. Put an Overview system first with 3 to 6 widgets, then one page per area the
   owner manages day to day, usually 3 to 6 pages: each main record type (bookings, courts, players, clients,
   products, tasks…) gets its own page with its own views, e.g. "Bookings" (schedule and list), "Courts" (all

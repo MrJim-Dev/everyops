@@ -25,6 +25,12 @@ export type ChangeOp =
   | { op: "add_view"; systemId: string; view: View }
   | { op: "add_view_field"; viewId: string; fieldId: string }
   | { op: "add_widget"; systemId: string; widget: Widget }
+  /** Changes a dashboard card: its title, what it counts or adds up, its formula, or its target. */
+  | {
+      op: "update_widget";
+      widgetId: string;
+      patch: Partial<Pick<Widget, "title" | "filter" | "metric" | "calc" | "target">>;
+    }
   | { op: "rename_workspace"; name: string }
   | { op: "add_entity"; entity: Entity }
   | { op: "add_system"; system: System }
@@ -133,6 +139,18 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         if (next.widgets.some((w) => w.id === op.widget.id)) break;
         next.widgets.push(op.widget);
         addTo(next.systems.find((s) => s.id === op.systemId)?.widgetIds, op.widget.id);
+        break;
+      }
+      case "update_widget": {
+        const widget = next.widgets.find((w) => w.id === op.widgetId);
+        if (!widget) break;
+        Object.assign(widget, op.patch);
+        // A card with a formula belongs to the record type of its first total; each total has its own filter.
+        if (op.patch.calc?.terms[0]) {
+          widget.entityId = op.patch.calc.terms[0].entityId;
+          if (op.patch.filter === undefined) delete widget.filter;
+        }
+        if (widget.filter === "") delete widget.filter;
         break;
       }
       case "rename_workspace":
