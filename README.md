@@ -8,7 +8,8 @@ Accounts and sessions run on the server (Better Auth + Kysely on PostgreSQL). Wo
 
 ```bash
 pnpm install
-pnpm env:pull     # writes .env.local from AWS Secrets Manager (profile mrjim-new)
+pnpm env:pull     # writes .env.local from Google Secret Manager (gcloud signed in to everyops-prod)
+pnpm db:proxy     # Cloud SQL Auth Proxy on 127.0.0.1:5433; keep it running in its own terminal
 pnpm db:migrate   # creates or updates the auth tables
 pnpm db:seed      # creates the demo account
 pnpm dev          # http://localhost:3000
@@ -22,7 +23,7 @@ The first visit seeds four demo workspaces: Court House PH, Tita Nena's Canteen,
 
 ## Database and auth
 
-The database is `everyops` on the MrJim AWS RDS instance `mrjim-postgres` (account 651952795536, ap-southeast-1), reached as `everyops_runtime`, which owns the database. Credentials live in Secrets Manager: `everyops/runtime-db` and `everyops/auth-config`. See `.env.example` for every variable. TLS is verified against `certs/rds-global-bundle.pem`.
+The database is `everyops` on the Cloud SQL instance `everyops-db` (PostgreSQL 17, project `everyops-prod`, `asia-southeast1`), reached as `everyops_runtime`, which owns the database. Connections are encrypted end to end: Cloud Run uses its built-in Cloud SQL socket and local development uses the Cloud SQL Auth Proxy, so no IP addresses are allowlisted. Credentials live in Google Secret Manager: `everyops-db-password`, `everyops-database-url` (the Cloud Run socket URL), `everyops-better-auth-secret` and `everyops-db-postgres-password` (admin, for operators only). See `.env.example` for every variable.
 
 | File | Role |
 |---|---|

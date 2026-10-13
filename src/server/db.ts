@@ -14,17 +14,11 @@ function createPool() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString)
     throw new Error("DATABASE_URL is not set. Run `pnpm env:pull` to create .env.local.");
-  // RDS requires TLS. Verify the server against the AWS RDS CA bundle unless explicitly disabled (local Postgres).
-  const ssl =
-    process.env.DATABASE_SSL === "disable"
-      ? false
-      : {
-          rejectUnauthorized: true,
-          ca: readFileSync(
-            process.env.DATABASE_CA_PATH ?? path.join(process.cwd(), "certs/rds-global-bundle.pem"),
-            "utf8",
-          ),
-        };
+  // Cloud SQL is reached through an encrypted channel: the Cloud Run socket (/cloudsql/…) in production and
+  // the Cloud SQL Auth Proxy on localhost in development, so the driver itself needs no TLS. Set
+  // DATABASE_CA_PATH only when connecting straight to a TLS server (it is then verified against that CA).
+  const caPath = process.env.DATABASE_CA_PATH;
+  const ssl = caPath ? { rejectUnauthorized: true, ca: readFileSync(path.resolve(caPath), "utf8") } : false;
   return new Pool({
     connectionString,
     ssl,

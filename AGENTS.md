@@ -15,7 +15,8 @@ Describe your business, and EveryOps builds the systems it needs (bookings, POS,
 ## Commands
 
 ```bash
-pnpm env:pull     # .env.local from AWS Secrets Manager (profile mrjim-new); never print or commit it
+pnpm env:pull     # .env.local from Google Secret Manager (gcloud, project everyops-prod); never print or commit it
+pnpm db:proxy     # Cloud SQL Auth Proxy on 127.0.0.1:5433; required for local dev, migrate and seed
 pnpm db:migrate   # Better Auth tables; idempotent
 pnpm db:seed      # demo account james@everyops.app / everyops2026; idempotent
 pnpm dev
@@ -33,8 +34,9 @@ Use pnpm only. `pnpm build` matters: `cacheComponents` errors (below) only show 
 
 ## Database and auth
 
-- Postgres database `everyops` on MrJim AWS RDS `mrjim-postgres` (account 651952795536, ap-southeast-1), login `everyops_runtime`. Secrets: `everyops/runtime-db`, `everyops/auth-config`. Verify `aws sts get-caller-identity --profile mrjim-new` before any AWS change. It will move to Cloud SQL on Cloud Run later.
-- Kysely is the only query layer (`src/server/db.ts`); add app tables to its `Database` type. No ORM. TLS is verified with `certs/rds-global-bundle.pem` (the one `.pem` allowed in git).
+- Postgres database `everyops` on Cloud SQL `everyops-db` (PostgreSQL 17, project `everyops-prod`, `asia-southeast1`, connection `everyops-prod:asia-southeast1:everyops-db`), login `everyops_runtime`. Secrets in Google Secret Manager: `everyops-db-password`, `everyops-database-url`, `everyops-better-auth-secret`. Check `gcloud config get project` is `everyops-prod` (account ocampojamesss@gmail.com) before any Google Cloud change.
+- Cloud Run runs as `everyops-run@everyops-prod.iam.gserviceaccount.com` (Vertex AI user, Secret Manager accessor, Cloud SQL client). Never deploy as the default compute service account.
+- Kysely is the only query layer (`src/server/db.ts`); add app tables to its `Database` type. No ORM. Never open the instance to public IPs; connect through the socket or the proxy.
 - Better Auth (`src/server/auth.ts`) owns `user`, `session`, `account`, `verification`; change them through its config plus `pnpm db:migrate`, never by hand.
 - Browser code uses `src/lib/auth/client.ts` only (`useCurrentUser`, `useAuthReady`, `signIn`, …). Keep its `AuthResult` messages: one message for unknown email and wrong password, same confirmation whether or not a reset email exists.
 - Page protection has two layers, and both are required: `src/proxy.ts` (cookie presence only, private paths in `config.matcher`) and `<Suspense><RequireSession next=…>` in the page or layout (real session check). The client `RequireAuth` guard is for sign-out transitions, not security. Server functions and route handlers must check the session themselves.
