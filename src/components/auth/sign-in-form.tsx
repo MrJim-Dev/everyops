@@ -42,11 +42,11 @@ export function SignInForm() {
   return (
     <RedirectIfSignedIn next={next}>
       <AuthShell
-        title="Sign in to Hulma"
+        title="Sign in to EveryOps"
         description="Welcome back. Your workspaces are waiting."
         footer={
           <>
-            New to Hulma?{" "}
+            New to EveryOps?{" "}
             <AuthLink href={`/sign-up${next ? `?next=${encodeURIComponent(next)}` : ""}`}>
               Create an account
             </AuthLink>

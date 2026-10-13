@@ -27,7 +27,7 @@ export default function HomePage() {
             className="animate-rise stagger text-[15px] text-muted-foreground"
             style={{ "--i": 1 } as React.CSSProperties}
           >
-            Describe how you work. Hulma asks the right questions, then builds it in your workspace.
+            Describe how you work. EveryOps asks the right questions, then builds it in your workspace.
           </p>
         </div>
         <div className="animate-rise stagger w-full" style={{ "--i": 2 } as React.CSSProperties}>

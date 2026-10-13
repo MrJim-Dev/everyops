@@ -1,7 +1,7 @@
 /**
  * Blueprint: the typed description of every system inside a workspace.
  * One generic engine and one set of views render any blueprint, so a client
- * "system" is configuration only. Shapes follow the Hulma design spec §4.
+ * "system" is configuration only. Shapes follow the EveryOps design spec §4.
  */
 
 export type IconName =

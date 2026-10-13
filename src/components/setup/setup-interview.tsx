@@ -34,7 +34,7 @@ import { cn } from "@/lib/utils";
 import { AssistantMessage, UserMessage } from "./messages";
 
 /**
- * Ask Hulma's first conversation. Hulma asks at most three questions at a
+ * Ask EveryOps's first conversation. EveryOps asks at most three questions at a
  * time, keeps a readable profile on the right, and shows exactly what it will
  * build before anything is created.
  */
@@ -111,7 +111,7 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
 
   const step = steps[Math.min(stepIndex, steps.length - 1)];
   const visible = step.questions.filter((q) => q.id !== "peak_rate" || answers.peak === "yes");
-  // The business name is optional (Hulma falls back to a placeholder); everything else needs an answer.
+  // The business name is optional (EveryOps falls back to a placeholder); everything else needs an answer.
   const missing = visible.some(
     (q) => q.kind !== "text" && (answers[q.id] === undefined || answers[q.id] === ""),
   );
@@ -166,7 +166,7 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
           >
             <InputGroup className="h-11">
               <InputGroupInput
-                aria-label="Add a note for Hulma"
+                aria-label="Add a note for EveryOps"
                 placeholder="Add anything else I should know…"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -195,7 +195,7 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
         {thinking ? (
           <AssistantMessage>
             <TypingIndicator
-              label={stepIndex + 1 >= steps.length ? "Designing your workspace" : "Hulma is thinking"}
+              label={stepIndex + 1 >= steps.length ? "Designing your workspace" : "EveryOps is thinking"}
             />
           </AssistantMessage>
         ) : !done ? (

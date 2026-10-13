@@ -107,9 +107,9 @@ export function CommandMenu() {
             {ws.mode === "live" ? (
               <CommandGroup heading="Actions">
                 {canManage(ws.role) ? (
-                  <CommandItem value="ask hulma change" onSelect={() => go(`${ws.basePath}/ask`)}>
+                  <CommandItem value="ask everyops change" onSelect={() => go(`${ws.basePath}/ask`)}>
                     <SparkleIcon />
-                    Ask Hulma for a change…
+                    Ask EveryOps for a change…
                   </CommandItem>
                 ) : null}
                 <CommandItem value="history versions undo" onSelect={() => go(`${ws.basePath}/history`)}>

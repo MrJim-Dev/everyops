@@ -1,4 +1,4 @@
-# Hulma — Design Spec
+# EveryOps — Design Spec
 
 Date: 2026-10-13 · Status: written, awaiting James's review · Competition: Google Cloud AI Builder Cup 2026 (submission closes 2026-10-18)
 
@@ -8,7 +8,7 @@ Companion documents: ../../../../AI Builder Cup 2026.md (event facts), ../../../
 
 **What James said**
 
-- Hulma is one platform. A business never gets a separate app. The AI shapes systems *inside that business's dashboard*.
+- EveryOps is one platform. A business never gets a separate app. The AI shapes systems *inside that business's dashboard*.
 - The AI works out what data to save, how to display it, what the line of business is and what the user wants. It asks follow-up questions until its information is complete.
 - It must be able to create: booking systems (rental, pickleball), social media management, finance/sales trackers, HRIS, and POS.
 - The system composes tables, kanban, lists, charts and interactive components.
@@ -47,7 +47,7 @@ Storage options for C: Cloud SQL Postgres with JSONB records (chosen: transactio
 ```mermaid
 flowchart TB
   subgraph UI[Next.js UI on Cloud Run]
-    Shell[App shell + ⌘K] --> Ask[Ask Hulma chat]
+    Shell[App shell + ⌘K] --> Ask[Ask EveryOps chat]
     Shell --> Views[View renderers]
     Shell --> ChangeDlg[Change plan dialog]
   end
@@ -244,8 +244,8 @@ Linear-inspired. The v2 mockups are reference only.
 
 - Dark first (with light mode tokens). Off-black #0E0E10 shell and #141416 content panel. 1px #232326 hairlines. One accent: muted teal #3FA796. Warning amber, neutral grey. No pure black, no glows, no gradients, no emoji.
 - Geist Sans 13px UI text and Geist Mono for numbers, times and ids. Rows are 32px. Sections are separated by hairlines instead of cards.
-- Sidebar: workspace switcher, Ask Hulma, Inbox, a Systems list (from blueprint.systems), Team, Help. The content panel has a 40px top bar with breadcrumb and actions, a view switcher as text tabs, and filters as chips.
-- ⌘K command bar for navigation, "Ask Hulma…" and "Change this workspace…". It opens with no animation (Emil: keyboard-initiated). Dialogs and panes use 180–220ms ease-out cubic-bezier(0.23,1,0.32,1). Buttons scale to 0.98 on press.
+- Sidebar: workspace switcher, Ask EveryOps, Inbox, a Systems list (from blueprint.systems), Team, Help. The content panel has a 40px top bar with breadcrumb and actions, a view switcher as text tabs, and filters as chips.
+- ⌘K command bar for navigation, "Ask EveryOps…" and "Change this workspace…". It opens with no animation (Emil: keyboard-initiated). Dialogs and panes use 180–220ms ease-out cubic-bezier(0.23,1,0.32,1). Buttons scale to 0.98 on press.
 - The record pane slides in from the right with Linear-style properties and an activity list.
 - The change plan dialog shows + / ~ / − rows, an Impact section with old → new values in mono, Edit, and Apply ⌘↵. An "Undo" toast stays for 10 seconds, and undo is also available from the version list.
 - Empty workspace: the single prompt "Tell me about your business."
@@ -286,7 +286,7 @@ workspaces(id, slug, name, current_version) · users(id, workspace_id, name, rol
 
 ## 14. Deployment
 
-One Cloud Run service hulma-web (Next.js standalone output, Node 22) in asia-southeast1, built with gcloud run deploy --source. Database is Cloud SQL Postgres 16 (smallest shared-core tier) through the Cloud SQL Node connector. Gemini runs via Vertex AI with the service account (no API keys). SESSION_SECRET and DB_PASSWORD live in Secret Manager. Min instances is 1 during judging to avoid cold starts.
+One Cloud Run service everyops-web (Next.js standalone output, Node 22) in asia-southeast1, built with gcloud run deploy --source. Database is Cloud SQL Postgres 16 (smallest shared-core tier) through the Cloud SQL Node connector. Gemini runs via Vertex AI with the service account (no API keys). SESSION_SECRET and DB_PASSWORD live in Secret Manager. Min instances is 1 during judging to avoid cold starts.
 
 ## 15. Out of scope
 

@@ -44,7 +44,7 @@ export function SignUpForm() {
     <RedirectIfSignedIn next={next}>
       <AuthShell
         title="Create your account"
-        description="Describe your business. Hulma builds the systems it needs."
+        description="Describe your business. EveryOps builds the systems it needs."
         footer={
           <>
             Already have an account?{" "}

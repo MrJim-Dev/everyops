@@ -1,6 +1,6 @@
-# Hulma
+# EveryOps
 
-Describe your business, and Hulma builds the systems it needs (bookings, POS, content, finance, HR) inside one workspace. Built for the Google Cloud AI Builder Cup 2026.
+Describe your business, and EveryOps builds the systems it needs (bookings, POS, content, finance, HR) inside one workspace. Built for the Google Cloud AI Builder Cup 2026.
 
 This is the **frontend build**. Every screen works with data saved in the browser. The AI steps are scripted stand-ins with the same inputs and outputs Gemini will use, so the backend can replace them without UI changes.
 
@@ -24,7 +24,7 @@ A client's system is a **blueprint**: a small JSON document that lists entities,
 ```
 blueprint (JSON) ──► engine (src/lib/engine) ──► views (src/components/views, widgets)
         ▲                         │
-  Ask Hulma (src/lib/assistant)   └──► records (JSON fields per record)
+  Ask EveryOps (src/lib/assistant)   └──► records (JSON fields per record)
 ```
 
 | Folder | What lives there |
@@ -66,7 +66,7 @@ Workspaces need an account. Community systems and their previews stay public.
 | `/forgot-password` | Always shows the same confirmation. Email isn't connected yet, so the page shows the reset link directly |
 | `/reset-password` | Single-use link, valid for 30 minutes, with a confirmation field |
 
-Demo account: `james@hulma.app` / `hulma2026`.
+Demo account: `james@everyops.app` / `everyops2026`.
 
 Each account has its own workspaces; the demo workspaces are created on an account's first sign-in.
 
@@ -91,7 +91,7 @@ Both are tabs in workspace Settings, next to General. Publish only shows for own
 | Role | Can do |
 |---|---|
 | Owner | Everything, including deleting the workspace |
-| Admin | Ask Hulma for changes, undo, rename, publish, manage the team |
+| Admin | Ask EveryOps for changes, undo, rename, publish, manage the team |
 | Staff | Add and edit records |
 | Viewer | View only |
 

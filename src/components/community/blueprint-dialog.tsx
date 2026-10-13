@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import type { CatalogSystem } from "@/lib/catalog";
 
-/** The whole system is this JSON. Hulma renders it; no code is generated. */
+/** The whole system is this JSON. EveryOps renders it; no code is generated. */
 export function BlueprintDialog({ system, trigger }: { system: CatalogSystem; trigger: ReactElement }) {
   const blueprint = useMemo(() => system.sample(new Date("2026-10-13T09:00:00+08:00")).blueprint, [system]);
   const json = useMemo(() => JSON.stringify(blueprint, null, 2), [blueprint]);
@@ -24,7 +24,7 @@ export function BlueprintDialog({ system, trigger }: { system: CatalogSystem; tr
           <DialogTitle>{system.name} blueprint</DialogTitle>
           <DialogDescription>
             This file is the entire system: {blueprint.entities.length} record types, {blueprint.views.length}{" "}
-            screens and {blueprint.rules.length} rules in {(size / 1024).toFixed(1)} KB. Hulma's engine
+            screens and {blueprint.rules.length} rules in {(size / 1024).toFixed(1)} KB. EveryOps's engine
             renders it; no code is generated.
           </DialogDescription>
         </DialogHeader>

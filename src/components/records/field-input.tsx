@@ -32,7 +32,7 @@ type Props = {
   invalid?: boolean;
 };
 
-/** One input for every field type, so every form in Hulma behaves the same. */
+/** One input for every field type, so every form in EveryOps behaves the same. */
 export function FieldInput({ id, field, value, onChange, invalid }: Props) {
   const common = { id, "aria-invalid": invalid || undefined, "aria-required": field.required || undefined };
 

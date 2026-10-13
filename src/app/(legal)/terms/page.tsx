@@ -6,17 +6,17 @@ export const metadata: Metadata = { title: "Terms of Service" };
 export default function Page() {
   return (
     <LegalPage title="Terms of Service" updated="October 13, 2026">
-      <h2>Using Hulma</h2>
+      <h2>Using EveryOps</h2>
       <p>
-        Hulma lets you describe your business and builds systems such as bookings, a register, content
+        EveryOps lets you describe your business and builds systems such as bookings, a register, content
         planning, finances and leave inside your workspace. You may use it for lawful business purposes.
       </p>
       <h2>Your account</h2>
       <p>Keep your password private. You are responsible for activity in your workspaces.</p>
       <h2>Your data</h2>
       <p>
-        You own the records you put into Hulma and the blueprints Hulma designs for you. You can export both
-        from workspace settings at any time.
+        You own the records you put into EveryOps and the blueprints EveryOps designs for you. You can export
+        both from workspace settings at any time.
       </p>
       <h2>Community systems</h2>
       <p>
@@ -25,8 +25,8 @@ export default function Page() {
       </p>
       <h2>AI-made changes</h2>
       <p>
-        Hulma shows every change before it is applied and keeps a history you can undo. Review changes before
-        applying them, especially changes to prices or balances.
+        EveryOps shows every change before it is applied and keeps a history you can undo. Review changes
+        before applying them, especially changes to prices or balances.
       </p>
       <h2>Availability</h2>
       <p>

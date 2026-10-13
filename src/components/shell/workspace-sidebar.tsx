@@ -62,7 +62,7 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
                 icon={<SparkleIcon />}
                 onNavigate={onNavigate}
               >
-                Ask Hulma
+                Ask EveryOps
               </SidebarLink>
             ) : null}
             <SidebarLink
@@ -88,7 +88,7 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
       <SidebarSection label="Systems">
         {ws.blueprint.systems.length === 0 ? (
           <p className="px-2 py-1 text-[12px] leading-relaxed text-muted-foreground">
-            Your systems will appear here once Hulma sets them up.
+            Your systems will appear here once EveryOps sets them up.
           </p>
         ) : (
           ws.blueprint.systems.map((system) => {
@@ -123,7 +123,7 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
           <UserMenu variant="sidebar" />
           <Link
             href="/"
-            aria-label="Hulma home"
+            aria-label="EveryOps home"
             className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
           >
             <LogoMark />

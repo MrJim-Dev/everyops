@@ -71,7 +71,7 @@ export function PublishPage() {
     return (
       <ViewEmpty
         title="Nothing to publish yet"
-        description="Finish setting up this workspace with Ask Hulma first."
+        description="Finish setting up this workspace with Ask EveryOps first."
       />
     );
   }

@@ -1,5 +1,5 @@
 /**
- * Setup interview for Ask Hulma. In this frontend build the interviewer is
+ * Setup interview for Ask EveryOps. In this frontend build the interviewer is
  * scripted; the shapes (profile, steps, questions) are what the Gemini
  * Interviewer will fill in later, so the UI does not change when it lands.
  */

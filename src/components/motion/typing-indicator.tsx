@@ -1,5 +1,5 @@
 /** Three dots while the assistant "thinks". Reduced motion shows them static. */
-export function TypingIndicator({ label = "Hulma is thinking" }: { label?: string }) {
+export function TypingIndicator({ label = "EveryOps is thinking" }: { label?: string }) {
   return (
     <output aria-live="polite" className="inline-flex h-5 items-center gap-1">
       <span className="sr-only">{label}</span>

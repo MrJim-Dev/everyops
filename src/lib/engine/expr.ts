@@ -1,5 +1,5 @@
 /**
- * Hulma's formula language: a tiny, side-effect-free expression interpreter.
+ * EveryOps's formula language: a tiny, side-effect-free expression interpreter.
  * Blueprints carry short expressions (rates, totals, filters, rule guards);
  * they are parsed into an AST and evaluated against a record. There is no
  * eval, no property access beyond declared fields, and only the functions in

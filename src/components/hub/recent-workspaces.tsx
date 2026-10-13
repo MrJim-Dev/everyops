@@ -35,7 +35,7 @@ export function RecentWorkspaces() {
               <span className="block truncate text-[13.5px] font-medium">{w.name}</span>
               <span className="block truncate text-[12px] text-muted-foreground">
                 {w.settingUp
-                  ? "Setting up with Ask Hulma"
+                  ? "Setting up with Ask EveryOps"
                   : w.shared
                     ? `Shared with you · ${w.summary}`
                     : w.summary}

@@ -3,7 +3,7 @@
 import { CheckCircleIcon, InfoIcon, SpinnerIcon, WarningIcon, XCircleIcon } from "@phosphor-icons/react";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 
-// Hulma ships dark only, so the toaster is pinned to the dark theme.
+// EveryOps ships dark only, so the toaster is pinned to the dark theme.
 function Toaster(props: ToasterProps) {
   return (
     <Sonner

@@ -18,7 +18,7 @@ export function HistoryList() {
     return (
       <ViewEmpty
         title="No changes yet"
-        description="When you ask Hulma to change this workspace, each version appears here and can be undone."
+        description="When you ask EveryOps to change this workspace, each version appears here and can be undone."
       />
     );
   }

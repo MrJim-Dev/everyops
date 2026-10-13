@@ -1,11 +1,20 @@
 import { cn } from "@/lib/utils";
 
-/** Hulma mark: an outlined rounded square with a horizontal notch. */
+/**
+ * EveryOps mark: a stacked "E" of three rounded bars with a shorter middle bar.
+ * Drawn in the current text color so it follows the theme. Matches public/brand/everyops-mark.svg.
+ */
 export function LogoMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className={cn("size-4 shrink-0", className)}>
-      <rect x="1.75" y="1.75" width="12.5" height="12.5" rx="3.5" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M5.25 8h5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    <svg
+      viewBox="0 0 92 100"
+      fill="currentColor"
+      aria-hidden="true"
+      className={cn("size-4 shrink-0", className)}
+    >
+      <rect x="0" y="0" width="92" height="26" rx="11" />
+      <rect x="0" y="37" width="60" height="26" rx="11" />
+      <rect x="0" y="74" width="92" height="26" rx="11" />
     </svg>
   );
 }
@@ -18,8 +27,8 @@ export function Logo({ className }: { className?: string }) {
         className,
       )}
     >
-      <LogoMark className="size-[18px]" />
-      Hulma
+      <LogoMark className="size-[16px]" />
+      EveryOps
     </span>
   );
 }

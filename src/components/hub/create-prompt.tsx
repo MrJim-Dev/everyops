@@ -33,7 +33,7 @@ const EMPTY: WorkspaceData = {
   records: [],
 };
 
-/** The front door: describe the business, and Ask Hulma takes it from there. */
+/** The front door: describe the business, and Ask EveryOps takes it from there. */
 export function CreatePrompt() {
   const router = useRouter();
   const createWorkspace = useWorkspaces((s) => s.createWorkspace);
@@ -77,7 +77,7 @@ export function CreatePrompt() {
           />
           <InputGroupAddon align="block-end" className="justify-between px-3 pb-3">
             <span className="text-[12px] text-muted-foreground">
-              Hulma asks a few questions, then builds it in your workspace.
+              EveryOps asks a few questions, then builds it in your workspace.
             </span>
             <InputGroupButton
               type="submit"

@@ -76,7 +76,7 @@ export const usePublished = create<State>()(
       unpublish: (id) => set((s) => ({ systems: s.systems.filter((x) => x.id !== id) })),
     }),
     {
-      name: "hulma.community",
+      name: "everyops.community",
       version: 1,
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,

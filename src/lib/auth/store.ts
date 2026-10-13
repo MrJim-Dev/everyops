@@ -40,7 +40,7 @@ type AuthState = {
   deleteAccount: (password: string) => Promise<AuthResult & { accountId?: string }>;
 };
 
-export const DEMO_ACCOUNT = { name: "James Ocampo", email: "james@hulma.app", password: "hulma2026" };
+export const DEMO_ACCOUNT = { name: "James Ocampo", email: "james@everyops.app", password: "everyops2026" };
 
 const RESET_TTL_MS = 30 * 60 * 1000;
 let seeding = false;
@@ -193,7 +193,7 @@ export const useAuth = create<AuthState>()(
       },
     }),
     {
-      name: "hulma.auth",
+      name: "everyops.auth",
       version: 1,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({

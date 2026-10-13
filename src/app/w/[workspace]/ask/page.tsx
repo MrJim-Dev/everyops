@@ -5,7 +5,7 @@ import { AskRoute } from "@/components/routes/workspace-routes";
 // They can't be prerendered for instant navigation until the data moves to the server.
 export const instant = false;
 
-export const metadata: Metadata = { title: "Ask Hulma" };
+export const metadata: Metadata = { title: "Ask EveryOps" };
 
 export default function AskPage() {
   return <AskRoute />;

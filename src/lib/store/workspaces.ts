@@ -36,7 +36,7 @@ export type Invite = {
   invitedBy: string;
 };
 
-/** Where Ask Hulma's setup interview left off, so a refresh doesn't lose answers. */
+/** Where Ask EveryOps's setup interview left off, so a refresh doesn't lose answers. */
 export type SetupProgress = { stepIndex: number; answers: Answers; notes: string[] };
 
 export type ChangeEntry = {
@@ -67,7 +67,7 @@ export type Workspace = {
   ownerId?: string;
   members?: Member[];
   invites?: Invite[];
-  /** Set while Ask Hulma is still setting the workspace up. */
+  /** Set while Ask EveryOps is still setting the workspace up. */
   setup?: { prompt: string; progress?: SetupProgress };
 };
 
@@ -507,7 +507,7 @@ export const useWorkspaces = create<State>()(
       };
     },
     {
-      name: "hulma.workspaces",
+      name: "everyops.workspaces",
       // Bump when demo blueprints change. Saved data from an older version is replaced by fresh demos;
       // this is a frontend prototype, so there is no per-version migration yet.
       version: DATA_VERSION,

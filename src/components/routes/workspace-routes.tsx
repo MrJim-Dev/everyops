@@ -50,7 +50,7 @@ export function PreviewWorkspaceLayout({
   );
 }
 
-/** /w/[workspace] and /preview/[id]: go to Ask Hulma during setup, otherwise the first system. */
+/** /w/[workspace] and /preview/[id]: go to Ask EveryOps during setup, otherwise the first system. */
 export function FirstSystemRedirect() {
   const ws = useWorkspace();
   const router = useRouter();
@@ -86,7 +86,7 @@ export function AskRoute() {
   if (workspace?.setup) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <PageHeader title="Ask Hulma" description="Set up your workspace" className="border-b pb-3" />
+        <PageHeader title="Ask EveryOps" description="Set up your workspace" className="border-b pb-3" />
         <SetupInterview prompt={workspace.setup.prompt} progress={workspace.setup.progress} />
       </div>
     );
@@ -95,7 +95,7 @@ export function AskRoute() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <PageHeader
-        title="Ask Hulma"
+        title="Ask EveryOps"
         description={`Change ${ws.name} in your own words.`}
         className="border-b pb-3"
       />

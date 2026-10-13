@@ -77,7 +77,7 @@ export function ForgotPasswordForm() {
   return (
     <AuthShell
       title="Reset your password"
-      description="Enter the email you use for Hulma and we'll send you a reset link."
+      description="Enter the email you use for EveryOps and we'll send you a reset link."
       footer={
         <>
           Remembered it? <AuthLink href="/sign-in">Sign in</AuthLink>

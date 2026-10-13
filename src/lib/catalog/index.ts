@@ -32,7 +32,7 @@ export type CatalogSystem = {
   version: string;
   uses: number;
   includes: string[];
-  /** Set for systems published by someone using Hulma (not the curated catalog). */
+  /** Set for systems published by someone using EveryOps (not the curated catalog). */
   authorId?: string;
   sample: (now: Date, workspaceName?: string) => WorkspaceData;
 };
