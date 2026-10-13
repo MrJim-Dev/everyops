@@ -4,10 +4,11 @@ import { ArrowRightIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SystemCard } from "@/components/community/system-card";
-import { CATALOG } from "@/lib/catalog";
+import { useCatalog } from "@/lib/community/use-catalog";
 
 export function CommunityStarters() {
   const router = useRouter();
+  const catalog = useCatalog();
   return (
     <section className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -21,7 +22,7 @@ export function CommunityStarters() {
         </Link>
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {CATALOG.slice(0, 3).map((system, i) => (
+        {catalog.slice(0, 3).map((system, i) => (
           <SystemCard
             key={system.id}
             index={i + 4}

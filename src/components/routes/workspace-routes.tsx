@@ -10,10 +10,11 @@ import { PageHeader } from "@/components/shell/page-header";
 import { ShellSkeleton } from "@/components/shell/shell-skeleton";
 import { WorkspaceShell } from "@/components/shell/workspace-shell";
 import { SystemPage } from "@/components/system/system-page";
+import { ViewEmpty } from "@/components/views/view-empty";
 import { LiveWorkspace } from "@/components/workspace/live-workspace";
 import { PreviewWorkspace } from "@/components/workspace/preview-workspace";
 import { useWorkspace } from "@/components/workspace/workspace-context";
-import { useWorkspaces } from "@/lib/store/workspaces";
+import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 
 type Params<T> = Promise<T>;
 
@@ -72,6 +73,15 @@ export function AskRoute() {
   const ws = useWorkspace();
   const workspace = useWorkspaces((s) => s.workspaces[ws.id]);
   const changes = workspace?.changes ?? [];
+
+  if (!canManage(ws.role)) {
+    return (
+      <ViewEmpty
+        title="Only admins can change this workspace"
+        description="Ask the owner or an admin of this workspace if something needs to be added or changed."
+      />
+    );
+  }
 
   if (workspace?.setup) {
     return (

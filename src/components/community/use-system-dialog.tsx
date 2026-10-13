@@ -18,7 +18,7 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useCurrentUser } from "@/lib/auth/store";
-import { getCatalogSystem } from "@/lib/catalog";
+import { useCatalogSystem } from "@/lib/community/use-catalog";
 import { useWorkspaces } from "@/lib/store/workspaces";
 
 /**
@@ -35,7 +35,7 @@ export function UseSystemDialog({
   /** Fill a workspace that is still being set up instead of creating a new one. */
   replaceSlug?: string;
 }) {
-  const system = getCatalogSystem(systemId);
+  const system = useCatalogSystem(systemId);
   const router = useRouter();
   const createWorkspace = useWorkspaces((s) => s.createWorkspace);
   const finishSetup = useWorkspaces((s) => s.finishSetup);
@@ -87,17 +87,19 @@ export function UseSystemDialog({
                 onChange={(e) => setName(e.target.value)}
               />
             </Field>
-            <Field orientation="horizontal">
-              <Checkbox
-                id="use-sample"
-                checked={withSample}
-                onCheckedChange={(c) => setWithSample(c === true)}
-              />
-              <div className="flex flex-col gap-0.5">
-                <FieldLabel htmlFor="use-sample">Start with sample data</FieldLabel>
-                <FieldDescription>Useful for trying it out. Delete it any time.</FieldDescription>
-              </div>
-            </Field>
+            {system.authorId ? null : (
+              <Field orientation="horizontal">
+                <Checkbox
+                  id="use-sample"
+                  checked={withSample}
+                  onCheckedChange={(c) => setWithSample(c === true)}
+                />
+                <div className="flex flex-col gap-0.5">
+                  <FieldLabel htmlFor="use-sample">Start with sample data</FieldLabel>
+                  <FieldDescription>Useful for trying it out. Delete it any time.</FieldDescription>
+                </div>
+              </Field>
+            )}
           </FieldGroup>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>

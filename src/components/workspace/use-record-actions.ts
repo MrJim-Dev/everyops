@@ -11,6 +11,7 @@ import {
   updateRecord,
 } from "@/lib/engine/records";
 import { markFresh } from "@/lib/motion/fresh";
+import { canEdit } from "@/lib/store/workspaces";
 import { useWorkspace } from "./workspace-context";
 
 /** Record mutations bound to the current workspace. Rule notices become toasts. */
@@ -18,8 +19,13 @@ export function useRecordActions() {
   const ws = useWorkspace();
   const { data, commit } = ws;
 
+  const readOnly = !canEdit(ws.role);
   const settle = useCallback(
-    (result: MutationResult) => {
+    (result: MutationResult): MutationResult => {
+      if (readOnly) {
+        toast("You have view-only access", { description: "Ask an admin to change your role." });
+        return { ok: false, errors: [{ message: "You have view-only access to this workspace." }] };
+      }
       if (result.ok) {
         commit(result.data);
         markFresh([result.record.id]);
@@ -27,7 +33,7 @@ export function useRecordActions() {
       }
       return result;
     },
-    [commit],
+    [commit, readOnly],
   );
 
   return {
@@ -41,6 +47,10 @@ export function useRecordActions() {
     ),
     remove: useCallback(
       (id: string, label = "Record") => {
+        if (readOnly) {
+          toast("You have view-only access");
+          return;
+        }
         const before = data;
         commit(deleteRecord(data, id));
         toast(`${label} deleted`, {
@@ -48,7 +58,7 @@ export function useRecordActions() {
           duration: 10_000,
         });
       },
-      [data, commit],
+      [data, commit, readOnly],
     ),
     createWithLines: useCallback(
       (parentEntityId: string, parent: RecordData, lineEntityId: string, lines: RecordData[]) =>

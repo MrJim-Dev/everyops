@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from "react";
 import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
+import type { Role } from "@/lib/store/workspaces";
 
 /**
  * Everything a view needs to render and edit a workspace. Saved workspaces
@@ -15,6 +16,10 @@ export type WorkspaceApi = {
   /** Where system routes live, e.g. "/w/court-house" or "/preview/court-bookings". */
   basePath: string;
   name: string;
+  /** The signed-in person's role here. Previews behave as owner (nothing is saved). */
+  role: Role;
+  /** True when someone else owns this workspace and shared it. */
+  isShared: boolean;
   blueprint: Blueprint;
   records: DataRecord[];
   data: WorkspaceData;

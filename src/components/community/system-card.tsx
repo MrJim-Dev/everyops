@@ -48,7 +48,7 @@ export function SystemCard({
         </div>
         <span className="flex shrink-0 items-center gap-1 text-[12px] text-muted-foreground tabular">
           <UsersIcon className="size-3.5" />
-          {formatUses(system.uses)}
+          {system.uses ? formatUses(system.uses) : "New"}
         </span>
       </div>
     </button>

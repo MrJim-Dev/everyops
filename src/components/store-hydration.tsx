@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useAuth } from "@/lib/auth/store";
+import { usePublished } from "@/lib/community/published";
 import { useWorkspaces } from "@/lib/store/workspaces";
 
 /**
@@ -29,6 +30,7 @@ export function StoreHydration() {
     });
     void useAuth.persist.rehydrate();
     void useWorkspaces.persist.rehydrate();
+    void usePublished.persist.rehydrate();
     return () => {
       unsubAuthReady();
       unsubWorkspacesReady();

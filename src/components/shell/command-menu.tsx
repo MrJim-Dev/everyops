@@ -7,7 +7,9 @@ import {
   HouseIcon,
   SparkleIcon,
   SquaresFourIcon,
+  UploadSimpleIcon,
   UserCircleIcon,
+  UsersThreeIcon,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
@@ -24,6 +26,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useHotkey } from "@/hooks/use-hotkey";
 import { useRecentWorkspaces } from "@/lib/store/selectors";
+import { canManage } from "@/lib/store/workspaces";
 import { WorkspaceTile } from "./workspace-tile";
 
 type CommandMenuState = { open: boolean; setOpen: (open: boolean) => void };
@@ -103,14 +106,29 @@ export function CommandMenu() {
             </CommandGroup>
             {ws.mode === "live" ? (
               <CommandGroup heading="Actions">
-                <CommandItem value="ask hulma change" onSelect={() => go(`${ws.basePath}/ask`)}>
-                  <SparkleIcon />
-                  Ask Hulma for a change…
-                </CommandItem>
+                {canManage(ws.role) ? (
+                  <CommandItem value="ask hulma change" onSelect={() => go(`${ws.basePath}/ask`)}>
+                    <SparkleIcon />
+                    Ask Hulma for a change…
+                  </CommandItem>
+                ) : null}
                 <CommandItem value="history versions undo" onSelect={() => go(`${ws.basePath}/history`)}>
                   <ClockCounterClockwiseIcon />
                   Open history
                 </CommandItem>
+                <CommandItem value="team members invite roles" onSelect={() => go(`${ws.basePath}/team`)}>
+                  <UsersThreeIcon />
+                  Team and invites
+                </CommandItem>
+                {canManage(ws.role) ? (
+                  <CommandItem
+                    value="publish community share template"
+                    onSelect={() => go(`${ws.basePath}/publish`)}
+                  >
+                    <UploadSimpleIcon />
+                    Publish to Community
+                  </CommandItem>
+                ) : null}
                 <CommandItem
                   value="settings rename export delete workspace"
                   onSelect={() => go(`${ws.basePath}/settings`)}

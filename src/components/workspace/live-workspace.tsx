@@ -4,7 +4,7 @@ import { type ReactNode, useCallback, useEffect, useMemo } from "react";
 import { ShellSkeleton } from "@/components/shell/shell-skeleton";
 import type { WorkspaceData } from "@/lib/blueprint/types";
 import { useHydrated } from "@/lib/store/use-hydrated";
-import { blueprintOf, useWorkspaces } from "@/lib/store/workspaces";
+import { blueprintOf, roleOf, useWorkspaces } from "@/lib/store/workspaces";
 import { WorkspaceProvider } from "./workspace-context";
 import { WorkspaceMissing } from "./workspace-missing";
 
@@ -14,6 +14,7 @@ export function LiveWorkspace({ slug, children }: { slug: string; children: Reac
   const workspace = useWorkspaces((s) => s.workspaces[slug]);
   const setRecords = useWorkspaces((s) => s.setRecords);
   const open = useWorkspaces((s) => s.open);
+  const me = useWorkspaces((s) => s.owner);
 
   useEffect(() => {
     if (hydrated) open(slug);
@@ -29,12 +30,14 @@ export function LiveWorkspace({ slug, children }: { slug: string; children: Reac
       id: slug,
       basePath: `/w/${slug}`,
       name: workspace.name,
+      role: roleOf(workspace, me) ?? ("viewer" as const),
+      isShared: workspace.ownerId !== me,
       blueprint,
       records: workspace.records,
       data: { blueprint, records: workspace.records },
       commit,
     };
-  }, [workspace, slug, commit]);
+  }, [workspace, slug, commit, me]);
 
   if (!hydrated) return <ShellSkeleton />;
   if (!value) return <WorkspaceMissing />;

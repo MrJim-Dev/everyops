@@ -13,7 +13,9 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { SearchInput } from "@/components/views/search-input";
 import { ViewEmpty } from "@/components/views/view-empty";
-import { CATALOG, CATEGORIES } from "@/lib/catalog";
+import { useCurrentUser } from "@/lib/auth/store";
+import { CATEGORIES } from "@/lib/catalog";
+import { useCatalog } from "@/lib/community/use-catalog";
 import { SystemCard } from "./system-card";
 import { SystemDetail } from "./system-detail";
 
@@ -23,16 +25,23 @@ export function CommunityBrowser() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [sort, setSort] = useState<keyof typeof SORTS>("uses");
-  const [selectedId, setSelectedId] = useState(CATALOG[0].id);
+  const catalog = useCatalog();
+  const user = useCurrentUser();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const systems = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return CATALOG.filter((s) => category === "all" || s.category === category)
+    return catalog
+      .filter((s) =>
+        category === "mine"
+          ? !!user && s.authorId === user.id
+          : category === "all" || s.category === category,
+      )
       .filter((s) => !q || `${s.name} ${s.summary} ${s.author}`.toLowerCase().includes(q))
       .sort((a, b) => (sort === "uses" ? b.uses - a.uses : a.name.localeCompare(b.name)));
-  }, [query, category, sort]);
-  const selected = CATALOG.find((s) => s.id === selectedId) ?? CATALOG[0];
+  }, [catalog, query, category, sort, user]);
+  const selected = catalog.find((s) => s.id === selectedId) ?? systems[0] ?? catalog[0];
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
@@ -46,6 +55,9 @@ export function CommunityBrowser() {
             options={[
               { value: "all", label: "All" },
               ...CATEGORIES.map((c) => ({ value: c.id, label: c.label })),
+              ...(user && catalog.some((s) => s.authorId === user.id)
+                ? [{ value: "mine", label: "Yours" }]
+                : []),
             ]}
           />
           <Select value={sort} onValueChange={(v) => setSort(v as keyof typeof SORTS)} items={SORTS}>

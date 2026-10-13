@@ -6,7 +6,7 @@ import { ViewEmpty } from "@/components/views/view-empty";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { formatDateTime } from "@/lib/format";
 import { markFresh } from "@/lib/motion/fresh";
-import { useWorkspaces } from "@/lib/store/workspaces";
+import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 
 export function HistoryList() {
   const ws = useWorkspace();
@@ -58,7 +58,7 @@ export function HistoryList() {
                 {formatDateTime(entry.appliedAt)} · {entry.recordChanges.length} values updated
               </p>
             </div>
-            {isCurrent ? (
+            {isCurrent && canManage(ws.role) ? (
               <Button
                 variant="outline"
                 size="sm"

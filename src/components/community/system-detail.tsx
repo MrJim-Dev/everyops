@@ -34,7 +34,7 @@ export function SystemDetail({ system }: { system: CatalogSystem }) {
         <UseSystemButton systemId={system.id} />
         <Button variant="outline" render={<Link href={`/preview/${system.id}`} />} nativeButton={false}>
           <EyeIcon data-icon="inline-start" />
-          Preview with sample data
+          {system.authorId ? "Preview" : "Preview with sample data"}
         </Button>
         <p className="text-center text-[12px] text-muted-foreground">
           Creates your own copy. Your business data stays private.

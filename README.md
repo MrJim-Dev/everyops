@@ -52,7 +52,8 @@ blueprint (JSON) ──► engine (src/lib/engine) ──► views (src/componen
 - Data is saved per browser. Bumping `DATA_VERSION` in `src/lib/store/workspaces.ts` replaces saved data with fresh demos.
 - The interviewer guides booking businesses. Other business types are pointed to a matching community system.
 - The change planner understands pricing changes, adding a field, and renaming a workspace.
-- Community authors and usage counts are sample catalog data.
+- Community authors and usage counts are sample catalog data. Systems you publish are stored in this browser.
+- Invites only work for accounts in the same browser until the backend lands.
 
 ## Accounts
 
@@ -76,3 +77,20 @@ Each account has its own workspaces; the demo workspaces are created on an accou
 | `/terms`, `/privacy` | Plain-language policies for the prototype |
 
 In this frontend build, accounts live in the browser (`src/lib/auth/store.ts`) with salted SHA-256 hashes. Pages only call `signIn`, `signUp`, `requestReset`, `resetPassword` and `signOut`, so Firebase Auth can replace that one file. Google sign-in arrives with Firebase.
+
+## Team and Community publishing
+
+| Page | What it does |
+|---|---|
+| `/w/[workspace]/team` | Invite by email with a role, copy or revoke invite links, change roles, remove people, or leave a shared workspace |
+| `/invite/[token]` | Shows who invited you and the role, then joins after you sign in or create an account |
+| `/w/[workspace]/publish` | Publish the workspace design to Community, publish new versions, or unpublish. Records, team and history stay private |
+
+| Role | Can do |
+|---|---|
+| Owner | Everything, including deleting the workspace |
+| Admin | Ask Hulma for changes, undo, rename, publish, manage the team |
+| Staff | Add and edit records |
+| Viewer | View only |
+
+Shared workspaces show "Shared with you" on the home page. Roles live in `src/lib/store/workspaces.ts` (`roleOf`, `canManage`, `canEdit`); published systems live in `src/lib/community/published.ts`.

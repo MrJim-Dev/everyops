@@ -6,6 +6,8 @@ import {
   GearSixIcon,
   MagnifyingGlassIcon,
   SparkleIcon,
+  UploadSimpleIcon,
+  UsersThreeIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -15,6 +17,7 @@ import { UseSystemButton } from "@/components/community/use-system-dialog";
 import { SystemIcon } from "@/components/system-icon";
 import { Kbd } from "@/components/ui/kbd";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { canManage } from "@/lib/store/workspaces";
 import { useCommandMenu } from "./command-menu";
 import { SidebarLink, SidebarSection } from "./sidebar-link";
 import { WorkspaceSwitcher } from "./workspace-switcher";
@@ -23,6 +26,7 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const ws = useWorkspace();
   const pathname = usePathname();
   const { setOpen } = useCommandMenu();
+  const manager = canManage(ws.role);
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   return (
@@ -53,14 +57,16 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
         </button>
         {ws.mode === "live" ? (
           <>
-            <SidebarLink
-              href={`${ws.basePath}/ask`}
-              active={isActive(`${ws.basePath}/ask`)}
-              icon={<SparkleIcon />}
-              onNavigate={onNavigate}
-            >
-              Ask Hulma
-            </SidebarLink>
+            {manager ? (
+              <SidebarLink
+                href={`${ws.basePath}/ask`}
+                active={isActive(`${ws.basePath}/ask`)}
+                icon={<SparkleIcon />}
+                onNavigate={onNavigate}
+              >
+                Ask Hulma
+              </SidebarLink>
+            ) : null}
             <SidebarLink
               href={`${ws.basePath}/history`}
               active={isActive(`${ws.basePath}/history`)}
@@ -69,6 +75,24 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
             >
               History
             </SidebarLink>
+            <SidebarLink
+              href={`${ws.basePath}/team`}
+              active={isActive(`${ws.basePath}/team`)}
+              icon={<UsersThreeIcon />}
+              onNavigate={onNavigate}
+            >
+              Team
+            </SidebarLink>
+            {manager ? (
+              <SidebarLink
+                href={`${ws.basePath}/publish`}
+                active={isActive(`${ws.basePath}/publish`)}
+                icon={<UploadSimpleIcon />}
+                onNavigate={onNavigate}
+              >
+                Publish
+              </SidebarLink>
+            ) : null}
             <SidebarLink
               href={`${ws.basePath}/settings`}
               active={isActive(`${ws.basePath}/settings`)}
@@ -108,7 +132,9 @@ export function WorkspaceSidebar({ onNavigate }: { onNavigate?: () => void }) {
         {ws.mode === "preview" ? (
           <div className="flex flex-col gap-2 rounded-lg border border-sidebar-border p-3">
             <p className="text-[12px] leading-relaxed text-muted-foreground">
-              You're previewing {ws.name} with sample data. Changes here aren't saved.
+              {ws.records.length
+                ? `You're previewing ${ws.name} with sample data. Changes here aren't saved.`
+                : `You're previewing ${ws.name}. It starts empty, and changes here aren't saved.`}
             </p>
             <UseSystemButton systemId={ws.id} />
           </div>

@@ -9,11 +9,13 @@ export type WorkspaceSummary = {
   summary: string;
   openedAt: string;
   settingUp: boolean;
+  shared: boolean;
 };
 
 /** Workspaces in this browser, most recently opened first. */
 export function useRecentWorkspaces(): WorkspaceSummary[] {
   const workspaces = useWorkspaces((s) => s.workspaces);
+  const shared = useWorkspaces((s) => s.shared);
   return useMemo(
     () =>
       Object.values(workspaces)
@@ -23,8 +25,9 @@ export function useRecentWorkspaces(): WorkspaceSummary[] {
           summary: w.summary,
           openedAt: w.openedAt,
           settingUp: !!w.setup,
+          shared: w.slug in shared,
         }))
         .sort((a, b) => b.openedAt.localeCompare(a.openedAt)),
-    [workspaces],
+    [workspaces, shared],
   );
 }

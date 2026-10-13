@@ -13,6 +13,7 @@ import { Dashboard } from "@/components/widgets/dashboard";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { getEntity, getSystem, getView } from "@/lib/blueprint/lookup";
 import type { View } from "@/lib/blueprint/types";
+import { canEdit, canManage } from "@/lib/store/workspaces";
 
 /** One system page: header, view tabs, and the active view or dashboard. */
 export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: string }) {
@@ -40,13 +41,13 @@ export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: s
         title={system.name}
         actions={
           <>
-            {ws.mode === "live" ? (
+            {ws.mode === "live" && canManage(ws.role) ? (
               <Button variant="ghost" size="sm" onClick={() => setChanging(true)}>
                 <SparkleIcon data-icon="inline-start" />
                 Ask for a change
               </Button>
             ) : null}
-            {active && entity && CREATABLE.includes(active.type) ? (
+            {active && entity && CREATABLE.includes(active.type) && canEdit(ws.role) ? (
               <Button size="sm" onClick={() => openCreate(entity.id)}>
                 <PlusIcon data-icon="inline-start" />
                 New {entity.name.toLowerCase()}
@@ -70,7 +71,9 @@ export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: s
         <div className="border-b" />
       )}
       {active ? <ViewRenderer view={active} /> : <Dashboard system={system} />}
-      {ws.mode === "live" ? <ChangeSheet open={changing} onOpenChange={setChanging} /> : null}
+      {ws.mode === "live" && canManage(ws.role) ? (
+        <ChangeSheet open={changing} onOpenChange={setChanging} />
+      ) : null}
     </div>
   );
 }

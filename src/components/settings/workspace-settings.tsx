@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { downloadText, fileSlug } from "@/lib/download";
 import { formatDate } from "@/lib/format";
-import { useWorkspaces } from "@/lib/store/workspaces";
+import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
 import { SettingsPage, SettingsSection } from "./settings-section";
 
@@ -24,6 +24,8 @@ export function WorkspaceSettings() {
   const remove = useWorkspaces((s) => s.deleteWorkspace);
   const [name, setName] = useState(ws.name);
   if (!workspace) return null;
+  const manager = canManage(ws.role);
+  const owner = ws.role === "owner" && !ws.isShared;
 
   const counts = ws.blueprint.entities.map((e) => ({
     label: e.pluralName,
@@ -49,18 +51,25 @@ export function WorkspaceSettings() {
                   id="workspace-name"
                   className="h-9"
                   value={name}
+                  readOnly={!manager}
                   onChange={(e) => setName(e.target.value)}
                 />
-                <Button
-                  type="submit"
-                  variant="outline"
-                  className="h-9"
-                  disabled={!name.trim() || name.trim() === ws.name}
-                >
-                  Save
-                </Button>
+                {manager ? (
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    className="h-9"
+                    disabled={!name.trim() || name.trim() === ws.name}
+                  >
+                    Save
+                  </Button>
+                ) : null}
               </div>
-              <FieldDescription>Renames are versioned like any other change.</FieldDescription>
+              <FieldDescription>
+                {manager
+                  ? "Renames are versioned like any other change."
+                  : "Only the owner or an admin can rename this workspace."}
+              </FieldDescription>
             </Field>
           </form>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px] sm:grid-cols-3">
@@ -129,33 +138,48 @@ export function WorkspaceSettings() {
           </div>
         </SettingsSection>
 
-        <SettingsSection
-          title="Delete workspace"
-          tone="danger"
-          description="Removes this workspace, its records and its history. This can't be undone."
-        >
-          <div>
-            <ConfirmDeleteDialog
-              trigger={
-                <Button variant="destructive">
-                  <TrashIcon data-icon="inline-start" />
-                  Delete workspace
-                </Button>
-              }
-              title={`Delete ${ws.name}?`}
-              description="Every record and version in this workspace will be removed. Export first if you might need it."
-              label={`Type ${ws.name} to confirm`}
-              expected={ws.name}
-              actionLabel="Delete workspace"
-              onConfirm={() => {
-                router.replace("/");
-                remove(ws.id);
-                toast(`${ws.name} deleted`);
-                return undefined;
-              }}
-            />
-          </div>
-        </SettingsSection>
+        {owner ? (
+          <SettingsSection
+            title="Delete workspace"
+            tone="danger"
+            description="Removes this workspace, its records and its history. This can't be undone."
+          >
+            <div>
+              <ConfirmDeleteDialog
+                trigger={
+                  <Button variant="destructive">
+                    <TrashIcon data-icon="inline-start" />
+                    Delete workspace
+                  </Button>
+                }
+                title={`Delete ${ws.name}?`}
+                description="Every record and version in this workspace will be removed. Export first if you might need it."
+                label={`Type ${ws.name} to confirm`}
+                expected={ws.name}
+                actionLabel="Delete workspace"
+                onConfirm={() => {
+                  router.replace("/");
+                  remove(ws.id);
+                  toast(`${ws.name} deleted`);
+                  return undefined;
+                }}
+              />
+            </div>
+          </SettingsSection>
+        ) : (
+          <SettingsSection
+            title="Leave workspace"
+            description="This workspace belongs to someone else, so you can't delete it."
+          >
+            <p className="text-[13px] text-muted-foreground">
+              To stop seeing it, leave from the{" "}
+              <Link href={`${ws.basePath}/team`} className="text-primary hover:underline">
+                Team page
+              </Link>
+              .
+            </p>
+          </SettingsSection>
+        )}
       </SettingsPage>
     </div>
   );

@@ -34,7 +34,11 @@ export function RecentWorkspaces() {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13.5px] font-medium">{w.name}</span>
               <span className="block truncate text-[12px] text-muted-foreground">
-                {w.settingUp ? "Setting up with Ask Hulma" : w.summary}
+                {w.settingUp
+                  ? "Setting up with Ask Hulma"
+                  : w.shared
+                    ? `Shared with you · ${w.summary}`
+                    : w.summary}
               </span>
             </span>
             <span className="hidden text-[12px] text-muted-foreground sm:inline">
