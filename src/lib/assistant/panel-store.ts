@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
+import type { Navigation } from "@/lib/assistant/screen";
 import type { ChangePlan } from "@/lib/engine/changes";
 
 export type AssistantTurn = {
@@ -13,6 +14,8 @@ export type AssistantTurn = {
   /** What happened to the plan: still waiting, applied (with its history entry), dismissed or undone. */
   planState?: "pending" | "applied" | "dismissed" | "undone";
   changeId?: string;
+  /** A page or record the reply points to; followed straight away when open is true. */
+  navigate?: Navigation;
   error?: boolean;
 };
 

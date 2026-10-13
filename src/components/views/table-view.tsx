@@ -8,6 +8,7 @@ import { useRecordPanels } from "@/components/records/record-panels";
 import { StatusMenu } from "@/components/records/status-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { useReportView } from "@/lib/assistant/screen-store";
 import { displayKind, isNumericKind } from "@/lib/blueprint/field-kind";
 import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
 import type { Sort, TableView as TableViewConfig } from "@/lib/blueprint/types";
@@ -57,6 +58,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
     );
     return sortRecords(searched, sort);
   }, [blueprint, entity, records, view.filter, query, sort, fields]);
+  useReportView({ viewId: view.id, search: query.trim() || undefined });
 
   const toggleSort = (fieldId: string) =>
     setSort((s) =>

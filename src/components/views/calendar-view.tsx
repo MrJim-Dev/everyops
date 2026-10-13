@@ -6,6 +6,7 @@ import { useRecordPanels } from "@/components/records/record-panels";
 import { StatusMenu } from "@/components/records/status-menu";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { useReportView } from "@/lib/assistant/screen-store";
 import { getEntity, getField, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { CalendarView as CalendarConfig, DataRecord, FieldValue } from "@/lib/blueprint/types";
 import { applyFilter } from "@/lib/engine/query";
@@ -88,6 +89,10 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
         ? Array.from({ length: 7 }, (_, i) => addDays(week, i))
         : [cursor];
   const inRange = (d: string) => (mode === "month" ? d.slice(0, 7) === month.slice(0, 7) : true);
+  const rangeFrom = mode === "month" ? month : mode === "week" ? week : cursor;
+  const rangeTo =
+    mode === "month" ? addDays(monthShift(month, 1), -1) : mode === "week" ? addDays(week, 6) : cursor;
+  useReportView({ viewId: view.id, from: rangeFrom, to: rangeTo, status: statusFilter });
   const count = shown.filter(inRange).reduce((n, d) => n + (byDay.get(d)?.length ?? 0), 0);
 
   const step = (dir: 1 | -1) =>

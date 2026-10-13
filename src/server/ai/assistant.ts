@@ -1,6 +1,7 @@
 import "server-only";
 import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentNames, attachmentsIn } from "@/lib/assistant/attachments";
+import { describeScreen, type Navigation, resolveGoTo, type Screen } from "@/lib/assistant/screen";
 import type {
   Block,
   Blueprint,
@@ -25,18 +26,34 @@ import { generateJsonHedged } from "./gemini";
 
 export type AssistantMessage = { role: "user" | "assistant"; text: string; attachments?: AttachmentRef[] };
 export type AssistantResult =
-  | { ok: true; kind: "answer" | "plan" | "clarify"; reply: string; suggestions: string[]; plan?: ChangePlan }
+  | {
+      ok: true;
+      kind: "answer" | "plan" | "clarify";
+      reply: string;
+      suggestions: string[];
+      plan?: ChangePlan;
+      /** A checked page or record to open, now (open) or as a link. */
+      navigate?: Navigation;
+    }
   | { ok: false; message: string };
 
 const MAX_RECORD_CHARS = 120_000;
 
-/** Records as compact JSON lines per record type, cut off if the workspace is very large. */
-function recordContext(bp: Blueprint, records: DataRecord[]) {
+/**
+ * Records as compact JSON lines per record type, cut off if the workspace is very large. What the person is
+ * looking at goes first, so it's never the part that gets cut.
+ */
+function recordContext(bp: Blueprint, records: DataRecord[], focus: { ids: string[]; entityId?: string }) {
   const lines: string[] = [];
   let size = 0;
   let cut = false;
-  for (const e of bp.entities) {
-    const own = records.filter((r) => r.entityId === e.id);
+  const rank = new Map(focus.ids.map((id, i) => [id, i]));
+  const first = (r: DataRecord) => rank.get(r.id) ?? Number.MAX_SAFE_INTEGER;
+  const entities = [...bp.entities].sort(
+    (a, b) => Number(b.id === focus.entityId) - Number(a.id === focus.entityId),
+  );
+  for (const e of entities) {
+    const own = records.filter((r) => r.entityId === e.id).sort((a, b) => first(a) - first(b));
     lines.push(`## ${e.pluralName} (${e.id}): ${own.length} records`);
     for (const r of own) {
       const line = JSON.stringify({ id: r.id, ...r.data });
@@ -454,7 +471,10 @@ export async function assistantTurn(input: {
   blueprint: Blueprint;
   records: DataRecord[];
   messages: AssistantMessage[];
-  page: string;
+  /** What the person has on screen. */
+  screen: Screen;
+  /** Text of document pages, by view id. */
+  docs?: Record<string, { body: string }>;
   canDesign: boolean;
   canEditRecords: boolean;
   /** The signed-in person; attachments are read from their own files only. */
@@ -466,9 +486,12 @@ export async function assistantTurn(input: {
     : input.canEditRecords
       ? "The person is staff: they can change data (records) but not the design. Don't plan design changes; say an owner or admin can."
       : "The person is a viewer: answer questions only. For changes, say an owner or admin can make them.";
+  const screen = describeScreen(bp, records, input.screen, input.docs);
   const context = `Today in Manila: ${todayKey()}
-Current page: ${input.page}
 ${permissions}
+
+What the person is looking at:
+${screen.text}
 
 Sidebar pages (in order), with their tabs:
 ${bp.systems
@@ -499,7 +522,7 @@ Blueprint:
 ${JSON.stringify(bp)}
 
 Records:
-${recordContext(bp, records)}
+${recordContext(bp, records, { ids: screen.focusIds, entityId: screen.entityId })}
 
 Conversation:
 ${input.messages
@@ -533,7 +556,9 @@ ${input.messages
     if (!result.ok) return { ok: false, message: result.error };
     const a = result.data;
     const suggestions = a.suggestions.slice(0, 3);
-    if (a.kind !== "plan") return { ok: true, kind: a.kind, reply: a.reply, suggestions };
+    const navigate = resolveGoTo(bp, records, a.goTo, { screen: input.screen, canManage: input.canDesign });
+    const withNav = navigate ? { navigate } : {};
+    if (a.kind !== "plan") return { ok: true, kind: a.kind, reply: a.reply, suggestions, ...withNav };
 
     const design = toDesignOps(bp, a.plan.ops, a.plan.renames);
     const errors = [...design.errors];
@@ -567,6 +592,7 @@ ${input.messages
         kind: "plan",
         reply: a.reply,
         suggestions,
+        ...withNav,
         plan: {
           request: input.messages.at(-1)?.text ?? "",
           title: a.plan.title || "Workspace change",

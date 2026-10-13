@@ -10,6 +10,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/
 import { Label } from "@/components/ui/label";
 import { useRecordActions } from "@/components/workspace/use-record-actions";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { useReportView } from "@/lib/assistant/screen-store";
 import { getEntity, getField, recordsOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { CheckoutView as CheckoutConfig, DataRecord, Entity, Field } from "@/lib/blueprint/types";
 import { formatMoney } from "@/lib/format";
@@ -47,6 +48,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
   const cashField = order.fields.find((f) => f.id === "cash_received");
 
   const [query, setQuery] = useState("");
+  useReportView({ viewId: view.id, search: query.trim() || undefined });
   const [category, setCategory] = useState("all");
   const [cart, setCart] = useState<{ productId: string; qty: number }[]>([]);
   const [method, setMethod] = useState(payment.options?.[0]?.id ?? "cash");
