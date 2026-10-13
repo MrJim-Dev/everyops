@@ -26,8 +26,8 @@ import {
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { useCurrentUser } from "@/lib/auth/client";
 import { emailSchema } from "@/lib/auth/schemas";
-import { useAuth, useCurrentUser } from "@/lib/auth/store";
 import { formatDate } from "@/lib/format";
 import { canManage, type Member, ROLES, useWorkspaces } from "@/lib/store/workspaces";
 import { RoleSelect } from "./role-select";
@@ -57,7 +57,7 @@ export function TeamPage() {
   const workspace = useWorkspaces((s) => s.workspaces[ws.id]);
   const { inviteMember, revokeInvite, setMemberRole, removeMember, leaveWorkspace } =
     useWorkspaces.getState();
-  const ownerAccount = useAuth((s) => s.accounts.find((a) => a.id === workspace?.ownerId));
+  const ownerAccount = useWorkspaces((s) => (workspace?.ownerId ? s.profiles[workspace.ownerId] : undefined));
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Member["role"]>("staff");
   const [error, setError] = useState<string>();

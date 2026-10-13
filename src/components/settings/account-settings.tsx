@@ -11,8 +11,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { changePassword, deleteAccount, updateProfile, useCurrentUser } from "@/lib/auth/client";
 import { changePasswordSchema, type FormErrors, fieldErrors, profileSchema } from "@/lib/auth/schemas";
-import { useAuth, useCurrentUser } from "@/lib/auth/store";
 import { formatDate, initials } from "@/lib/format";
 import { useWorkspaces } from "@/lib/store/workspaces";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
@@ -21,7 +21,6 @@ import { SettingsPage, SettingsSection } from "./settings-section";
 export function AccountSettings() {
   const user = useCurrentUser();
   const router = useRouter();
-  const { updateProfile, changePassword, deleteAccount } = useAuth.getState();
   const dropOwner = useWorkspaces((s) => s.dropOwner);
   const ids = useFieldIds("name", "email", "current", "password", "confirm");
   const [name, setName] = useState(user?.name ?? "");
@@ -37,8 +36,9 @@ export function AccountSettings() {
     const parsed = profileSchema.safeParse({ name });
     if (!parsed.success) return setNameError(fieldErrors(parsed.error).name);
     setSavingName(true);
-    await updateProfile(parsed.data.name);
+    const result = await updateProfile(parsed.data.name);
     setSavingName(false);
+    if (!result.ok) return setNameError(result.message);
     toast.success("Profile updated");
   };
 
@@ -171,9 +171,10 @@ export function AccountSettings() {
             inputType="password"
             actionLabel="Delete account"
             onConfirm={async (password) => {
+              const accountId = user.id;
               const result = await deleteAccount(password);
               if (!result.ok) return result.message;
-              if (result.accountId) dropOwner(result.accountId);
+              dropOwner(accountId);
               router.replace("/sign-in");
               toast("Account deleted");
               return undefined;

@@ -6,8 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { resetPassword } from "@/lib/auth/client";
 import { type FormErrors, fieldErrors, resetPasswordSchema } from "@/lib/auth/schemas";
-import { useAuth } from "@/lib/auth/store";
 import { AuthLink, AuthShell } from "./auth-shell";
 import { FormAlert } from "./form-alert";
 import { PasswordInput } from "./password-input";
@@ -17,8 +17,9 @@ import { useFieldIds } from "./use-field-ids";
 
 export function ResetPasswordForm() {
   const ids = useFieldIds("password", "confirm");
-  const token = useSearchParams().get("token");
-  const resetPassword = useAuth((s) => s.resetPassword);
+  const params = useSearchParams();
+  // Better Auth redirects here with ?error=INVALID_TOKEN when a link is used or expired.
+  const token = params.get("error") ? null : params.get("token");
   const [values, setValues] = useState({ password: "", confirm: "" });
   const [errors, setErrors] = useState<FormErrors>({});
   const [failure, setFailure] = useState<string | null>(null);

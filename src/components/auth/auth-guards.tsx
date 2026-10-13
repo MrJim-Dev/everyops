@@ -2,9 +2,8 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect } from "react";
+import { isSigningOut, useAuthReady, useCurrentUser } from "@/lib/auth/client";
 import { safeNext } from "@/lib/auth/redirect";
-import { isSigningOut, useCurrentUser } from "@/lib/auth/store";
-import { useAuthReady } from "@/lib/auth/use-auth-ready";
 
 /** Signed-out visitors go to sign-in and come back here afterwards. */
 export function RequireAuth({ children, fallback }: { children: ReactNode; fallback: ReactNode }) {

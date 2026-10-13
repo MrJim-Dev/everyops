@@ -4,9 +4,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { signUp } from "@/lib/auth/client";
 import { safeNext } from "@/lib/auth/redirect";
 import { type FormErrors, fieldErrors, signUpSchema } from "@/lib/auth/schemas";
-import { useAuth } from "@/lib/auth/store";
 import { RedirectIfSignedIn } from "./auth-guards";
 import { AuthLink, AuthShell } from "./auth-shell";
 import { GoogleButton, OrDivider } from "./google-button";
@@ -20,7 +20,6 @@ export function SignUpForm() {
   const params = useSearchParams();
   const next = params.get("next");
   const router = useRouter();
-  const signUp = useAuth((s) => s.signUp);
   const [values, setValues] = useState({ name: "", email: "", password: "" });
   const [errors, setErrors] = useState<FormErrors>({});
   const [pending, setPending] = useState(false);
@@ -53,7 +52,7 @@ export function SignUpForm() {
         }
       >
         <div className="flex flex-col gap-4">
-          <GoogleButton />
+          <GoogleButton next={safeNext(next)} />
           <OrDivider />
           <form onSubmit={submit} noValidate className="flex flex-col gap-4">
             <FieldGroup className="gap-4">

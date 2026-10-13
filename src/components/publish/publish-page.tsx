@@ -21,7 +21,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { ViewEmpty } from "@/components/views/view-empty";
 import { useWorkspace } from "@/components/workspace/workspace-context";
-import { useCurrentUser } from "@/lib/auth/store";
+import { useCurrentUser } from "@/lib/auth/client";
 import { CATEGORIES, type CatalogCategory } from "@/lib/catalog";
 import { describeBlueprint, toCatalogSystem, usePublished } from "@/lib/community/published";
 import { formatDate } from "@/lib/format";

@@ -13,7 +13,7 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { SearchInput } from "@/components/views/search-input";
 import { ViewEmpty } from "@/components/views/view-empty";
-import { useCurrentUser } from "@/lib/auth/store";
+import { useCurrentUser } from "@/lib/auth/client";
 import { CATEGORIES } from "@/lib/catalog";
 import { useCatalog } from "@/lib/community/use-catalog";
 import { SystemCard } from "./system-card";

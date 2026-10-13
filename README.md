@@ -2,12 +2,15 @@
 
 Describe your business, and EveryOps builds the systems it needs (bookings, POS, content, finance, HR) inside one workspace. Built for the Google Cloud AI Builder Cup 2026.
 
-This is the **frontend build**. Every screen works with data saved in the browser. The AI steps are scripted stand-ins with the same inputs and outputs Gemini will use, so the backend can replace them without UI changes.
+Accounts and sessions run on the server (Better Auth + Kysely on PostgreSQL). Workspaces are still saved in the browser, per account, until they move to the database. The AI steps are scripted stand-ins with the same inputs and outputs Gemini will use, so the backend can replace them without UI changes.
 
 ## Run it
 
 ```bash
 pnpm install
+pnpm env:pull     # writes .env.local from AWS Secrets Manager (profile mrjim-new)
+pnpm db:migrate   # creates or updates the auth tables
+pnpm db:seed      # creates the demo account
 pnpm dev          # http://localhost:3000
 pnpm test         # engine tests (Vitest)
 pnpm typecheck    # route types + TypeScript
@@ -16,6 +19,21 @@ pnpm build
 ```
 
 The first visit seeds four demo workspaces: Court House PH, Tita Nena's Canteen, Kapé Ilaya and Sunrise Bakeshop.
+
+## Database and auth
+
+The database is `everyops` on the MrJim AWS RDS instance `mrjim-postgres` (account 651952795536, ap-southeast-1), reached as `everyops_runtime`, which owns the database. Credentials live in Secrets Manager: `everyops/runtime-db` and `everyops/auth-config`. See `.env.example` for every variable. TLS is verified against `certs/rds-global-bundle.pem`.
+
+| File | Role |
+|---|---|
+| `src/server/db.ts` | The Kysely instance (one pool per process, opened lazily) |
+| `src/server/auth.ts` | Better Auth: email and password, Google when `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set, 30-day sessions, rate limiting |
+| `src/app/api/auth/[...all]/route.ts` | Better Auth's HTTP endpoints |
+| `src/lib/auth/client.ts` | Browser client: `useCurrentUser`, `useAuthReady`, `signIn`, `signUp`, `signOut`, reset, profile and account actions |
+| `src/proxy.ts` | First gate: private pages without a session cookie redirect to `/sign-in?next=…` |
+| `src/components/auth/require-session.tsx` | Second gate: validates the session on the server before a private page renders |
+
+Private pages are `/`, `/account` and everything under `/w/`. Sign-in pages, `/community`, `/preview/…`, invites and the legal pages are public.
 
 ## How it works
 
@@ -63,7 +81,7 @@ Workspaces need an account. Community systems and their previews stay public.
 |---|---|
 | `/sign-in` | Email and password, a "Fill in the demo account" shortcut, and a return to the page you were on (`?next=`) |
 | `/sign-up` | Name, email and password with a strength meter. Duplicate emails are rejected |
-| `/forgot-password` | Always shows the same confirmation. Email isn't connected yet, so the page shows the reset link directly |
+| `/forgot-password` | Always shows the same confirmation. Email isn't connected yet, so the reset link is written to the server log |
 | `/reset-password` | Single-use link, valid for 30 minutes, with a confirmation field |
 
 Demo account: `james@everyops.app` / `everyops2026`.
@@ -76,7 +94,7 @@ Each account has its own workspaces; the demo workspaces are created on an accou
 | `/w/[workspace]/settings` | Rename (versioned and undoable), export the blueprint and records as JSON, delete (type the name to confirm) |
 | `/terms`, `/privacy` | Plain-language policies for the prototype |
 
-In this frontend build, accounts live in the browser (`src/lib/auth/store.ts`) with salted SHA-256 hashes. Pages only call `signIn`, `signUp`, `requestReset`, `resetPassword` and `signOut`, so Firebase Auth can replace that one file. Google sign-in arrives with Firebase.
+Accounts live in PostgreSQL through Better Auth, with scrypt password hashes and HttpOnly session cookies. "Continue with Google" works once Google OAuth credentials are set; until then it explains that it's coming soon.
 
 ## Team and Community publishing
 

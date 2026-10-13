@@ -1,24 +1,21 @@
 "use client";
 
 import { EnvelopeSimpleIcon } from "@phosphor-icons/react";
-import Link from "next/link";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { requestReset } from "@/lib/auth/client";
 import { type FormErrors, fieldErrors, forgotPasswordSchema } from "@/lib/auth/schemas";
-import { useAuth } from "@/lib/auth/store";
 import { AuthLink, AuthShell } from "./auth-shell";
 import { SubmitButton } from "./submit-button";
 import { useFieldIds } from "./use-field-ids";
 
 export function ForgotPasswordForm() {
   const ids = useFieldIds("email");
-  const requestReset = useAuth((s) => s.requestReset);
   const [email, setEmail] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [pending, setPending] = useState(false);
-  const [sent, setSent] = useState<{ email: string; token: string | null } | null>(null);
+  const [sent, setSent] = useState<{ email: string } | null>(null);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -26,10 +23,10 @@ export function ForgotPasswordForm() {
     if (!parsed.success) return setErrors(fieldErrors(parsed.error));
     setErrors({});
     setPending(true);
-    const token = await requestReset(parsed.data.email);
+    await requestReset(parsed.data.email);
     setPending(false);
     // Same confirmation whether or not the account exists, so emails can't be probed.
-    setSent({ email: parsed.data.email, token });
+    setSent({ email: parsed.data.email });
   };
 
   if (sent) {
@@ -48,20 +45,6 @@ export function ForgotPasswordForm() {
           <span className="flex size-12 animate-pop items-center justify-center rounded-full border text-primary">
             <EnvelopeSimpleIcon className="size-5" />
           </span>
-          {sent.token ? (
-            <div className="flex w-full flex-col gap-2 rounded-lg border bg-card/40 p-3 text-center">
-              <p className="text-[12.5px] text-muted-foreground">
-                Email isn't connected in this preview, so here's your reset link.
-              </p>
-              <Button
-                variant="outline"
-                render={<Link href={`/reset-password?token=${sent.token}`} />}
-                nativeButton={false}
-              >
-                Open reset link
-              </Button>
-            </div>
-          ) : null}
           <button
             type="button"
             onClick={() => setSent(null)}

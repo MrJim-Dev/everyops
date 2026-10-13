@@ -9,8 +9,7 @@ import { AuthLink, AuthShell } from "@/components/auth/auth-shell";
 import { FormAlert } from "@/components/auth/form-alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useCurrentUser } from "@/lib/auth/store";
-import { useAuthReady } from "@/lib/auth/use-auth-ready";
+import { useAuthReady, useCurrentUser } from "@/lib/auth/client";
 import { findInvite, ROLES, useWorkspaces } from "@/lib/store/workspaces";
 
 export function AcceptInvite({ params }: { params: Promise<{ token: string }> }) {

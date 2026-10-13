@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { signInWithGoogle } from "@/lib/auth/client";
 
 function GoogleMark() {
   return (
@@ -26,17 +28,26 @@ function GoogleMark() {
   );
 }
 
-/** Google sign-in arrives with Firebase Auth; until then it explains instead of failing silently. */
-export function GoogleButton() {
+/** Google sign-in through Better Auth. Until Google credentials are configured, it explains instead of failing silently. */
+export function GoogleButton({ next }: { next: string }) {
+  const [pending, setPending] = useState(false);
+  const start = async () => {
+    setPending(true);
+    const { error } = await signInWithGoogle(next);
+    // On success the browser is already on its way to Google.
+    if (error) {
+      setPending(false);
+      toast("Google sign-in is coming soon", { description: "Use your email and password for now." });
+    }
+  };
   return (
     <Button
       type="button"
       variant="outline"
       size="lg"
       className="h-10 w-full text-[14px]"
-      onClick={() =>
-        toast("Google sign-in is coming soon", { description: "Use your email and password for now." })
-      }
+      disabled={pending}
+      onClick={start}
     >
       <GoogleMark />
       Continue with Google

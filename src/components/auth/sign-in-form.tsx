@@ -4,9 +4,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { DEMO_ACCOUNT, signIn } from "@/lib/auth/client";
 import { safeNext } from "@/lib/auth/redirect";
 import { type FormErrors, fieldErrors, signInSchema } from "@/lib/auth/schemas";
-import { DEMO_ACCOUNT, useAuth } from "@/lib/auth/store";
 import { RedirectIfSignedIn } from "./auth-guards";
 import { AuthLink, AuthShell } from "./auth-shell";
 import { FormAlert } from "./form-alert";
@@ -20,7 +20,6 @@ export function SignInForm() {
   const params = useSearchParams();
   const next = params.get("next");
   const router = useRouter();
-  const signIn = useAuth((s) => s.signIn);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
@@ -54,7 +53,7 @@ export function SignInForm() {
         }
       >
         <div className="flex flex-col gap-4">
-          <GoogleButton />
+          <GoogleButton next={safeNext(next)} />
           <OrDivider />
           <form onSubmit={submit} noValidate className="flex flex-col gap-4">
             {failure ? <FormAlert key={failure.attempt} message={failure.message} /> : null}

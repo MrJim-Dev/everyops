@@ -21,16 +21,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useAuth, useCurrentUser } from "@/lib/auth/store";
-import { useAuthReady } from "@/lib/auth/use-auth-ready";
+import { signOut, useAuthReady, useCurrentUser } from "@/lib/auth/client";
 import { initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 function useSignOut() {
-  const signOut = useAuth((s) => s.signOut);
   const router = useRouter();
-  return () => {
-    signOut();
+  return async () => {
+    await signOut();
     router.replace("/sign-in");
     toast("Signed out");
   };

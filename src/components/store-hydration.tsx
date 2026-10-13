@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { useAuth } from "@/lib/auth/store";
+import { useEffect, useState } from "react";
+import { authClient } from "@/lib/auth/client";
 import { usePublished } from "@/lib/community/published";
 import { useWorkspaces } from "@/lib/store/workspaces";
 
@@ -10,32 +10,24 @@ import { useWorkspaces } from "@/lib/store/workspaces";
  * the session: each account sees only its own workspaces.
  */
 export function StoreHydration() {
+  const { data, isPending } = authClient.useSession();
+  const [workspacesReady, setWorkspacesReady] = useState(false);
+
   useEffect(() => {
-    let authReady = false;
-    let workspacesReady = false;
-    const sync = () => {
-      if (authReady && workspacesReady) useWorkspaces.getState().setOwner(useAuth.getState().sessionId);
-    };
-    const unsubAuthReady = useAuth.persist.onFinishHydration(() => {
-      authReady = true;
-      void useAuth.getState().seed();
-      sync();
-    });
-    const unsubWorkspacesReady = useWorkspaces.persist.onFinishHydration(() => {
-      workspacesReady = true;
-      sync();
-    });
-    const unsubSession = useAuth.subscribe((state, previous) => {
-      if (state.sessionId !== previous.sessionId) sync();
-    });
-    void useAuth.persist.rehydrate();
+    const unsub = useWorkspaces.persist.onFinishHydration(() => setWorkspacesReady(true));
     void useWorkspaces.persist.rehydrate();
     void usePublished.persist.rehydrate();
-    return () => {
-      unsubAuthReady();
-      unsubWorkspacesReady();
-      unsubSession();
-    };
+    if (useWorkspaces.persist.hasHydrated()) setWorkspacesReady(true);
+    return unsub;
   }, []);
+
+  const userId = data?.user.id ?? null;
+  const name = data?.user.name;
+  const email = data?.user.email;
+  useEffect(() => {
+    if (!workspacesReady || isPending) return;
+    useWorkspaces.getState().setOwner(userId, userId && name && email ? { name, email } : undefined);
+  }, [workspacesReady, isPending, userId, name, email]);
+
   return null;
 }

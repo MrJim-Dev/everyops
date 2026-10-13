@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { useCurrentUser } from "@/lib/auth/store";
+import { useCurrentUser } from "@/lib/auth/client";
 import { useCatalogSystem } from "@/lib/community/use-catalog";
 import { useWorkspaces } from "@/lib/store/workspaces";
 

@@ -89,8 +89,10 @@ type State = {
   shared: Record<string, { owner: string; slug: string }>;
   /** undefined until the session is known; null when signed out. */
   owner: string | null | undefined;
+  /** Names and emails of accounts seen in this browser, so team lists can show workspace owners. */
+  profiles: Record<string, { name: string; email: string }>;
   /** Switch to an account's workspaces, creating the demo workspaces on its first visit. */
-  setOwner: (owner: string | null) => void;
+  setOwner: (owner: string | null, profile?: { name: string; email: string }) => void;
   resetDemo: () => void;
   renameWorkspace: (slug: string, name: string) => void;
   deleteWorkspace: (slug: string) => void;
@@ -256,14 +258,16 @@ export const useWorkspaces = create<State>()(
         byOwner: {},
         shared: {},
         owner: undefined,
+        profiles: {},
 
-        setOwner: (owner) =>
+        setOwner: (owner, profile) =>
           rawSet((state) => {
             if (!owner) return { owner: null, workspaces: {}, shared: {} };
             const byOwner = state.byOwner[owner]
               ? state.byOwner
               : { ...state.byOwner, [owner]: demoWorkspaces() };
-            return { owner, byOwner, ...viewFor(byOwner, owner) };
+            const profiles = profile ? { ...state.profiles, [owner]: profile } : state.profiles;
+            return { owner, byOwner, profiles, ...viewFor(byOwner, owner) };
           }),
 
         resetDemo: () => set({ workspaces: demoWorkspaces() }),
@@ -511,9 +515,9 @@ export const useWorkspaces = create<State>()(
       // Bump when demo blueprints change. Saved data from an older version is replaced by fresh demos;
       // this is a frontend prototype, so there is no per-version migration yet.
       version: DATA_VERSION,
-      migrate: () => ({ byOwner: {} }),
+      migrate: () => ({ byOwner: {}, profiles: {} }),
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ byOwner: s.byOwner }),
+      partialize: (s) => ({ byOwner: s.byOwner, profiles: s.profiles }),
       // Data lives in the browser; hydrate after mount to keep SSR markup stable.
       skipHydration: true,
     },

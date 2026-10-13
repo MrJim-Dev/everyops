@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import { RequireAuth } from "@/components/auth/auth-guards";
+import { RequireSession } from "@/components/auth/require-session";
 import { CommunityStarters } from "@/components/hub/community-starters";
 import { CreatePrompt } from "@/components/hub/create-prompt";
 import { RecentWorkspaces } from "@/components/hub/recent-workspaces";
@@ -17,7 +19,19 @@ function HomeSkeleton() {
 
 export default function HomePage() {
   return (
-    <RequireAuth fallback={<HomeSkeleton />}>
+    <Suspense fallback={<HomeSkeleton />}>
+      <RequireSession next="/">
+        <RequireAuth fallback={<HomeSkeleton />}>
+          <HomeContent />
+        </RequireAuth>
+      </RequireSession>
+    </Suspense>
+  );
+}
+
+function HomeContent() {
+  return (
+    <>
       <section className="flex flex-col items-center gap-6 pb-16 pt-20 text-center">
         <div className="flex flex-col gap-2">
           <h1 className="animate-rise text-balance text-[30px] font-semibold tracking-tight sm:text-[34px]">
@@ -44,6 +58,6 @@ export default function HomePage() {
           <RecentWorkspaces />
         </section>
       </div>
-    </RequireAuth>
+    </>
   );
 }
