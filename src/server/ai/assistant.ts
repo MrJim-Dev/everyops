@@ -420,6 +420,7 @@ ${input.messages.map((m) => `${m.role === "user" ? "Person" : "You"}: ${m.text}`
       system: ASSISTANT_SYSTEM,
       prompt,
       task: "assistant",
+      repair: fixOpNames,
       // Answers take 3–8 s and big plans 10–17 s. Vertex sometimes stalls a call outright, so the first try
       // gives up early and a retry (usually fast) gets more room.
       timeoutMs: stalls === 0 ? 25_000 : 35_000,
@@ -494,4 +495,16 @@ ${input.messages.map((m) => `${m.role === "user" ? "Person" : "You"}: ${m.text}`
     ok: false,
     message: "I couldn't put together a valid change for that. Try describing it a little differently.",
   };
+}
+
+const OP_NAMES = new Set(["add_field", "add_entity", "add_view", "add_widget", "add_system", "add_rule"]);
+
+/** Gemini sometimes drops the add_ prefix ("op": "widget"); put it back so one slip doesn't sink a whole plan. */
+function fixOpNames(json: unknown): unknown {
+  const ops = (json as { plan?: { ops?: { op?: unknown }[] } })?.plan?.ops;
+  if (Array.isArray(ops))
+    for (const o of ops)
+      if (typeof o?.op === "string" && !o.op.startsWith("add_") && OP_NAMES.has(`add_${o.op}`))
+        o.op = `add_${o.op}`;
+  return json;
 }

@@ -262,6 +262,7 @@ export function tidy(bp: Blueprint): Blueprint {
       if (chart.dateFieldId && !has.has(chart.dateFieldId)) delete chart.dateFieldId;
       if (chart.splitByFieldId && !has.has(chart.splitByFieldId)) delete chart.splitByFieldId;
       if (chart.kind === "donut" && !chart.groupByFieldId) chart.kind = "bar";
+      if (!chart.bucket) chart.bucket = "day";
       if (!chart.groupByFieldId && !chart.dateFieldId) return false;
     }
     if (w.list) w.list.fieldIds = w.list.fieldIds.filter((id) => has.has(id));

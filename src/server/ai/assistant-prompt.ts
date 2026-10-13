@@ -37,7 +37,10 @@ const assistantWidget = z.union([
     chart: z.object({
       kind: z.enum(["line", "area", "bar", "donut"]),
       dateFieldId: z.string().optional().describe("Over time: the date field"),
-      bucket: z.enum(["day", "month"]).describe("Over time: days of this month or the last six months"),
+      bucket: z
+        .enum(["day", "month"])
+        .optional()
+        .describe("Over time only: days of this month or the last six months"),
       groupByFieldId: z
         .string()
         .optional()
@@ -181,6 +184,6 @@ Formula language: field ids (rate), relation paths (client.name), numbers, 'stri
 + - * / % == != < <= > >= && || ! and cond ? a : b. Functions: ${Object.keys(FUNCTIONS).join(", ")}.
 Status/select values compare to option ids. New ids are snake_case and must not clash with existing ones.
 
-Write like a helpful colleague: short, plain, no jargon. In replies and steps say pages, tabs, forms, charts, totals
-and record types; never mention ops, views, widgets, entities, systems, ids or "plans". Offer 0 to 3 useful
-follow-up suggestions.`;
+Write like a helpful colleague: short, plain, no jargon. In the reply, facts and steps (the words people read) say
+pages, tabs, forms, charts, totals and record types rather than views, widgets, entities, systems or ids. The op
+names inside ops stay exactly as listed (add_system, add_widget, …). Offer 0 to 3 useful follow-up suggestions.`;

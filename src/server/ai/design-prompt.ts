@@ -150,7 +150,7 @@ export const widget = z.object({
     .object({
       kind: z.enum(["line", "bar", "area", "donut"]),
       dateFieldId: z.string().optional().describe("over time: the date field to bucket by"),
-      bucket: z.enum(["day", "week", "month"]),
+      bucket: z.enum(["day", "week", "month"]).optional().describe("over time only"),
       groupByFieldId: z
         .string()
         .optional()

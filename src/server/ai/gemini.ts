@@ -33,6 +33,8 @@ type Input = {
   /** Leave unset: Gemini 3 models are tuned for the default temperature and can loop when it is lowered. */
   temperature?: number;
   timeoutMs?: number;
+  /** Fixes known harmless slips in Gemini's JSON before it's checked against the schema. */
+  repair?: (json: unknown) => unknown;
   /** Overrides the model's default reasoning depth. Leave unset for Gemini 3 models. */
   thinking?: "LOW" | "MEDIUM" | "HIGH";
   /** Logged with token usage, e.g. "plan-change". */
@@ -82,7 +84,8 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
     } catch {
       return { ok: false, error: "Gemini returned malformed JSON.", retryable: true };
     }
-    const parsed = schema.safeParse(withoutNulls(json));
+    const cleaned = withoutNulls(json);
+    const parsed = schema.safeParse(input.repair ? input.repair(cleaned) : cleaned);
     if (!parsed.success) {
       console.warn(
         JSON.stringify({
