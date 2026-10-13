@@ -17,7 +17,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { computeAll } from "@/lib/engine/compute";
 import { isImagePath } from "@/lib/engine/records";
-import { todayKey } from "@/lib/time";
+import { hhmm, todayKey } from "@/lib/time";
 import { DESIGN_SYSTEM, type Design, design } from "./design-prompt";
 import { generateJson } from "./gemini";
 
@@ -448,10 +448,12 @@ export async function designWorkspace(brief: string, workspaceName: string): Pro
       if (result.retryable && attempt < 1) continue;
       return { ok: false, message: result.error };
     }
-    const bp = ensurePages(repairStructure(tidy(toBlueprint(result.data))));
+    const raw = toBlueprint(result.data);
+    const samples = mergeDateAndSlot(raw, result.data.samples);
+    const bp = ensurePages(repairStructure(tidy(raw)));
     const errors = [...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`), ...extraChecks(bp)];
     if (!errors.length) {
-      const records = computeAll(bp, toRecords(bp, result.data.samples, now), now);
+      const records = computeAll(bp, toRecords(bp, samples, now), now);
       return {
         ok: true,
         name: result.data.workspaceName || workspaceName,
@@ -623,6 +625,40 @@ export function repairStructure(bp: Blueprint): Blueprint {
       }
     }
   }
+  // A booking's court fee comes from the court's rates and the hours booked, not from a number someone types.
+  for (const e of bp.entities) {
+    const b = e.booking;
+    const res = b ? e.fields.find((f) => f.id === b.resourceFieldId) : undefined;
+    const court = bp.entities.find((x) => x.id === res?.relation?.entityId);
+    if (!b || !court) continue;
+    const rates = court.fields.filter((f) => f.type === "money");
+    const fee =
+      e.fields.find(
+        (f) =>
+          f.type === "money" &&
+          /(court|rental|booking)_?(fee|rate|price|cost)|^(fee|rate|price|amount)$/.test(f.id),
+      ) ??
+      e.fields.find(
+        (f) =>
+          f.type === "money" &&
+          /fee|rate|price|cost/.test(f.id) &&
+          !/paid|deposit|balance|discount|addon|add_on|extra/.test(f.id),
+      );
+    if (!fee || !rates.length) continue;
+    const peak = rates.find((f) => /evening|night|peak|prime/.test(f.id));
+    const base =
+      rates.find((f) => f !== peak && /day|regular|base|standard|rate|price/.test(f.id)) ??
+      rates.find((f) => f !== peak);
+    const rate =
+      peak && base
+        ? `(hour(${b.timeFieldId}) >= 17 ? ${res?.id}.${peak.id} : ${res?.id}.${base.id})`
+        : `${res?.id}.${(base ?? peak ?? rates[0]).id}`;
+    Object.assign(fee, {
+      type: "formula",
+      required: undefined,
+      formula: { expr: `${rate} * duration_hours(${b.timeFieldId})`, resultType: "money" },
+    });
+  }
   // Pages that only list line items go: those show inside their parent record.
   const children = new Set(bp.entities.filter((e) => e.parent).map((e) => e.id));
   bp.systems = bp.systems.filter(
@@ -632,4 +668,136 @@ export function repairStructure(bp: Blueprint): Blueprint {
       !s.viewIds.every((id) => children.has(bp.views.find((v) => v.id === id)?.entityId ?? "")),
   );
   return bp;
+}
+
+/** "6:00 AM - 7:00 AM", "6 PM", "18:00-19:00" or an id like "06_00" → minutes after midnight for start and end. */
+function slotTimes(label: string, id: string): { start: number; end?: number } | null {
+  const one = (text: string): number | null => {
+    const m = text.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+    if (!m) return null;
+    let h = Number(m[1]) % 24;
+    const ap = m[3]?.toLowerCase();
+    if (ap === "pm" && h < 12) h += 12;
+    if (ap === "am" && h === 12) h = 0;
+    return h * 60 + Number(m[2] ?? 0);
+  };
+  const parts = label.split(/\s*(?:-|–|to)\s*/i);
+  const start = one(parts[0] ?? "") ?? one(id.replace(/_/g, ":"));
+  if (start === null) return null;
+  const end = parts[1] ? one(parts[1]) : null;
+  return { start, ...(end !== null && end > start ? { end } : {}) };
+}
+
+/**
+ * Gemini sometimes models a court booking as a date plus a dropdown of time slots. Bookings need one time_range
+ * for the schedule, double-booking checks and public slots, so the pair becomes a "Time" range: screens, charts and
+ * blocks point at it, the resource gets its hours from the slots, booking settings are filled in, and sample
+ * bookings are converted. Returns the samples to use.
+ */
+export function mergeDateAndSlot(bp: Blueprint, samples: Design["samples"]): Design["samples"] {
+  let out = samples;
+  for (const e of bp.entities) {
+    if (e.booking) continue;
+    const date = e.fields.find((f) => f.type === "date");
+    const slot = e.fields.find(
+      (f) =>
+        f.type === "select" &&
+        (f.options?.length ?? 0) >= 2 &&
+        f.options?.every((o) => slotTimes(o.label, o.id)),
+    );
+    // The thing being booked: a record type with hours, else one named like a court or room, never people.
+    const relations = e.fields.filter((f) => f.type === "relation" && f.relation?.entityId !== e.id);
+    const target = (f: Field) => bp.entities.find((x) => x.id === f.relation?.entityId);
+    const named = (f: Field, re: RegExp) => re.test(`${target(f)?.id} ${target(f)?.name}`.toLowerCase());
+    const resourceField =
+      relations.find((f) => target(f)?.resource) ??
+      relations.find((f) => named(f, /court|room|table|space|venue|lane|field|studio|desk|resource/)) ??
+      relations.find((f) => !named(f, /player|client|customer|member|guest|person|staff|user|people/));
+    const resource = bp.entities.find((x) => x.id === resourceField?.relation?.entityId);
+    if (!date || !slot?.options || !resourceField || !resource) continue;
+
+    const times = new Map(
+      slot.options.map((o) => [o.id, slotTimes(o.label, o.id) as { start: number; end?: number }]),
+    );
+    const starts = [...times.values()].map((t) => t.start).sort((a, b) => a - b);
+    const step = starts.length > 1 ? starts[1] - starts[0] : 60;
+    const endOf = (t: { start: number; end?: number }) => t.end ?? t.start + step;
+    const id = e.fields.some((f) => f.id === "time") ? "booking_time" : "time";
+    const time: Field = { id, name: "Time", type: "time_range", range: "times", required: true };
+    const at = e.fields.indexOf(date);
+    e.fields = e.fields.filter((f) => f !== date && f !== slot);
+    e.fields.splice(Math.min(at, e.fields.length), 0, time);
+    if (e.primaryFieldId === date.id || e.primaryFieldId === slot.id)
+      e.primaryFieldId = e.fields.find((f) => f.type === "text")?.id ?? id;
+
+    const swap = (ids: string[]) => [...new Set(ids.map((x) => (x === date.id || x === slot.id ? id : x)))];
+    const swapOne = (x: string | undefined) => (x === date.id || x === slot.id ? id : x);
+    for (const v of bp.views) {
+      if (v.entityId !== e.id && v.type !== "landing" && v.type !== "form") continue;
+      if (v.type === "table" || v.type === "form") v.fieldIds = swap(v.fieldIds);
+      if (v.type === "kanban") v.cardFieldIds = swap(v.cardFieldIds);
+      if (v.type === "calendar") v.dateFieldId = swapOne(v.dateFieldId) ?? id;
+      if (v.type === "notes" && v.metaFieldIds) v.metaFieldIds = swap(v.metaFieldIds);
+      if ((v.type === "landing" || v.type === "form") && v.blocks)
+        for (const b of v.blocks)
+          if (b.type === "records" && b.entityId === e.id) b.fieldIds = swap(b.fieldIds);
+    }
+    for (const w of bp.widgets) {
+      if (w.entityId !== e.id) continue;
+      if (w.chart) {
+        if (w.chart.dateFieldId === date.id || w.chart.dateFieldId === slot.id) w.chart.dateFieldId = id;
+        if (w.chart.groupByFieldId === slot.id) delete w.chart.groupByFieldId;
+        if (!w.chart.dateFieldId && !w.chart.groupByFieldId) w.chart.dateFieldId = id;
+      }
+      if (w.list) w.list.fieldIds = swap(w.list.fieldIds);
+    }
+    // Formulas and filters that read the date now read the range (date functions take ranges too).
+    const word = (name: string) => new RegExp(`\\b${name}\\b`, "g");
+    const rewrite = (expr: string) => expr.replace(word(date.id), id);
+    for (const f of e.fields) if (f.formula) f.formula.expr = rewrite(f.formula.expr);
+    for (const v of bp.views)
+      if ("filter" in v && v.filter && v.entityId === e.id) v.filter = rewrite(v.filter);
+    for (const w of bp.widgets) if (w.filter && w.entityId === e.id) w.filter = rewrite(w.filter);
+
+    resource.resource ??= {
+      opensAt: hhmm(starts[0]),
+      closesAt: hhmm(Math.max(...[...times.values()].map(endOf))),
+      slotMinutes: SLOT_MINUTES.reduce((a, b) => (Math.abs(b - step) < Math.abs(a - step) ? b : a)),
+    };
+    const status =
+      e.fields.find((f) => f.type === "status" && f.options?.some((o) => /cancel/.test(o.id))) ??
+      e.fields.find((f) => f.type === "status");
+    if (status)
+      e.booking = {
+        resourceFieldId: resourceField.id,
+        timeFieldId: id,
+        statusFieldId: status.id,
+        blockingStatuses: (status.options ?? []).map((o) => o.id).filter((x) => !/cancel/.test(x)),
+      };
+    const home = bp.systems.find((s) =>
+      s.viewIds.some(
+        (v) =>
+          bp.views.find((x) => x.id === v)?.entityId === e.id &&
+          bp.views.find((x) => x.id === v)?.type !== "calendar",
+      ),
+    );
+    if (status && home && !bp.views.some((v) => v.type === "slot_grid" && v.entityId === e.id)) {
+      const viewId = bp.views.some((v) => v.id === `${e.id}_schedule`)
+        ? `${e.id}_schedule_2`
+        : `${e.id}_schedule`;
+      bp.views.push({ id: viewId, entityId: e.id, name: "Schedule", type: "slot_grid" });
+      home.viewIds.unshift(viewId);
+    }
+
+    out = out.map((s) => {
+      if (s.entityId !== e.id) return s;
+      const day = s.values.find((v) => v.fieldId === date.id)?.value;
+      const t = times.get(s.values.find((v) => v.fieldId === slot.id)?.value ?? "");
+      const rest = s.values.filter((v) => v.fieldId !== date.id && v.fieldId !== slot.id);
+      if (!day || !t) return { ...s, values: rest };
+      const iso = (m: number) => `${day.slice(0, 10)}T${hhmm(m)}`;
+      return { ...s, values: [...rest, { fieldId: id, value: `${iso(t.start)}/${iso(endOf(t))}` }] };
+    });
+  }
+  return out;
 }

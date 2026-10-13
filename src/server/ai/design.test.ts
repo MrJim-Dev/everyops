@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
-import { ensurePages, repairStructure } from "./design";
+import { ensurePages, mergeDateAndSlot, repairStructure } from "./design";
 
 describe("ensurePages", () => {
   it("gives a record type without any screen its own page", () => {
@@ -79,5 +79,64 @@ describe("repairStructure", () => {
     });
     expect(fixed.systems.map((s) => s.name)).not.toContain("Add-on lines");
     expect(fixed.systems.find((s) => s.id === "courts")?.name).toBe("Setup");
+  });
+});
+
+describe("mergeDateAndSlot", () => {
+  it("turns a booking date plus a time-slot dropdown into one time range with booking settings", () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
+    const bp = structuredClone(blueprint);
+    const booking = bp.entities.find((e) => e.id === "booking");
+    const court = bp.entities.find((e) => e.id === "court");
+    if (!booking || !court) throw new Error("sample changed");
+    delete booking.booking;
+    delete court.resource;
+    bp.views = bp.views.filter((v) => v.type !== "slot_grid");
+    for (const s of bp.systems) s.viewIds = s.viewIds.filter((id) => bp.views.some((v) => v.id === id));
+    booking.fields = booking.fields.filter((f) => f.id !== "slot" && f.type !== "formula");
+    booking.fields.push(
+      { id: "booking_date", name: "Date", type: "date", required: true },
+      {
+        id: "time_slot",
+        name: "Time slot",
+        type: "select",
+        options: [
+          { id: "06_00", label: "6:00 AM - 7:00 AM", tone: "neutral" },
+          { id: "07_00", label: "7:00 AM - 8:00 AM", tone: "neutral" },
+        ],
+      },
+    );
+    const samples = mergeDateAndSlot(bp, [
+      {
+        ref: "b1",
+        entityId: "booking",
+        values: [
+          { fieldId: "booking_date", value: "2026-10-14" },
+          { fieldId: "time_slot", value: "07_00" },
+        ],
+      },
+    ]);
+    const fixed = bp.entities.find((e) => e.id === "booking");
+    expect(fixed?.fields.some((f) => f.id === "booking_date" || f.id === "time_slot")).toBe(false);
+    expect(fixed?.booking).toMatchObject({
+      resourceFieldId: "court",
+      timeFieldId: "time",
+      statusFieldId: "status",
+    });
+    expect(court.resource).toEqual({ opensAt: "06:00", closesAt: "08:00", slotMinutes: 60 });
+    expect(samples[0].values).toContainEqual({ fieldId: "time", value: "2026-10-14T07:00/2026-10-14T08:00" });
+    expect(bp.views.some((v) => v.type === "slot_grid" && v.entityId === "booking")).toBe(true);
+
+    // A typed-in court fee becomes the court's rate (evening rate from 5 PM) times the hours booked.
+    court.fields.push(
+      { id: "day_rate", name: "Day rate", type: "money" },
+      { id: "evening_rate", name: "Evening rate", type: "money" },
+    );
+    fixed?.fields.push({ id: "court_fee", name: "Court fee", type: "money", required: true });
+    repairStructure(bp);
+    expect(fixed?.fields.find((f) => f.id === "court_fee")).toMatchObject({
+      type: "formula",
+      formula: { expr: "(hour(time) >= 17 ? court.evening_rate : court.day_rate) * duration_hours(time)" },
+    });
   });
 });
