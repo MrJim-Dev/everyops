@@ -515,7 +515,7 @@
 }
 [data-sonner-toaster] [data-sonner-toast].eo-toast {
   --tone: var(--muted-foreground);
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   padding: 12px 14px;
   border-radius: 12px;
@@ -567,7 +567,6 @@
 }
 [data-sonner-toaster] [data-sonner-toast].eo-toast [data-content] {
   gap: 2px;
-  padding-top: 3px;
 }
 [data-sonner-toaster] [data-sonner-toast].eo-toast .eo-toast-title {
   font-size: 13.5px;
@@ -601,6 +600,12 @@
   background: var(--popover);
   border-color: color-mix(in oklab, var(--foreground) 12%, transparent);
   color: var(--muted-foreground);
+}
+
+/* Native dropdown lists (public forms) follow the dark theme instead of the OS default. */
+select option {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
 }
 
 /* Respect reduced motion everywhere; !important is required to beat component-level durations. */

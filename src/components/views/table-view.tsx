@@ -14,10 +14,13 @@ import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
 import type { Sort, TableView as TableViewConfig } from "@/lib/blueprint/types";
 import { applyFilter, searchRecords, sortRecords } from "@/lib/engine/query";
 import { useFreshStore } from "@/lib/motion/fresh";
-import { canManage, useWorkspaces } from "@/lib/store/workspaces";
+import { useViewPref } from "@/lib/store/view-prefs";
+import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
+import { canEditInline, EditableCell } from "./editable-cell";
 import { SearchInput } from "./search-input";
 import { ViewEmpty } from "./view-empty";
+import { ViewPrefToggle } from "./view-pref-toggle";
 import { ToolbarSummary, ViewToolbar } from "./view-toolbar";
 
 export function TableView({ view }: { view: TableViewConfig }) {
@@ -48,8 +51,11 @@ export function TableView({ view }: { view: TableViewConfig }) {
       steps: [{ kind: "change", label: `${view.name} columns`, detail: names }],
       ops: [{ op: "update_view", viewId: view.id, patch: { fieldIds: order } }],
     });
-    if (entry) toast("Columns reordered", { description: "Saved to History, where you can undo it." });
+    if (entry)
+      toast.success("Columns reordered", { description: "Saved to History, where you can undo it." });
   };
+  const editable = canEdit(ws.role);
+  const inlineEdit = useViewPref("inlineEdit") && editable;
 
   const rows = useMemo(() => {
     const filtered = applyFilter(blueprint, entity, records, view.filter);
@@ -75,6 +81,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
           onChange={setQuery}
           placeholder={`Search ${entity.pluralName.toLowerCase()}`}
         />
+        {editable ? <ViewPrefToggle pref="inlineEdit" label="Edit in cells" /> : null}
         <ToolbarSummary>
           {rows.length} {rows.length === 1 ? entity.name.toLowerCase() : entity.pluralName.toLowerCase()}
         </ToolbarSummary>
@@ -185,6 +192,8 @@ export function TableView({ view }: { view: TableViewConfig }) {
                       >
                         {field.type === "status" ? (
                           <StatusMenu record={row} field={field} />
+                        ) : inlineEdit && i > 0 && canEditInline(field) ? (
+                          <EditableCell record={row} field={field} />
                         ) : (
                           <FieldValue field={field} value={row.data[field.id]} />
                         )}
