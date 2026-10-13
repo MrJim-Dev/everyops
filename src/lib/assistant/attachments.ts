@@ -19,7 +19,9 @@ export const attachmentRef = z.object({
 });
 export type AttachmentRef = z.infer<typeof attachmentRef>;
 
-export const MAX_ATTACHMENT_BYTES = 10_000_000;
+/** Per file. Uploads go through Cloud Run, which takes requests up to 32 MB. */
+export const MAX_ATTACHMENT_BYTES = 30_000_000;
+export const MAX_ATTACHMENT_MB = 30;
 /** Files per message. */
 export const MAX_ATTACHMENTS = 5;
 /** What the file picker offers; the server checks the bytes again. */

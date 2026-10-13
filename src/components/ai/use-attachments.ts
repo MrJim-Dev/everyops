@@ -2,7 +2,12 @@
 
 import { type ClipboardEvent, type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { type AttachmentRef, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS } from "@/lib/assistant/attachments";
+import {
+  type AttachmentRef,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_MB,
+  MAX_ATTACHMENTS,
+} from "@/lib/assistant/attachments";
 
 export type PendingFile = {
   key: string;
@@ -57,7 +62,7 @@ export function useAttachments() {
     if (files.length > room) toast(`You can attach up to ${MAX_ATTACHMENTS} files to one message.`);
     for (const file of files.slice(0, Math.max(room, 0))) {
       if (file.size > MAX_ATTACHMENT_BYTES) {
-        toast(`"${file.name}" is over 10 MB.`);
+        toast(`"${file.name}" is over ${MAX_ATTACHMENT_MB} MB.`);
         continue;
       }
       const key = `f${++counter}`;
