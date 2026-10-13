@@ -96,6 +96,8 @@ Formula language (for formula.expr, formula.freezeWhen):
 Rules:
 - Make the smallest change that does what was asked, using ids that exist in the blueprint.
 - When updating a formula, keep its resultType and freezeWhen unless asked otherwise.
+- When changing a select or status field's options, keep every existing option id: rename its label if needed, and
+  add new options next to it. Records store the id, so dropping an option strands the records that use it.
 - facts: the key values the owner should confirm (e.g. "Peak hours: 5 PM – 10 PM", "Rate: ₱520 per hour").
 - steps: one line per visible change, kind "add" or "change", detail like "₱400 → ₱520 per hour".
 - Every number in facts and steps must match the operations exactly (same amounts, hours and percentages). Never round or restate them differently.

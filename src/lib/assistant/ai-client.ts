@@ -3,6 +3,7 @@
 import type { AttachmentRef } from "@/lib/assistant/attachments";
 import type { Blueprint } from "@/lib/blueprint/types";
 import type { ChangePlan } from "@/lib/engine/changes";
+import type { OptionUsage } from "@/lib/engine/options";
 import { type PlanResult, planChange } from "./planner";
 
 export type AiPlanResult = PlanResult & { source?: "gemini" | "basic"; model?: string };
@@ -15,12 +16,13 @@ export async function requestPlan(
   blueprint: Blueprint,
   request: string,
   attachments: AttachmentRef[] = [],
+  optionUsage: OptionUsage = {},
 ): Promise<AiPlanResult> {
   try {
     const response = await fetch("/api/ai/plan-change", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ blueprint, request, attachments }),
+      body: JSON.stringify({ blueprint, request, attachments, optionUsage }),
     });
     const body = (await response.json().catch(() => null)) as
       | { ok: true; plan: ChangePlan; model: string }
