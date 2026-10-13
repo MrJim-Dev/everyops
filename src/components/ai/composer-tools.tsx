@@ -11,7 +11,7 @@ import {
   StopIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { InputGroupButton } from "@/components/ui/input-group";
 import { ATTACHMENT_ACCEPT, type AttachmentKind, type AttachmentRef } from "@/lib/assistant/attachments";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,110 @@ const KIND_ICONS: Record<Exclude<AttachmentKind, "image">, typeof FileTextIcon> 
 };
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+/** How long the mic can stay silent before we suggest checking it. */
+const QUIET_MS = 3000;
+const BARS = [0.55, 0.85, 1, 0.75, 0.5];
+
+/**
+ * A live level meter for the microphone. Bars are moved directly (no React render per frame). After a few
+ * seconds without sound it reports `quiet`, so a muted or wrong microphone shows up while recording.
+ */
+function LevelMeter({
+  analyser,
+  onQuiet,
+}: {
+  analyser: AnalyserNode | null;
+  onQuiet: (quiet: boolean) => void;
+}) {
+  const bars = useRef<(HTMLSpanElement | null)[]>([]);
+  const report = useRef(onQuiet);
+  report.current = onQuiet;
+  useEffect(() => {
+    if (!analyser) return;
+    const samples = new Float32Array(analyser.fftSize);
+    const started = performance.now();
+    let heard = started;
+    let quiet = false;
+    let frame = 0;
+    const tick = (now: number) => {
+      analyser.getFloatTimeDomainData(samples);
+      let sum = 0;
+      for (const s of samples) sum += s * s;
+      // Speech sits around 0.05–0.3 RMS; scale so normal talking moves the meter without pinning it.
+      const level = Math.min(1, Math.sqrt(sum / samples.length) * 3);
+      if (level > 0.06) heard = now;
+      bars.current.forEach((bar, i) => {
+        if (bar) bar.style.transform = `scaleY(${Math.max(0.18, level * BARS[i])})`;
+      });
+      const nowQuiet = now - heard > QUIET_MS;
+      if (nowQuiet !== quiet) {
+        quiet = nowQuiet;
+        report.current(quiet);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(frame);
+      report.current(false);
+    };
+  }, [analyser]);
+  return (
+    <span className="flex h-4 items-center gap-[2px]" aria-hidden>
+      {BARS.map((_, i) => (
+        <span
+          // biome-ignore lint/suspicious/noArrayIndexKey: a fixed set of bars
+          key={i}
+          ref={(el) => {
+            bars.current[i] = el;
+          }}
+          style={{ transform: "scaleY(0.18)" }}
+          className="h-full w-[3px] origin-center rounded-full bg-primary transition-transform duration-75"
+        />
+      ))}
+    </span>
+  );
+}
+
+/** While recording: the level meter, the time, and a hint when the mic hears nothing. */
+function Recording({ voice }: { voice: VoiceInput }) {
+  const [quiet, setQuiet] = useState(false);
+  return (
+    <output className="flex items-center gap-1" aria-live="polite">
+      <span className="flex items-center gap-2 pr-1 text-[12px] tabular-nums text-muted-foreground">
+        <LevelMeter analyser={voice.analyser} onQuiet={setQuiet} />
+        {quiet ? (
+          <span className="text-warning">Can't hear you. Check your mic.</span>
+        ) : (
+          <span>Listening {clock(voice.seconds)}</span>
+        )}
+      </span>
+      <InputGroupButton size="icon-sm" aria-label="Cancel recording" onClick={voice.cancel}>
+        <XIcon />
+      </InputGroupButton>
+      <InputGroupButton
+        size="icon-sm"
+        variant="secondary"
+        aria-label="Stop and transcribe"
+        onClick={voice.stop}
+      >
+        <StopIcon weight="fill" />
+      </InputGroupButton>
+    </output>
+  );
+}
+
+/** Covers the composer while files are dragged over it, so it's clear they can be dropped there. */
+export function DropOverlay({ attachments }: { attachments: Attachments }) {
+  if (!attachments.dragging) return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10 flex animate-pop items-center justify-center gap-2 rounded-[inherit] border-2 border-dashed border-primary/70 bg-background/90 text-[13px] font-medium text-primary">
+      <PaperclipIcon className="size-4" aria-hidden />
+      Drop files to attach
+    </div>
+  );
+}
 
 /**
  * Attach and voice buttons for an AI prompt. While recording they turn into a timer with stop and cancel;
@@ -47,26 +151,7 @@ export function ComposerTools({
 }) {
   const input = useRef<HTMLInputElement>(null);
 
-  if (voice?.state === "recording")
-    return (
-      <output className="flex items-center gap-1" aria-live="polite">
-        <span className="flex items-center gap-1.5 pr-1 text-[12px] tabular-nums text-muted-foreground">
-          <span className="size-2 animate-pulse rounded-full bg-destructive" aria-hidden />
-          Listening {clock(voice.seconds)}
-        </span>
-        <InputGroupButton size="icon-sm" aria-label="Cancel recording" onClick={voice.cancel}>
-          <XIcon />
-        </InputGroupButton>
-        <InputGroupButton
-          size="icon-sm"
-          variant="secondary"
-          aria-label="Stop and transcribe"
-          onClick={voice.stop}
-        >
-          <StopIcon weight="fill" />
-        </InputGroupButton>
-      </output>
-    );
+  if (voice?.state === "recording") return <Recording voice={voice} />;
 
   if (voice?.state === "transcribing")
     return (

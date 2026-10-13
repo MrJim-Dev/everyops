@@ -3,7 +3,7 @@
 import { ArrowUpIcon, SparkleIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { AttachmentTray, ComposerTools } from "@/components/ai/composer-tools";
+import { AttachmentTray, ComposerTools, DropOverlay } from "@/components/ai/composer-tools";
 import { useAttachments } from "@/components/ai/use-attachments";
 import { useVoiceInput } from "@/components/ai/use-voice-input";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
@@ -101,10 +101,10 @@ export function CreatePrompt() {
           e.preventDefault();
           start();
         }}
-        onDragOver={files.onDragOver}
-        onDrop={user ? files.onDrop : undefined}
+        {...(user ? files.dropProps : {})}
       >
-        <div className="rounded-2xl border border-foreground/10 bg-card/80 text-left shadow-[0_24px_70px_-36px_rgba(0,0,0,0.9)] backdrop-blur-md transition-[border-color,box-shadow] duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklab,var(--primary)_12%,transparent),0_24px_70px_-30px_color-mix(in_oklab,var(--primary)_40%,transparent)]">
+        <div className="relative rounded-2xl border border-foreground/10 bg-card/80 text-left shadow-[0_24px_70px_-36px_rgba(0,0,0,0.9)] backdrop-blur-md transition-[border-color,box-shadow] duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklab,var(--primary)_12%,transparent),0_24px_70px_-30px_color-mix(in_oklab,var(--primary)_40%,transparent)]">
+          <DropOverlay attachments={files} />
           <AttachmentTray attachments={files} className="px-3 pt-3" />
           <textarea
             ref={ref}

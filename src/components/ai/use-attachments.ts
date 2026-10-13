@@ -39,6 +39,8 @@ let counter = 0;
  */
 export function useAttachments() {
   const [items, setItems] = useState<PendingFile[]>([]);
+  /** Files are being dragged over the composer. */
+  const [dragging, setDragging] = useState(false);
   const count = useRef(0);
   count.current = items.length;
   const previews = useRef(new Set<string>());
@@ -90,10 +92,17 @@ export function useAttachments() {
     [add],
   );
   const onDragOver = useCallback((e: DragEvent) => {
-    if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    setDragging(true);
+  }, []);
+  const onDragLeave = useCallback((e: DragEvent) => {
+    // Moving between children fires leave events too; only stop when the pointer leaves the composer.
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
   }, []);
   const onDrop = useCallback(
     (e: DragEvent) => {
+      setDragging(false);
       if (!e.dataTransfer.files.length) return;
       e.preventDefault();
       add(e.dataTransfer.files);
@@ -103,7 +112,9 @@ export function useAttachments() {
 
   const refs = items.flatMap((f) => (f.ref ? [f.ref] : []));
   const uploading = items.some((f) => f.status === "uploading");
-  return { items, refs, uploading, add, remove, clear, onPaste, onDragOver, onDrop };
+  /** Spread on the composer element to accept dropped files. */
+  const dropProps = { onDragEnter: onDragOver, onDragOver, onDragLeave, onDrop };
+  return { items, refs, uploading, dragging, add, remove, clear, onPaste, dropProps };
 }
 
 export type Attachments = ReturnType<typeof useAttachments>;
