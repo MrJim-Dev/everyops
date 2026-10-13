@@ -11,6 +11,7 @@ export function describeBlueprint(bp: Blueprint): string[] {
     form: "Form",
     notes: "Notebook",
     document: "Pages",
+    canvas: "Canvas",
   };
   const screens = [...new Set(bp.views.map((v) => names[v.type]).filter((n): n is string => !!n))];
   return [

@@ -473,3 +473,115 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* MDXEditor (src/components/editor): fit the app's dark theme and give the content real typography. */
+.eo-mdx .mdxeditor.mdxeditor,
+.mdxeditor-popup-container.mdxeditor-popup-container {
+  --baseBase: var(--background);
+  --basePageBg: var(--background);
+  --baseBg: var(--muted);
+  --baseBgSubtle: var(--muted);
+  --baseText: var(--muted-foreground);
+  --baseTextContrast: var(--foreground);
+  --baseBorder: var(--border);
+  --baseLine: var(--border);
+  --accentSolid: var(--primary);
+  --accentSolidHover: var(--primary);
+  --accentBorder: var(--primary);
+  --accentText: var(--primary);
+  --accentTextContrast: var(--primary-foreground);
+  --font-body: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  color: var(--foreground);
+  font-family: var(--font-body);
+}
+.eo-mdx .eo-mdx-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-radius: calc(var(--radius) - 2px) calc(var(--radius) - 2px) 0 0;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--background) 92%, transparent);
+  backdrop-filter: blur(8px);
+  overflow-x: auto;
+}
+.eo-mdx .eo-mdx-content {
+  padding: 14px 18px;
+  font-size: 14px;
+  line-height: 1.65;
+  outline: none;
+}
+.eo-mdx .eo-mdx-content h1 {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 1.2em 0 0.5em;
+}
+.eo-mdx .eo-mdx-content h2 {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 1.2em 0 0.4em;
+}
+.eo-mdx .eo-mdx-content h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 1em 0 0.4em;
+}
+.eo-mdx .eo-mdx-content > :first-child {
+  margin-top: 0;
+}
+.eo-mdx .eo-mdx-content p {
+  margin: 0.5em 0;
+}
+.eo-mdx .eo-mdx-content ul {
+  list-style: disc;
+  padding-left: 1.4em;
+  margin: 0.5em 0;
+}
+.eo-mdx .eo-mdx-content ol {
+  list-style: decimal;
+  padding-left: 1.4em;
+  margin: 0.5em 0;
+}
+.eo-mdx .eo-mdx-content blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+  color: var(--muted-foreground);
+  margin: 0.75em 0;
+}
+.eo-mdx .eo-mdx-content a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.eo-mdx .eo-mdx-content code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--muted);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.eo-mdx .eo-mdx-content hr {
+  border-color: var(--border);
+  margin: 1.25em 0;
+}
+.eo-mdx .eo-mdx-content table {
+  border-collapse: collapse;
+  margin: 0.75em 0;
+}
+.eo-mdx .eo-mdx-content th,
+.eo-mdx .eo-mdx-content td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+}
+.eo-mdx .eo-mdx-content img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+.eo-mdx .cm-editor {
+  font-size: 12.5px;
+}
+.mdxeditor-popup-container {
+  color: var(--foreground);
+}

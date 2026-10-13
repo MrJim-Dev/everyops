@@ -92,6 +92,8 @@ export function toView(v: Design["views"][number]): View {
       };
     case "document":
       return { ...base, entityId: "", type: "document", ...(v.starter ? { starter: v.starter } : {}) };
+    case "canvas":
+      return { ...base, entityId: "", type: "canvas" };
     case "landing":
       return {
         ...base,
@@ -262,11 +264,11 @@ export function tidy(bp: Blueprint): Blueprint {
   const fieldsOf = (entityId: string) =>
     new Set(bp.entities.find((e) => e.id === entityId)?.fields.map((x) => x.id) ?? []);
   bp.views = bp.views.filter((v) =>
-    v.type === "document" || v.type === "landing" ? true : entityIds.has(v.entityId),
+    v.type === "document" || v.type === "canvas" || v.type === "landing" ? true : entityIds.has(v.entityId),
   );
   const formIds = new Set(bp.views.filter((v) => v.type === "form").map((v) => v.id));
   for (const v of bp.views) {
-    if (v.type === "document" || v.type === "landing") {
+    if (v.type === "document" || v.type === "canvas" || v.type === "landing") {
       v.entityId = "";
       if (v.type === "landing") v.blocks = tidyBlocks(v.blocks, resolve, fieldsOf, formIds);
       continue;
@@ -547,7 +549,11 @@ export function ensurePages(bp: Blueprint): Blueprint {
   // Pages built for people outside the team (a website, a public form, a document) need a place in the sidebar too.
   const listed = new Set(bp.systems.flatMap((s) => s.viewIds));
   for (const v of bp.views) {
-    if (listed.has(v.id) || (v.type !== "landing" && v.type !== "form" && v.type !== "document")) continue;
+    if (
+      listed.has(v.id) ||
+      (v.type !== "landing" && v.type !== "form" && v.type !== "document" && v.type !== "canvas")
+    )
+      continue;
     bp.systems.push({
       id: unique(`${v.id}_page`),
       name: v.name,

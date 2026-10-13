@@ -70,7 +70,9 @@ blueprint (JSON) ──► engine (src/lib/engine) ──► views (src/componen
 | `src/lib/catalog` | Community systems (blueprint + sample data) and the demo workspaces |
 | `src/lib/assistant` | Setup interview and change planner. **Gemini plugs in here.** |
 | `src/lib/store` | Workspace model and the browser store, which loads from `/api/workspaces` and saves each changed workspace back (debounced) |
-| `src/components/views` | One component per view type: table, kanban, calendar, schedule, checkout, approval queue |
+| `src/components/views` | One component per view type: table, kanban, calendar (month, week, day), schedule, checkout, approval queue, form, notes, document, landing and canvas |
+| `src/components/editor` | Markdown rendering (`react-markdown` + GFM, no raw HTML) and the editor: [MDXEditor](https://mdxeditor.dev) (rich text with headings, lists, checklists, links, tables, code, uploaded pictures, and a markdown source view), loaded in the browser only |
+| `src/components/canvas`, `src/lib/canvas` | Canvas pages (`type: "canvas"`), built with [Konva](https://konvajs.org) after its Canvas Editor demo: shapes, text, sticky notes, arrows and pictures; select, drag, resize, rotate; edit text in place; reorder, duplicate, undo/redo, zoom/pan and PNG export. The drawing is JSON in the workspace docs under the view id |
 | `src/components/widgets` | Dashboard stats, charts, progress and lists |
 | `src/components/records` | Shared field display/input, record panel, create dialog |
 | `src/components/workspace` | Workspace context, used by saved workspaces and previews alike |

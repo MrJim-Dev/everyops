@@ -6,8 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Field, FieldValue } from "@/lib/blueprint/types";
-
-const MAX_BYTES = 5_000_000;
+import { uploadImage } from "@/lib/uploads";
 
 /** Picks an image, uploads it to the workspace's storage and stores its link. Previews keep it in the browser. */
 export function ImageInput({
@@ -27,30 +26,11 @@ export function ImageInput({
 
   const pick = async (file: File | undefined) => {
     if (!file) return;
-    if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type))
-      return toast("Choose a PNG, JPG, WebP or GIF image.");
-    if (file.size > MAX_BYTES) return toast("That image is over 5 MB.");
-    if (ws.mode === "preview") {
-      const reader = new FileReader();
-      reader.onload = () => onChange(String(reader.result));
-      reader.readAsDataURL(file);
-      return;
-    }
     setBusy(true);
     try {
-      const form = new FormData();
-      form.set("file", file);
-      form.set("workspaceId", ws.id);
-      const res = await fetch("/api/uploads", { method: "POST", body: form });
-      const body = (await res.json().catch(() => null)) as {
-        ok: boolean;
-        url?: string;
-        message?: string;
-      } | null;
-      if (body?.ok && body.url) onChange(body.url);
-      else toast("Couldn't upload the image", { description: body?.message ?? "Try again." });
-    } catch {
-      toast("Couldn't upload the image", { description: "Check your connection and try again." });
+      onChange(await uploadImage(file, ws));
+    } catch (error) {
+      toast("Couldn't upload the image", { description: (error as Error).message });
     } finally {
       setBusy(false);
       if (input.current) input.current.value = "";

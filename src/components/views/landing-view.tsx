@@ -137,9 +137,7 @@ function BlockEditor({ viewId, block }: { viewId: string; block: Block }) {
         </p>
       </section>
     );
-  return (
-    <MarkdownEditor label="Section text" value={draft} onChange={setDraft} mode="split" minHeight={220} />
-  );
+  return <MarkdownEditor label="Section text" value={draft} onChange={setDraft} minHeight={220} />;
 }
 
 function safeJson(text: string | undefined): Record<string, string> {

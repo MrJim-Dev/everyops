@@ -157,6 +157,11 @@ export type DocumentView = ViewBase & {
   /** Markdown shown until someone edits the page. */
   starter?: string;
 };
+/**
+ * A free canvas (whiteboard): shapes, text, sticky notes, arrows and pictures people arrange by hand, e.g. a floor
+ * plan, a mood board or a process map. entityId is "", and the drawing lives in the workspace's docs as JSON.
+ */
+export type CanvasView = ViewBase & { type: "canvas" };
 /** A public web page (a landing page) built from blocks that can show live data. entityId is "". */
 export type LandingView = ViewBase & {
   type: "landing";
@@ -198,6 +203,7 @@ export type View =
   | FormView
   | NotesView
   | DocumentView
+  | CanvasView
   | LandingView;
 
 export type ViewType = View["type"];

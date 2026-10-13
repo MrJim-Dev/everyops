@@ -3,6 +3,7 @@
 import type { View } from "@/lib/blueprint/types";
 import { ApprovalQueueView } from "./approval-queue-view";
 import { CalendarView } from "./calendar-view";
+import { CanvasView } from "./canvas-view";
 import { CheckoutView } from "./checkout-view";
 import { DocumentView } from "./document-view";
 import { FormView } from "./form-view";
@@ -33,6 +34,8 @@ export function ViewRenderer({ view }: { view: View }) {
       return <NotesView key={view.id} view={view} />;
     case "document":
       return <DocumentView key={view.id} view={view} />;
+    case "canvas":
+      return <CanvasView key={view.id} view={view} />;
     case "landing":
       return <LandingView key={view.id} view={view} />;
   }

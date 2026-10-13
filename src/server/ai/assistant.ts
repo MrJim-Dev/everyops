@@ -217,7 +217,12 @@ function toDesignOps(
       : (allEntities.find((e) => [e.id, e.name, e.pluralName].some((k) => norm(k) === norm(id)))?.id ?? id);
   for (const op of ops) {
     if (op.op === "add_widget") op.widget.entityId = resolveEntity(op.widget.entityId);
-    if (op.op === "add_view" && op.view.type !== "document" && op.view.type !== "landing")
+    if (
+      op.op === "add_view" &&
+      op.view.type !== "document" &&
+      op.view.type !== "canvas" &&
+      op.view.type !== "landing"
+    )
       op.view.entityId = resolveEntity(op.view.entityId);
   }
   // Blocks on public pages point at real record types, fields and forms.
@@ -248,7 +253,7 @@ function toDesignOps(
       continue;
     }
     if (op.op !== "add_view") continue;
-    if (op.view.type === "document" || op.view.type === "landing") {
+    if (op.view.type === "document" || op.view.type === "canvas" || op.view.type === "landing") {
       op.view.entityId = "";
       continue;
     }

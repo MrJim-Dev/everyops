@@ -178,6 +178,8 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   - notes: a notebook with a list of notes and a markdown editor ("a note taking page"). It needs a record type
     with a text title and a long_text body: add_entity (e.g. Note: title, body long_text, plus tags or a date if
     useful) unless one exists; set titleFieldId, bodyFieldId and optional metaFieldIds.
+  - canvas: a free whiteboard people draw on ("a canvas page", "a whiteboard", "a floor plan of the venue", "a mood
+    board"): shapes, text, sticky notes, arrows and pictures. Its entityId is "" and it needs no other settings.
   - document: one free page of markdown the team edits ("a markdown page", "our policies", "an SOP page"). Its
     entityId is "" (no record type); put a helpful outline in starter (markdown).
 - Reports and totals pages: add_system with no views and several add_widget on it; a page without views shows

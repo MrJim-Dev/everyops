@@ -203,6 +203,7 @@ export const view = z.union([
     type: z.literal("document"),
     starter: z.string().optional().describe("Starting markdown"),
   }),
+  z.object({ ...viewBase, type: z.literal("canvas") }),
   z.object({
     ...viewBase,
     type: z.literal("landing"),
@@ -362,7 +363,9 @@ Rules for a valid blueprint:
 - checkout needs product, order and line-item types (line items have parent set to the order). Only for selling.
 - form views are a page that is just the form to add one record type (fieldIds, intro, submitLabel). notes views
   are a notebook over a record type with a text title and a long_text body (titleFieldId, bodyFieldId).
-  document views are one free markdown page with entityId "" and a starter outline. Use them when asked.
+  document views are one free markdown page with entityId "" and a starter outline. canvas views are a free
+  whiteboard (shapes, text, sticky notes, arrows, pictures) with entityId "", for a floor plan, mood board,
+  layout or process map. Use them when asked.
 - Charts plot over time (dateFieldId, bucket; kind line, area or bar) or by category (groupByFieldId; kind bar
   or donut). A reports page is a system with only widgets: stats for totals and several charts.
 - Systems are the sidebar pages. Put an Overview system first with 3 to 6 widgets, then one page per area the

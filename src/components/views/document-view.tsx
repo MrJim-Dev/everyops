@@ -78,7 +78,6 @@ export function DocumentView({ view }: { view: DocumentViewConfig }) {
             label={`${view.name} text`}
             value={draft}
             onChange={setDraft}
-            mode="split"
             autoFocus
             minHeight={460}
           />
