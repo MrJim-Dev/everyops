@@ -1,5 +1,6 @@
 import "server-only";
 import type {
+  Block,
   Blueprint,
   DataRecord,
   Entity,
@@ -15,6 +16,7 @@ import type {
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { computeAll } from "@/lib/engine/compute";
+import { isImagePath } from "@/lib/engine/records";
 import { todayKey } from "@/lib/time";
 import { DESIGN_SYSTEM, type Design, design } from "./design-prompt";
 import { generateJson } from "./gemini";
@@ -74,6 +76,8 @@ export function toView(v: Design["views"][number]): View {
         fieldIds: v.fieldIds ?? [],
         ...(v.intro ? { intro: v.intro } : {}),
         ...(v.submitLabel ? { submitLabel: v.submitLabel } : {}),
+        ...(v.public ? { public: true } : {}),
+        ...(v.blocks?.length ? { blocks: v.blocks as Block[] } : {}),
       };
     case "notes":
       return {
@@ -85,6 +89,14 @@ export function toView(v: Design["views"][number]): View {
       };
     case "document":
       return { ...base, entityId: "", type: "document", ...(v.starter ? { starter: v.starter } : {}) };
+    case "landing":
+      return {
+        ...base,
+        entityId: "",
+        type: "landing",
+        blocks: v.blocks as Block[],
+        ...(v.public === false ? { public: false } : {}),
+      };
   }
 }
 
@@ -231,14 +243,21 @@ export function tidy(bp: Blueprint): Blueprint {
   }
   const fieldsOf = (entityId: string) =>
     new Set(bp.entities.find((e) => e.id === entityId)?.fields.map((x) => x.id) ?? []);
-  bp.views = bp.views.filter((v) => (v.type === "document" ? true : entityIds.has(v.entityId)));
+  bp.views = bp.views.filter((v) =>
+    v.type === "document" || v.type === "landing" ? true : entityIds.has(v.entityId),
+  );
+  const formIds = new Set(bp.views.filter((v) => v.type === "form").map((v) => v.id));
   for (const v of bp.views) {
-    if (v.type === "document") {
+    if (v.type === "document" || v.type === "landing") {
       v.entityId = "";
+      if (v.type === "landing") v.blocks = tidyBlocks(v.blocks, resolve, fieldsOf, formIds);
       continue;
     }
     const has = fieldsOf(v.entityId);
-    if (v.type === "form") v.fieldIds = v.fieldIds.filter((id) => has.has(id));
+    if (v.type === "form") {
+      v.fieldIds = v.fieldIds.filter((id) => has.has(id));
+      if (v.blocks) v.blocks = tidyBlocks(v.blocks, resolve, fieldsOf, formIds);
+    }
     if (v.type === "notes") {
       const entity = bp.entities.find((e) => e.id === v.entityId);
       if (entity) fillNotesView(v, entity);
@@ -343,6 +362,9 @@ export function toFieldValue(
     }
     case "checkbox":
       return /^(true|yes|1)$/i.test(v);
+    case "image":
+      // Pictures are uploaded by people; the AI can't make one, so sample values are left empty.
+      return isImagePath(v) ? v : null;
     case "relation":
       return v === "" ? null : ref(v);
     case "select":
@@ -426,7 +448,7 @@ export async function designWorkspace(brief: string, workspaceName: string): Pro
       if (result.retryable && attempt < 1) continue;
       return { ok: false, message: result.error };
     }
-    const bp = ensurePages(tidy(toBlueprint(result.data)));
+    const bp = ensurePages(repairStructure(tidy(toBlueprint(result.data))));
     const errors = [...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`), ...extraChecks(bp)];
     if (!errors.length) {
       const records = computeAll(bp, toRecords(bp, result.data.samples, now), now);
@@ -494,6 +516,18 @@ export function ensurePages(bp: Blueprint): Blueprint {
       widgetIds: [],
     });
   }
+  // Pages built for people outside the team (a website, a public form, a document) need a place in the sidebar too.
+  const listed = new Set(bp.systems.flatMap((s) => s.viewIds));
+  for (const v of bp.views) {
+    if (listed.has(v.id) || (v.type !== "landing" && v.type !== "form" && v.type !== "document")) continue;
+    bp.systems.push({
+      id: unique(`${v.id}_page`),
+      name: v.name,
+      icon: v.type === "landing" ? "house" : v.type === "form" ? "calendar" : "image",
+      viewIds: [v.id],
+      widgetIds: [],
+    });
+  }
   return bp;
 }
 
@@ -519,4 +553,83 @@ export function fillNotesView(view: NotesView, entity: Entity) {
   view.metaFieldIds = (view.metaFieldIds ?? []).filter(
     (id) => has(id) && id !== view.titleFieldId && id !== view.bodyFieldId,
   );
+}
+
+/** Blocks that point at real things: record types by their id, fields that exist, forms that exist. */
+export function tidyBlocks(
+  blocks: Block[],
+  resolve: (id: string | undefined) => string | undefined,
+  fieldsOf: (entityId: string) => Set<string>,
+  formIds: Set<string>,
+): Block[] {
+  const seen = new Set<string>();
+  return blocks.flatMap((b): Block[] => {
+    if (seen.has(b.id)) return [];
+    seen.add(b.id);
+    if (b.type === "records") {
+      const entityId = resolve(b.entityId) as string;
+      const has = fieldsOf(entityId);
+      const fieldIds = b.fieldIds.filter((id) => has.has(id));
+      return fieldIds.length
+        ? [{ ...b, entityId, fieldIds, sort: b.sort?.filter((s) => has.has(s.fieldId)) }]
+        : [];
+    }
+    if (b.type === "form") return formIds.has(b.viewId) ? [b] : [];
+    if (b.type === "hero" && b.ctaViewId && !formIds.has(b.ctaViewId)) {
+      const { ctaViewId: _drop, ...rest } = b;
+      return [rest];
+    }
+    return [b];
+  });
+}
+
+const RESERVED_PAGES: Record<string, string> = { settings: "Setup", history: "Log", search: "Lookup" };
+
+/**
+ * Structural slips that would quietly break features: a page named like one of the app's own, bookings without
+ * booking settings (no schedule, no double-booking check, no public slots), and line items without a parent.
+ */
+export function repairStructure(bp: Blueprint): Blueprint {
+  for (const s of bp.systems) {
+    const fix = RESERVED_PAGES[s.name.trim().toLowerCase()];
+    if (fix) s.name = fix;
+  }
+  for (const e of bp.entities) {
+    if (!e.booking) {
+      const resourceField = e.fields.find(
+        (f) => f.type === "relation" && bp.entities.find((x) => x.id === f.relation?.entityId)?.resource,
+      );
+      const time = e.fields.find((f) => f.type === "time_range" && f.range !== "dates");
+      const status = e.fields.find((f) => f.type === "status");
+      if (resourceField && time && status)
+        e.booking = {
+          resourceFieldId: resourceField.id,
+          timeFieldId: time.id,
+          statusFieldId: status.id,
+          blockingStatuses: (status.options ?? []).map((o) => o.id).filter((id) => !/cancel/.test(id)),
+        };
+    }
+    if (!e.parent && /(line|item|addon|add_on|extra)/.test(e.id)) {
+      for (const f of e.fields) {
+        if (f.type !== "relation" || !f.relation) continue;
+        const parent = bp.entities.find((x) => x.id === f.relation?.entityId);
+        const rolledUp = parent?.fields.some(
+          (x) => x.type === "rollup" && x.rollup?.childEntityId === e.id && x.rollup.viaFieldId === f.id,
+        );
+        if (parent && rolledUp) {
+          e.parent = { entityId: parent.id, fieldId: f.id };
+          break;
+        }
+      }
+    }
+  }
+  // Pages that only list line items go: those show inside their parent record.
+  const children = new Set(bp.entities.filter((e) => e.parent).map((e) => e.id));
+  bp.systems = bp.systems.filter(
+    (s) =>
+      s.widgetIds.length > 0 ||
+      !s.viewIds.length ||
+      !s.viewIds.every((id) => children.has(bp.views.find((v) => v.id === id)?.entityId ?? "")),
+  );
+  return bp;
 }

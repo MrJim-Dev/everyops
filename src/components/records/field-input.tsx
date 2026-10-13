@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { Field, FieldValue, TimeRange } from "@/lib/blueprint/types";
 import { isTimeRange } from "@/lib/format";
 import { at, dateKey, manilaParts } from "@/lib/time";
+import { ImageInput } from "./image-input";
 import { RelationInput } from "./relation-input";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -140,6 +141,15 @@ export function FieldInput({ id, field, value, onChange, invalid }: Props) {
           value={typeof value === "string" ? value : null}
           onChange={onChange}
           invalid={invalid}
+        />
+      );
+    case "image":
+      return (
+        <ImageInput
+          id={id}
+          field={field}
+          value={typeof value === "string" ? value : null}
+          onChange={onChange}
         />
       );
     default:

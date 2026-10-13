@@ -7,6 +7,7 @@ import { CheckoutView } from "./checkout-view";
 import { DocumentView } from "./document-view";
 import { FormView } from "./form-view";
 import { KanbanView } from "./kanban-view";
+import { LandingView } from "./landing-view";
 import { NotesView } from "./notes-view";
 import { SlotGridView } from "./slot-grid-view";
 import { TableView } from "./table-view";
@@ -32,6 +33,8 @@ export function ViewRenderer({ view }: { view: View }) {
       return <NotesView key={view.id} view={view} />;
     case "document":
       return <DocumentView key={view.id} view={view} />;
+    case "landing":
+      return <LandingView key={view.id} view={view} />;
   }
 }
 

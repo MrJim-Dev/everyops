@@ -92,6 +92,18 @@ export function FieldValue({
       );
     case "person":
       return <PersonChip name={String(value)} />;
+    case "image":
+      return typeof value === "string" ? (
+        // biome-ignore lint/performance/noImgElement: uploads are served by our own route at their own size
+        <img
+          src={value}
+          alt={field.name}
+          loading="lazy"
+          className={cn("h-9 w-9 rounded-md border bg-white object-contain", className)}
+        />
+      ) : (
+        <Empty />
+      );
     case "relation": {
       const target = field.relation ? findEntity(blueprint, field.relation.entityId) : undefined;
       const linked = typeof value === "string" ? findRecord(records, value) : undefined;

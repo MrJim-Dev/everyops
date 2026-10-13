@@ -1,12 +1,22 @@
 import "server-only";
-import type { Blueprint, DataRecord, Entity, Field, RecordData, View, Widget } from "@/lib/blueprint/types";
+import type {
+  Block,
+  Blueprint,
+  DataRecord,
+  Entity,
+  Field,
+  RecordData,
+  View,
+  Widget,
+} from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { applyOps, type ChangeOp, type ChangePlan, commitChange, type RecordOp } from "@/lib/engine/changes";
 import { applyRecordOps } from "@/lib/engine/records";
+import { isPublic } from "@/lib/public/resolve";
 import { randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
 import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer } from "./assistant-prompt";
-import { fillNotesView, toEntity, toFieldValue, toRule, toView } from "./design";
+import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
 import { generateJson } from "./gemini";
 
 export type AssistantMessage = { role: "user" | "assistant"; text: string };
@@ -153,6 +163,24 @@ function toDesignOps(
         if (o.viewId && systemId) ops.push({ op: "move_view", viewId: o.viewId, systemId });
         else errors.push(`${at}: needs viewId and systemId`);
         break;
+      case "update_view": {
+        const patch = {
+          ...(o.public !== undefined ? { public: o.public } : {}),
+          ...(o.intro ? { intro: o.intro } : {}),
+          ...(o.submitLabel ? { submitLabel: o.submitLabel } : {}),
+          ...(o.fieldIds?.length ? { fieldIds: o.fieldIds } : {}),
+        };
+        if (Object.keys(patch).length) ops.push({ op: "update_view", viewId: o.viewId, patch });
+        break;
+      }
+      case "add_block":
+        ops.push({
+          op: "add_block",
+          viewId: o.viewId,
+          block: structuredClone(o.block) as Block,
+          ...(o.beforeBlockId ? { beforeBlockId: o.beforeBlockId } : {}),
+        });
+        break;
     }
   }
   for (const [i, r] of renames.entries()) {
@@ -186,8 +214,25 @@ function toDesignOps(
       : (allEntities.find((e) => [e.id, e.name, e.pluralName].some((k) => norm(k) === norm(id)))?.id ?? id);
   for (const op of ops) {
     if (op.op === "add_widget") op.widget.entityId = resolveEntity(op.widget.entityId);
-    if (op.op === "add_view" && op.view.type !== "document")
+    if (op.op === "add_view" && op.view.type !== "document" && op.view.type !== "landing")
       op.view.entityId = resolveEntity(op.view.entityId);
+  }
+  // Blocks on public pages point at real record types, fields and forms.
+  const fieldsOf = (id: string) =>
+    new Set(allEntities.find((e) => e.id === id)?.fields.map((f) => f.id) ?? []);
+  const formIds = new Set([
+    ...bp.views.filter((v) => v.type === "form").map((v) => v.id),
+    ...ops.flatMap((x) => (x.op === "add_view" && x.view.type === "form" ? [x.view.id] : [])),
+  ]);
+  const resolveLoose = (id: string | undefined) => (id === undefined ? id : resolveEntity(id));
+  for (const op of ops) {
+    if (op.op === "add_view" && (op.view.type === "landing" || op.view.type === "form") && op.view.blocks)
+      op.view.blocks = tidyBlocks(op.view.blocks, resolveLoose, fieldsOf, formIds);
+    if (op.op === "add_block") {
+      const [cleaned] = tidyBlocks([op.block], resolveLoose, fieldsOf, formIds);
+      if (cleaned) op.block = cleaned;
+      else errors.push(`add_block: the ${op.block.type} block points at fields or forms that don't exist`);
+    }
   }
   const entityFor = (id: string) => {
     const created = ops.flatMap((x) => (x.op === "add_entity" && x.entity.id === id ? [x.entity] : []))[0];
@@ -200,7 +245,7 @@ function toDesignOps(
       continue;
     }
     if (op.op !== "add_view") continue;
-    if (op.view.type === "document") {
+    if (op.view.type === "document" || op.view.type === "landing") {
       op.view.entityId = "";
       continue;
     }
@@ -261,6 +306,8 @@ function toDesignOps(
     "add_system",
     "add_view",
     "move_view",
+    "update_view",
+    "add_block",
     "add_view_field",
     "add_widget",
     "add_rule",
@@ -278,7 +325,13 @@ function toDesignOps(
       bp.views.some((v) => v.id === id) || ops.some((x) => x.op === "add_view" && x.view.id === id);
     const systemKnown = (id: string) =>
       bp.systems.some((s) => s.id === id) || ops.some((x) => x.op === "add_system" && x.system.id === id);
-    if ((op.op === "move_view" || op.op === "rename_view") && !viewKnown(op.viewId))
+    if (
+      (op.op === "move_view" ||
+        op.op === "rename_view" ||
+        op.op === "update_view" ||
+        op.op === "add_block") &&
+      !viewKnown(op.viewId)
+    )
       errors.push(`${op.op}: view "${op.viewId}" doesn't exist`);
     if ((op.op === "move_view" || op.op === "rename_system") && !systemKnown(op.systemId))
       errors.push(`${op.op}: page "${op.systemId}" doesn't exist`);
@@ -395,7 +448,16 @@ ${bp.systems
         [
           ...s.viewIds.map((id) => {
             const v = bp.views.find((x) => x.id === id);
-            return v ? `${v.name} (${v.id}, ${v.type} of ${v.entityId})` : id;
+            if (!v) return id;
+            const extra =
+              v.type === "form" || v.type === "landing"
+                ? `${isPublic(v) ? ", public" : ", team only"}${
+                    v.blocks?.length
+                      ? `, blocks: ${v.blocks.map((b) => `${b.type} ${b.id}`).join(" / ")}`
+                      : ""
+                  }`
+                : "";
+            return `${v.name} (${v.id}, ${v.type}${v.entityId ? ` of ${v.entityId}` : ""}${extra})`;
           }),
           ...(s.widgetIds.length ? [`${s.widgetIds.length} dashboard widgets`] : []),
         ].join(", ") || "empty"
@@ -497,7 +559,15 @@ ${input.messages.map((m) => `${m.role === "user" ? "Person" : "You"}: ${m.text}`
   };
 }
 
-const OP_NAMES = new Set(["add_field", "add_entity", "add_view", "add_widget", "add_system", "add_rule"]);
+const OP_NAMES = new Set([
+  "add_field",
+  "add_entity",
+  "add_view",
+  "add_widget",
+  "add_system",
+  "add_rule",
+  "add_block",
+]);
 
 /** Gemini sometimes drops the add_ prefix ("op": "widget"); put it back so one slip doesn't sink a whole plan. */
 function fixOpNames(json: unknown): unknown {

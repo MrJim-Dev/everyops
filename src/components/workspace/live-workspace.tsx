@@ -23,6 +23,19 @@ export function LiveWorkspace({ slug, children }: { slug: string; children: Reac
     if (hydrated) open(slug);
   }, [hydrated, slug, open]);
 
+  // New public bookings show up without a reload: check on focus and every 30 seconds.
+  const refresh = useWorkspaces((s) => s.refresh);
+  useEffect(() => {
+    if (!hydrated) return;
+    const tick = () => document.visibilityState === "visible" && void refresh(slug);
+    const timer = setInterval(tick, 30_000);
+    window.addEventListener("focus", tick);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", tick);
+    };
+  }, [hydrated, slug, refresh]);
+
   const commit = useCallback((next: WorkspaceData) => setRecords(slug, next.records), [setRecords, slug]);
   const saveDoc = useCallback((viewId: string, body: string) => setDoc(slug, viewId, body), [setDoc, slug]);
 

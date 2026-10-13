@@ -1,11 +1,12 @@
 import "server-only";
-import { sql } from "kysely";
+import { sql, type Transaction } from "kysely";
 import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { freshSample } from "@/lib/catalog/shift";
 import {
   type Invite,
   type Member,
   type MemberRole,
+  mergeRecords,
   newWorkspaceId,
   type Role,
   toDoc,
@@ -13,7 +14,8 @@ import {
   type WorkspaceDoc,
   workspaceFrom,
 } from "@/lib/store/workspace-model";
-import { db } from "./db";
+
+import { type Database, db } from "./db";
 import { inviteEmail } from "./emails";
 import { appUrl, sendMail } from "./mail";
 
@@ -72,6 +74,7 @@ async function seedIfNew(userId: string) {
 /** Everything the account can open: its own workspaces and the ones it was invited to. */
 export async function listWorkspaces(userId: string): Promise<Workspace[]> {
   await seedIfNew(userId);
+  const syncedAt = new Date().toISOString();
   const { rows } = await sql<Row>`
     select w.id, w.owner_id, w.doc, u.name as owner_name, u.email as owner_email
     from workspace w join "user" u on u.id = w.owner_id
@@ -117,6 +120,7 @@ export async function listWorkspaces(userId: string): Promise<Workspace[]> {
     return {
       ...r.doc,
       slug: r.id,
+      syncedAt,
       ownerId: r.owner_id,
       owner: { name: r.owner_name, email: r.owner_email },
       members: team,
@@ -144,9 +148,10 @@ export async function loadWorkspace(
 ): Promise<{ workspace: Workspace; role: Role } | null> {
   const access = await roleIn(id, userId);
   if (!access) return null;
+  const syncedAt = new Date().toISOString();
   const { rows } = await sql<{ doc: WorkspaceDoc }>`select doc from workspace where id = ${id}`.execute(db);
   if (!rows[0]) return null;
-  return { workspace: { ...rows[0].doc, slug: id, ownerId: access.ownerId }, role: access.role };
+  return { workspace: { ...rows[0].doc, slug: id, syncedAt, ownerId: access.ownerId }, role: access.role };
 }
 
 /**
@@ -170,16 +175,22 @@ export async function saveWorkspace(userId: string, ws: Workspace): Promise<Save
 
   if (access.role === "staff") {
     // Staff edit records and page text only; the blueprint, history and settings stay as the owner left them.
-    const records: DataRecord[] = doc.records;
     const docs = doc.docs && typeof doc.docs === "object" ? doc.docs : {};
-    await sql`update workspace set doc = jsonb_set(jsonb_set(doc, '{records}', ${JSON.stringify(records)}::jsonb), '{docs}', ${JSON.stringify(docs)}::jsonb), updated_at = now()
-      where id = ${ws.slug}`.execute(db);
+    await db.transaction().execute(async (trx) => {
+      const records = mergeRecords(await lockedRecords(trx, ws.slug), doc.records, ws.syncedAt);
+      await sql`update workspace set doc = jsonb_set(jsonb_set(doc, '{records}', ${JSON.stringify(records)}::jsonb), '{docs}', ${JSON.stringify(docs)}::jsonb), updated_at = now()
+        where id = ${ws.slug}`.execute(trx);
+    });
     return { ok: true };
   }
 
   const newInvites: Invite[] = [];
   await db.transaction().execute(async (trx) => {
-    await sql`update workspace set doc = ${JSON.stringify(doc)}::jsonb, updated_at = now() where id = ${ws.slug}`.execute(
+    const merged = {
+      ...doc,
+      records: mergeRecords(await lockedRecords(trx, ws.slug), doc.records, ws.syncedAt),
+    };
+    await sql`update workspace set doc = ${JSON.stringify(merged)}::jsonb, updated_at = now() where id = ${ws.slug}`.execute(
       trx,
     );
     // The team: managers can change roles and remove people; joining only happens by accepting an invite.
@@ -307,4 +318,11 @@ export async function upsertWorkspaceTemplate(t: {
     values (${t.id}, ${t.name}, ${t.summary}, ${t.sourceSystemId ?? null}, ${JSON.stringify({ ...t.data, builtOn: t.builtOn })}::jsonb, ${t.sort})
     on conflict (id) do update set name = excluded.name, summary = excluded.summary, source_system_id = excluded.source_system_id,
       doc = excluded.doc, sort = excluded.sort, updated_at = now()`.execute(db);
+}
+
+/** The stored records, with the row locked until the transaction ends so concurrent writes queue up. */
+export async function lockedRecords(trx: Transaction<Database>, id: string): Promise<DataRecord[]> {
+  const { rows } = await sql<{ records: DataRecord[] | null }>`
+    select doc->'records' as records from workspace where id = ${id} for update`.execute(trx);
+  return rows[0]?.records ?? [];
 }

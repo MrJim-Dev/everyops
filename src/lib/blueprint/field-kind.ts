@@ -15,7 +15,8 @@ export type DisplayKind =
   | "multi"
   | "person"
   | "relation"
-  | "checkbox";
+  | "checkbox"
+  | "image";
 
 export function displayKind(bp: Blueprint, field: Field): DisplayKind {
   switch (field.type) {

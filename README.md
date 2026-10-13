@@ -96,6 +96,20 @@ Gemini runs only on the server, through Vertex AI in `asia-southeast1`, signed i
 
 The model is `gemini-3.5-flash` (`GEMINI_MODEL`). Conversation turns take 3–10 seconds and a design about 20. Leave temperature at its default and only lower thinking for the designer and the assistant: lowering them elsewhere made Gemini 3 models loop, and the `global` endpoint stalled often, which is why the regional endpoint is used.
 
+## Public pages
+
+A workspace can publish a landing page and forms at `/s/<workspace>/<view>` for people without an account.
+
+| File | Role |
+|---|---|
+| `src/lib/public/resolve.ts` | Turns a public view into plain, pre-formatted data: only fields a block lists, only choices visitors may see (bookable resources, or record types a public block shows). Used by the public site and the in-app preview |
+| `src/lib/public/slots.ts` | Free and taken slots of a resource on a day, for public booking forms |
+| `src/server/public.ts`, `src/app/api/public/*` | Page data, slots, and submissions: accepted fields only, the same engine checks as the app (required fields, double bookings, rules), the workspace row locked while saving, and a per-address limit |
+| `src/app/s/[workspace]/[[...view]]`, `src/components/public` | The public site: blocks (hero, markdown, live records as cards/list/table/FAQ, embedded forms, sandboxed HTML) and the booking form with a slot picker |
+| `src/server/storage.ts`, `/api/uploads`, `/api/files/*` | Image fields (QR codes, logos) in the Cloud Storage bucket `everyops-prod-uploads`. Types are checked by their bytes; SVG is refused; names are random UUIDs |
+
+Bookings made on a public page are written on the server. Saves from an open tab keep any record created after the tab last read the workspace (`syncedAt`), and open tabs pull new records every 30 seconds and on focus.
+
 ## Design rules
 
 - Dark, compact, Linear-inspired. Tokens live in `src/app/globals.css` with one accent (#3FA796).

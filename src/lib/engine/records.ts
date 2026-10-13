@@ -61,6 +61,10 @@ export function validateRecord(
         if (!isTimeRange(value) || Date.parse(value.end) < Date.parse(value.start))
           errors.push({ fieldId: field.id, message: "End must be after start" });
         break;
+      case "image":
+        if (!isImagePath(value))
+          errors.push({ fieldId: field.id, message: `Upload ${field.name.toLowerCase()} again` });
+        break;
     }
   }
   if (errors.length === 0 && entity.booking) {
@@ -258,4 +262,13 @@ export function applyRecordOps(ws: WorkspaceData, ops: RecordOp[], now: Date = n
     }
   }
   return { data, created, replaced, errors };
+}
+
+/** Images are only ever our own uploads (or, in a preview that isn't saved, a picture held in the browser). */
+export function isImagePath(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    (/^\/api\/files\/[a-z0-9-]+\/[0-9a-f-]{36}\.(png|jpg|gif|webp)$/.test(value) ||
+      value.startsWith("data:image/"))
+  );
 }

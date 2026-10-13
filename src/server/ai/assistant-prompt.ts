@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { FUNCTIONS } from "@/lib/engine/expr";
-import { entity, field, option, rule, system, view } from "./design-prompt";
+import { block, entity, field, option, PUBLIC_PAGES_GUIDE, rule, system, view } from "./design-prompt";
 
 const patch = z.object({
   name: z.string().optional(),
@@ -88,6 +88,20 @@ const designOp = z.union([
     op: z.literal("move_view"),
     viewId: z.string().describe("The view (tab) to move"),
     systemId: z.string().describe("The page it moves to"),
+  }),
+  z.object({
+    op: z.literal("update_view"),
+    viewId: z.string().describe("A form or landing view"),
+    public: z.boolean().optional().describe("Make it a public page anyone with the link can use"),
+    intro: z.string().optional(),
+    submitLabel: z.string().optional(),
+    fieldIds: z.array(z.string()).optional().describe("Form: the fields asked, in order"),
+  }),
+  z.object({
+    op: z.literal("add_block"),
+    viewId: z.string().describe("A form or landing view, existing or added in this plan"),
+    block,
+    beforeBlockId: z.string().optional(),
   }),
 ]);
 
@@ -179,6 +193,19 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
 - Every number in facts and steps must match the operations exactly.
 
 Ask (kind "clarify") when the request is ambiguous in a way that changes the result; ask one short question.
+
+Public pages and their requests:
+- "a public booking page": update_view public true on the booking form if there is one, otherwise add_system with
+  add_view (form, public true, the resource, time, guest name/phone/email and add-on fields). Add guest fields with
+  add_field when bookings don't have them. Add a records block of active payment methods if they exist.
+- "payment methods… if active show them in the booking form": add_entity for payment methods, its page, and
+  add_block on the booking form (records, cards, filter status == 'active').
+- "a landing page": add_system (icon house) and add_view landing with a hero (button to the public booking form),
+  a text block about the business, and records blocks for what customers should see (courts, rates, FAQs).
+- "FAQs shown on the landing page or booking form": add_entity, its page, and add_block (layout faq) on each.
+- update_view also changes a form's intro, button or questions. Blocks go on form and landing views only.
+
+${PUBLIC_PAGES_GUIDE}
 
 Formula language: field ids (rate), relation paths (client.name), numbers, 'strings', true, false, null,
 + - * / % == != < <= > >= && || ! and cond ? a : b. Functions: ${Object.keys(FUNCTIONS).join(", ")}.

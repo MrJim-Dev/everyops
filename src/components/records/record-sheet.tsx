@@ -104,7 +104,11 @@ function RecordSheetBody({
                 <div key={field.id} className="contents">
                   <dt className="text-muted-foreground">{field.name}</dt>
                   <dd className="min-w-0">
-                    <FieldValue field={field} value={record.data[field.id]} />
+                    <FieldValue
+                      field={field}
+                      value={record.data[field.id]}
+                      className={field.type === "image" ? "size-40" : undefined}
+                    />
                   </dd>
                 </div>
               ))}

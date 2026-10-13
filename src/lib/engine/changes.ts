@@ -1,5 +1,6 @@
 import { findEntity } from "@/lib/blueprint/lookup";
 import type {
+  Block,
   Blueprint,
   DataRecord,
   Entity,
@@ -31,7 +32,15 @@ export type ChangeOp =
   /** Moves a view (tab) to another page. A page left with nothing on it is removed. */
   | { op: "move_view"; viewId: string; systemId: string }
   | { op: "rename_system"; systemId: string; name: string }
-  | { op: "rename_view"; viewId: string; name: string };
+  | { op: "rename_view"; viewId: string; name: string }
+  /** Form and landing settings: who can see it, its intro, button and questions. */
+  | {
+      op: "update_view";
+      viewId: string;
+      patch: { public?: boolean; intro?: string; submitLabel?: string; fieldIds?: string[] };
+    }
+  /** Adds a block (live data, text, a form) to a form or landing page, optionally before another block. */
+  | { op: "add_block"; viewId: string; block: Block; beforeBlockId?: string };
 
 /** Data edits a plan may make after its design changes: add records or change field values. */
 export type RecordOp =
@@ -130,6 +139,22 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "rename_view": {
         const view = next.views.find((v) => v.id === op.viewId);
         if (view) view.name = op.name;
+        break;
+      }
+      case "update_view": {
+        const view = next.views.find((v) => v.id === op.viewId);
+        if (view?.type === "form") Object.assign(view, op.patch);
+        else if (view?.type === "landing" && op.patch.public !== undefined) view.public = op.patch.public;
+        break;
+      }
+      case "add_block": {
+        const view = next.views.find((v) => v.id === op.viewId);
+        if (view?.type !== "form" && view?.type !== "landing") break;
+        if (view.type === "form" && !view.blocks) view.blocks = [];
+        const blocks = view.blocks ?? [];
+        if (blocks.some((b) => b.id === op.block.id)) break;
+        const at = op.beforeBlockId ? blocks.findIndex((b) => b.id === op.beforeBlockId) : -1;
+        blocks.splice(at < 0 ? blocks.length : at, 0, op.block);
         break;
       }
     }

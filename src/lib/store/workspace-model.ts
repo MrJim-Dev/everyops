@@ -76,10 +76,25 @@ export type Workspace = {
   invites?: Invite[];
   /** Set while Ask EveryOps is still setting the workspace up. */
   setup?: { prompt: string; progress?: SetupProgress };
+  /**
+   * Server time when this copy was read. Saves keep records the server created after it (public bookings)
+   * instead of treating them as deleted. Never stored in the document.
+   */
+  syncedAt?: string;
 };
 
 /** The parts of a workspace stored in its JSON document. */
-export type WorkspaceDoc = Omit<Workspace, "ownerId" | "owner" | "members" | "invites">;
+export type WorkspaceDoc = Omit<Workspace, "ownerId" | "owner" | "members" | "invites" | "syncedAt">;
+
+/**
+ * Records to save: the browser's copy, plus any record the server created after the browser last read the
+ * workspace (a public booking it hasn't seen yet). Anything older that's missing was deleted on purpose.
+ */
+export function mergeRecords(stored: DataRecord[], incoming: DataRecord[], syncedAt?: string): DataRecord[] {
+  if (!syncedAt) return incoming;
+  const have = new Set(incoming.map((r) => r.id));
+  return [...incoming, ...stored.filter((r) => !have.has(r.id) && r.createdAt > syncedAt)];
+}
 
 export type PageDoc = { body: string; updatedAt: string };
 
@@ -162,6 +177,6 @@ export function demoWorkspaces(now = new Date()): Workspace[] {
 }
 
 export function toDoc(ws: Workspace): WorkspaceDoc {
-  const { ownerId: _o, owner: _p, members: _m, invites: _i, ...doc } = ws;
+  const { ownerId: _o, owner: _p, members: _m, invites: _i, syncedAt: _s, ...doc } = ws;
   return doc;
 }

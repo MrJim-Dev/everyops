@@ -1,6 +1,16 @@
 import type { Workspace } from "@/lib/store/workspace-model";
 import { apiUser, sameOrigin } from "@/server/session-api";
-import { MAX_DOC_BYTES, removeWorkspace, saveWorkspace } from "@/server/workspaces";
+import { loadWorkspace, MAX_DOC_BYTES, removeWorkspace, saveWorkspace } from "@/server/workspaces";
+
+/** The latest copy of one workspace, so an open tab can pick up records created elsewhere (public bookings). */
+export async function GET(request: Request, { params }: RouteContext<"/api/workspaces/[id]">) {
+  const { user, error } = await apiUser(request);
+  if (error) return error;
+  const found = await loadWorkspace((await params).id, user.id);
+  if (!found) return Response.json({ ok: false, message: "Workspace not found." }, { status: 404 });
+  const { records, syncedAt, docs } = found.workspace;
+  return Response.json({ ok: true, records, docs: docs ?? {}, syncedAt });
+}
 
 export async function PUT(request: Request, { params }: RouteContext<"/api/workspaces/[id]">) {
   const { user, error } = await apiUser(request);

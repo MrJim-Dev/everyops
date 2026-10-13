@@ -39,6 +39,8 @@ export type FieldType =
   | "person"
   | "relation"
   | "checkbox"
+  /** An uploaded picture (a QR code, a logo). The value is the app path that serves it. */
+  | "image"
   | "formula"
   | "rollup";
 
@@ -135,6 +137,10 @@ export type FormView = ViewBase & {
   fieldIds: string[];
   intro?: string;
   submitLabel?: string;
+  /** Anyone with the link can submit it (a public booking page), at /s/[workspace]/[view]. */
+  public?: boolean;
+  /** Shown with the form, e.g. the active payment methods or FAQs. */
+  blocks?: Block[];
 };
 /** A notebook over one record type: a list of notes beside a markdown editor for the selected one. */
 export type NotesView = ViewBase & {
@@ -151,6 +157,36 @@ export type DocumentView = ViewBase & {
   /** Markdown shown until someone edits the page. */
   starter?: string;
 };
+/** A public web page (a landing page) built from blocks that can show live data. entityId is "". */
+export type LandingView = ViewBase & {
+  type: "landing";
+  /** Public unless switched off. */
+  public?: boolean;
+  blocks: Block[];
+};
+
+/**
+ * Pieces of a public page. Text in hero, text and html blocks can be edited in the app (kept in the workspace's
+ * docs); records blocks show live data, only the fields they list, filtered.
+ */
+export type Block =
+  | { id: string; type: "hero"; heading: string; subheading?: string; ctaLabel?: string; ctaViewId?: string }
+  | { id: string; type: "text"; markdown: string }
+  | {
+      id: string;
+      type: "records";
+      title?: string;
+      entityId: string;
+      filter?: string;
+      fieldIds: string[];
+      /** cards (images shown large, e.g. payment QR codes), list, table, or faq (question then answer). */
+      layout: "cards" | "list" | "table" | "faq";
+      sort?: Sort[];
+      limit?: number;
+    }
+  | { id: string; type: "form"; viewId: string; title?: string }
+  /** Raw HTML, shown in a sandboxed frame so it can't touch the app or visitors' sessions. */
+  | { id: string; type: "html"; html: string };
 
 export type View =
   | TableView
@@ -161,7 +197,8 @@ export type View =
   | ApprovalQueueView
   | FormView
   | NotesView
-  | DocumentView;
+  | DocumentView
+  | LandingView;
 
 export type ViewType = View["type"];
 

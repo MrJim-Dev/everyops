@@ -6,6 +6,7 @@ import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { applyOps, type ChangePlan, commitChange, revertChange } from "@/lib/engine/changes";
 import { computeAll } from "@/lib/engine/compute";
 import { applyRecordOps } from "@/lib/engine/records";
+import { markFresh } from "@/lib/motion/fresh";
 import {
   blueprintOf,
   type ChangeEntry,
@@ -43,6 +44,8 @@ type State = {
   createWorkspace: (input: NewWorkspace) => string;
   setRecords: (slug: string, records: DataRecord[]) => void;
   setDoc: (slug: string, viewId: string, body: string) => void;
+  /** Pulls in records the server created since this copy was read (public bookings), without saving. */
+  refresh: (slug: string) => Promise<void>;
   saveSetup: (slug: string, progress: SetupProgress) => void;
   finishSetup: (slug: string, data: WorkspaceData, name: string, summary: string) => void;
   applyChange: (slug: string, plan: ChangePlan) => ChangeEntry | null;
@@ -148,11 +151,19 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
         const res = await fetch("/api/workspaces", { cache: "no-store" });
         if (!res.ok) throw new Error(String(res.status));
         const body = (await res.json()) as { workspaces: Workspace[] };
+        // A workspace created while the list was loading (typing on the home page right after signing up)
+        // isn't on the server yet: keep it and save it now instead of dropping it.
+        const server = Object.fromEntries(body.workspaces.map((w) => [w.slug, w]));
+        const early = Object.values(get().workspaces).filter((w) => !server[w.slug]);
         rawSet({
           owner,
           status: "ready",
-          workspaces: Object.fromEntries(body.workspaces.map((w) => [w.slug, w])),
+          workspaces: {
+            ...server,
+            ...Object.fromEntries(early.map((w) => [w.slug, { ...w, ownerId: owner }])),
+          },
         });
+        for (const w of early) scheduleSave(w.slug);
       } catch {
         rawSet({ owner, status: "error", workspaces: {} });
       }
@@ -236,6 +247,37 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
     },
 
     setRecords: (slug, records) => update(slug, (ws) => ({ ...ws, records })),
+
+    refresh: async (slug) => {
+      if (pending.has(slug) || !get().workspaces[slug]) return;
+      const res = await fetch(`/api/workspaces/${encodeURIComponent(slug)}`, { cache: "no-store" }).catch(
+        () => null,
+      );
+      if (!res?.ok) return;
+      const body = (await res.json().catch(() => null)) as {
+        records: DataRecord[];
+        syncedAt: string;
+      } | null;
+      if (!body || pending.has(slug)) return;
+      rawSet((s) => {
+        const ws = s.workspaces[slug];
+        if (!ws) return s;
+        const have = new Set(ws.records.map((r) => r.id));
+        const since = ws.syncedAt ?? "";
+        const added = body.records.filter((r) => !have.has(r.id) && r.createdAt > since);
+        if (added.length) markFresh(added.map((r) => r.id));
+        return {
+          workspaces: {
+            ...s.workspaces,
+            [slug]: {
+              ...ws,
+              syncedAt: body.syncedAt,
+              records: added.length ? computeAll(blueprintOf(ws), [...ws.records, ...added]) : ws.records,
+            },
+          },
+        };
+      });
+    },
 
     setDoc: (slug, viewId, body) =>
       update(slug, (ws) => ({

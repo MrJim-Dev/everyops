@@ -1,6 +1,6 @@
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
-import type { Blueprint, Entity } from "./types";
+import type { Block, Blueprint, Entity } from "./types";
 
 export type ValidationError = { path: string; message: string };
 
@@ -74,6 +74,10 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
   bp.views.forEach((view, vi) => {
     const path = `views.${vi}`;
     if (view.type === "document") return;
+    if (view.type === "landing") {
+      checkBlocks(bp, view.blocks, path, errors);
+      return;
+    }
     const entity = bp.entities.find((e) => e.id === view.entityId);
     if (!entity) {
       errors.push({ path, message: `View "${view.name}" uses a missing entity` });
@@ -114,6 +118,7 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
         break;
       case "form":
         missing(view.fieldIds);
+        if (view.blocks) checkBlocks(bp, view.blocks, path, errors);
         break;
       case "notes":
         missing([view.titleFieldId, view.bodyFieldId, ...(view.metaFieldIds ?? [])]);
@@ -155,4 +160,39 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
   });
 
   return errors;
+}
+
+/** Blocks on public pages: live data must point at real fields, and links at real forms. */
+function checkBlocks(bp: Blueprint, blocks: Block[], path: string, errors: ValidationError[]) {
+  const ids = new Set<string>();
+  const isForm = (id: string | undefined) => !!id && bp.views.some((v) => v.id === id && v.type === "form");
+  blocks.forEach((block, bi) => {
+    const at = `${path}.blocks.${bi}`;
+    if (ids.has(block.id)) errors.push({ path: at, message: `Duplicate block "${block.id}"` });
+    ids.add(block.id);
+    switch (block.type) {
+      case "records": {
+        const entity = bp.entities.find((e) => e.id === block.entityId);
+        if (!entity) {
+          errors.push({ path: at, message: `${block.title ?? "A list"} uses a missing record type` });
+          break;
+        }
+        for (const id of block.fieldIds)
+          if (!entity.fields.some((f) => f.id === id))
+            errors.push({ path: at, message: `Field "${id}" does not exist on ${entity.name}` });
+        if (!block.fieldIds.length)
+          errors.push({ path: at, message: `${block.title ?? "A list"} shows no fields` });
+        if (block.filter) checkExpr(bp, entity, block.filter, at, errors);
+        break;
+      }
+      case "form":
+        if (!isForm(block.viewId))
+          errors.push({ path: at, message: "The form block points at a missing form" });
+        break;
+      case "hero":
+        if (block.ctaViewId && !isForm(block.ctaViewId))
+          errors.push({ path: at, message: "The button points at a missing form" });
+        break;
+    }
+  });
 }
