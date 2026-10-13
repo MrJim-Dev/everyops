@@ -1,0 +1,131 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-shell: var(--shell);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/*
+ * Hulma is dark only. One accent (muted teal), warm neutrals, no pure black.
+ * Light tokens are intentionally absent until a light theme is designed.
+ */
+:root {
+  color-scheme: dark;
+  --shell: #0e0e10;
+  --background: #141416;
+  --foreground: #ececee;
+  --card: #18181b;
+  --card-foreground: #ececee;
+  --popover: #1a1a1d;
+  --popover-foreground: #ececee;
+  --primary: #3fa796;
+  --primary-foreground: #06110e;
+  --secondary: #1f1f23;
+  --secondary-foreground: #ececee;
+  --muted: #1c1c1f;
+  --muted-foreground: #a0a0a8;
+  --accent: #222226;
+  --accent-foreground: #ececee;
+  --destructive: #e5675a;
+  --warning: #d9a441;
+  --success: #3fa796;
+  --border: #29292d;
+  --input: #2e2e33;
+  --ring: #3fa796;
+  --chart-1: #3fa796;
+  --chart-2: #7c7c86;
+  --chart-3: #d9a441;
+  --chart-4: #5b8fb9;
+  --chart-5: #4a4a52;
+  --radius: 0.5rem;
+  --sidebar: #0e0e10;
+  --sidebar-foreground: #c9c9cf;
+  --sidebar-primary: #3fa796;
+  --sidebar-primary-foreground: #06110e;
+  --sidebar-accent: #1c1c1f;
+  --sidebar-accent-foreground: #ececee;
+  --sidebar-border: #232326;
+  --sidebar-ring: #3fa796;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply bg-shell font-sans;
+  }
+  body {
+    @apply bg-shell text-foreground;
+    font-feature-settings: "ss01", "cv11";
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 35%, transparent);
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Respect reduced motion everywhere; !important is required to beat component-level durations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: must override every component */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: must override every component */
+    transition-duration: 0.01ms !important;
+  }
+}
