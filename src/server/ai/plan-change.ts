@@ -3,6 +3,7 @@ import type { AttachmentRef } from "@/lib/assistant/attachments";
 import type { Blueprint, Field } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { applyOps, type ChangeOp, type ChangePlan } from "@/lib/engine/changes";
+import { type OptionUsage, strandedOptions } from "@/lib/engine/options";
 import { attachmentParts } from "./attachments";
 import { generateJson } from "./gemini";
 import { type Answer, answer, SYSTEM } from "./plan-change-prompt";
@@ -12,7 +13,11 @@ export type PlanChangeResult =
   | { ok: false; message: string; kind: "clarify" | "unsupported" | "error" };
 
 /** Turns the model's flat operations into ChangeOps, rejecting anything that doesn't fit the blueprint. */
-function toOps(bp: Blueprint, raw: NonNullable<Answer["ops"]>): { ops: ChangeOp[]; errors: string[] } {
+function toOps(
+  bp: Blueprint,
+  raw: NonNullable<Answer["ops"]>,
+  usage: OptionUsage,
+): { ops: ChangeOp[]; errors: string[] } {
   const ops: ChangeOp[] = [];
   const errors: string[] = [];
   const added = new Map<string, Set<string>>();
@@ -81,8 +86,11 @@ function toOps(bp: Blueprint, raw: NonNullable<Answer["ops"]>): { ops: ChangeOp[
   if (!errors.length) {
     // Only report problems the plan introduces, not ones the blueprint already had.
     const before = new Set(validateBlueprint(bp).map((e) => `${e.path} ${e.message}`));
-    for (const e of validateBlueprint(applyOps(bp, ops)))
+    const next = applyOps(bp, ops);
+    for (const e of validateBlueprint(next))
       if (!before.has(`${e.path} ${e.message}`)) errors.push(`${e.path}: ${e.message}`);
+    // This planner can't move records, so an option that records use can't be dropped here.
+    errors.push(...strandedOptions(bp, next, usage));
   }
   return { ops, errors };
 }
@@ -100,6 +108,8 @@ export async function planChangeWithGemini(
   bp: Blueprint,
   request: string,
   files?: { userId: string; attachments: AttachmentRef[] },
+  /** Which options the workspace's records use, so a plan can't drop one out from under them. */
+  usage: OptionUsage = {},
 ): Promise<PlanChangeResult> {
   const context = `Blueprint (JSON):\n${JSON.stringify(bp)}\n\nOwner's request: ${request}`;
   const fileParts = files ? await attachmentParts(files.userId, files.attachments) : [];
@@ -120,7 +130,7 @@ export async function planChangeWithGemini(
         kind: a.status,
         message: clip(a.message || "I couldn't plan that change. Try describing it differently.", 240),
       };
-    const { ops, errors } = toOps(bp, a.ops);
+    const { ops, errors } = toOps(bp, a.ops, usage);
     if (!errors.length && ops.length)
       return {
         ok: true,

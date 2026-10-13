@@ -13,6 +13,7 @@ import type {
 } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { applyOps, type ChangeOp, type ChangePlan, commitChange, type RecordOp } from "@/lib/engine/changes";
+import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
 import { isPublic } from "@/lib/public/resolve";
 import { randomToken } from "@/lib/store/workspace-model";
@@ -530,12 +531,16 @@ ${input.messages
     const recordPart = toRecordOps(next, records, a.plan.recordOps);
     errors.push(...recordPart.errors);
     if (recordPart.ops.length && !input.canEditRecords) errors.push("This person can't change data.");
-    if (!errors.length && recordPart.ops.length) {
+    if (!errors.length) {
       // Rehearse the data edits on a copy so validation, rules and booking conflicts are checked now.
       const staged = design.ops.length
         ? commitChange({ blueprint: bp, records }, next).data
         : { blueprint: bp, records };
-      errors.push(...applyRecordOps(staged, recordPart.ops).errors);
+      const rehearsal = recordPart.ops.length ? applyRecordOps(staged, recordPart.ops) : null;
+      if (rehearsal) errors.push(...rehearsal.errors);
+      // An option can only go once no record (after this plan's own edits) still uses it.
+      if (design.ops.length)
+        errors.push(...strandedOptions(bp, next, optionUsage(bp, rehearsal?.data.records ?? staged.records)));
     }
     if (!errors.length && (design.ops.length || recordPart.ops.length)) {
       return {
