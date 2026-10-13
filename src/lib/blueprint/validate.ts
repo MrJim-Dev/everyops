@@ -1,0 +1,132 @@
+import { formulaOrder } from "@/lib/engine/compute";
+import { parseExpr } from "@/lib/engine/expr";
+import type { Blueprint, Entity } from "./types";
+
+export type ValidationError = { path: string; message: string };
+
+function checkExpr(bp: Blueprint, entity: Entity, src: string, path: string, errors: ValidationError[]) {
+  const parsed = parseExpr(src);
+  if (!parsed.ok) {
+    errors.push({ path, message: `Formula "${src}" is invalid: ${parsed.error}` });
+    return;
+  }
+  for (const ref of parsed.refs) {
+    const [head, tail] = ref.split(".");
+    const field = entity.fields.find((f) => f.id === head);
+    if (!field) {
+      errors.push({ path, message: `"${head}" is not a field on ${entity.name}` });
+      continue;
+    }
+    if (tail) {
+      const target = field.relation ? bp.entities.find((e) => e.id === field.relation?.entityId) : undefined;
+      if (!target?.fields.some((f) => f.id === tail))
+        errors.push({ path, message: `"${ref}" does not resolve through ${field.name}` });
+    }
+  }
+}
+
+/** Returns every problem in a blueprint, each with a path and a plain message. */
+export function validateBlueprint(bp: Blueprint): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const entityIds = new Set(bp.entities.map((e) => e.id));
+  const viewIds = new Set(bp.views.map((v) => v.id));
+  const widgetIds = new Set(bp.widgets.map((w) => w.id));
+
+  bp.entities.forEach((entity, ei) => {
+    const fieldIds = new Set<string>();
+    entity.fields.forEach((field, fi) => {
+      const path = `entities.${ei}.fields.${fi}`;
+      if (fieldIds.has(field.id)) errors.push({ path, message: `Duplicate field "${field.id}"` });
+      fieldIds.add(field.id);
+      if (field.type === "relation" && !entityIds.has(field.relation?.entityId ?? ""))
+        errors.push({ path, message: `${field.name} links to a missing entity` });
+      if ((field.type === "select" || field.type === "status") && !field.options?.length)
+        errors.push({ path, message: `${field.name} needs options` });
+      if (field.type === "formula") {
+        if (!field.formula) errors.push({ path, message: `${field.name} has no formula` });
+        else {
+          checkExpr(bp, entity, field.formula.expr, path, errors);
+          if (field.formula.freezeWhen) checkExpr(bp, entity, field.formula.freezeWhen, path, errors);
+        }
+      }
+    });
+    if (!fieldIds.has(entity.primaryFieldId))
+      errors.push({ path: `entities.${ei}`, message: `${entity.name} has no primary field` });
+    const formulas = entity.fields.filter((f) => f.type === "formula");
+    if (formulaOrder(entity).length < formulas.length)
+      errors.push({ path: `entities.${ei}`, message: `${entity.name} has a formula cycle` });
+    if (entity.booking) {
+      const b = entity.booking;
+      for (const id of [b.resourceFieldId, b.timeFieldId, b.statusFieldId])
+        if (!fieldIds.has(id))
+          errors.push({ path: `entities.${ei}.booking`, message: `Missing field "${id}"` });
+    }
+  });
+
+  bp.views.forEach((view, vi) => {
+    const path = `views.${vi}`;
+    const entity = bp.entities.find((e) => e.id === view.entityId);
+    if (!entity) {
+      errors.push({ path, message: `View "${view.name}" uses a missing entity` });
+      return;
+    }
+    const has = (id: string) => entity.fields.some((f) => f.id === id);
+    const missing = (ids: string[]) => {
+      for (const id of ids)
+        if (!has(id)) errors.push({ path, message: `Field "${id}" does not exist on ${entity.name}` });
+    };
+    switch (view.type) {
+      case "table":
+        missing(view.fieldIds);
+        if (view.filter) checkExpr(bp, entity, view.filter, path, errors);
+        break;
+      case "kanban":
+        missing([view.statusFieldId, ...view.cardFieldIds]);
+        if (entity.fields.find((f) => f.id === view.statusFieldId)?.type !== "status")
+          errors.push({ path, message: "Board columns must use a status field" });
+        break;
+      case "calendar":
+        missing([view.dateFieldId, view.titleFieldId]);
+        break;
+      case "slot_grid": {
+        const resourceField = entity.fields.find((f) => f.id === entity.booking?.resourceFieldId);
+        const resource = bp.entities.find((e) => e.id === resourceField?.relation?.entityId);
+        if (!entity.booking || !resource?.resource)
+          errors.push({ path, message: "A schedule needs a bookable resource with opening hours" });
+        break;
+      }
+      case "checkout":
+        if (!entityIds.has(view.productEntityId) || !entityIds.has(view.lineEntityId))
+          errors.push({ path, message: "Checkout needs products and line items" });
+        missing([view.paymentFieldId]);
+        break;
+      case "approval_queue":
+        missing([view.statusFieldId, ...view.detailFieldIds]);
+        break;
+    }
+  });
+
+  bp.systems.forEach((system, si) => {
+    const path = `systems.${si}`;
+    if (system.viewIds.length + system.widgetIds.length === 0)
+      errors.push({ path, message: `${system.name} is empty` });
+    for (const id of system.viewIds)
+      if (!viewIds.has(id)) errors.push({ path, message: `${system.name} lists a missing view "${id}"` });
+    for (const id of system.widgetIds)
+      if (!widgetIds.has(id)) errors.push({ path, message: `${system.name} lists a missing widget "${id}"` });
+  });
+
+  bp.widgets.forEach((widget, wi) => {
+    const entity = bp.entities.find((e) => e.id === widget.entityId);
+    if (!entity) errors.push({ path: `widgets.${wi}`, message: `${widget.title} uses a missing entity` });
+    else if (widget.filter) checkExpr(bp, entity, widget.filter, `widgets.${wi}`, errors);
+  });
+
+  bp.rules.forEach((rule, ri) => {
+    const entity = bp.entities.find((e) => e.id === rule.trigger.entityId);
+    if (!entity) errors.push({ path: `rules.${ri}`, message: `${rule.name} uses a missing entity` });
+    else if (rule.when) checkExpr(bp, entity, rule.when, `rules.${ri}`, errors);
+  });
+
+  return errors;
+}
