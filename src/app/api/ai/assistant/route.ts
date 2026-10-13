@@ -31,7 +31,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return Response.json({ ok: false, message: "Ask something first." }, { status: 400 });
   const found = await loadWorkspace(parsed.data.workspaceId, user.id);
   if (!found) return Response.json({ ok: false, message: "Workspace not found." }, { status: 404 });
-  const limit = takeAiToken(user.id);
+  const limit = await takeAiToken(user.id);
   if (!limit.ok)
     return Response.json(
       { ok: false, message: "That's a lot of questions. Wait a few minutes and try again." },

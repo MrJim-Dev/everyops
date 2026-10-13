@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   const parsed = body.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
     return Response.json({ ok: false, message: "Tell me a bit more first." }, { status: 400 });
-  const limit = takeAiToken(user.id);
+  const limit = await takeAiToken(user.id);
   if (!limit.ok)
     return Response.json({ ok: false, message: "Wait a few minutes and try again." }, { status: 429 });
   const result = await designWorkspace(parsed.data.brief, parsed.data.workspaceName, {

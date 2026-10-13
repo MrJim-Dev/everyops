@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   if (!parsed.success)
     return Response.json({ ok: false, message: "Describe the change in a few words." }, { status: 400 });
 
-  const limit = takeAiToken(session.user.id);
+  const limit = await takeAiToken(session.user.id);
   if (!limit.ok)
     return Response.json(
       { ok: false, message: "You've asked for a lot of changes. Wait a few minutes and try again." },
