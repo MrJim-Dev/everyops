@@ -204,7 +204,22 @@ export function tidy(bp: Blueprint): Blueprint {
       const field = entity.fields.find((x) => x.id === rel);
       const other = bp.entities.find((x) => x.id === field?.relation?.entityId);
       if (!other || other.fields.some((x) => x.id === target)) return whole;
-      return /^(name|title|label|full_name)$/.test(target) ? `${rel}.${other.primaryFieldId}` : whole;
+      if (/^(name|title|label|full_name)$/.test(target)) return `${rel}.${other.primaryFieldId}`;
+      // "court.peak_rate" when the court's money fields are called something else: pick the matching one.
+      if (/price|rate|cost|fee|amount/.test(target)) {
+        const money = other.fields.filter(
+          (x) => x.type === "money" || (x.type === "formula" && x.formula?.resultType === "money"),
+        );
+        const peak = /peak|evening|night|prime/;
+        const base = /std|standard|day|regular|base|off/;
+        const pick =
+          (peak.test(target) && money.find((x) => peak.test(x.id))) ||
+          (base.test(target) && money.find((x) => base.test(x.id) || !peak.test(x.id))) ||
+          (money.length === 1 && money[0]) ||
+          money.find((x) => target.split("_").some((part) => part.length > 2 && x.id.includes(part)));
+        if (pick) return `${rel}.${pick.id}`;
+      }
+      return whole;
     });
   for (const e of bp.entities)
     for (const f of e.fields)
@@ -568,18 +583,36 @@ export function tidyBlocks(
   return blocks.flatMap((b): Block[] => {
     if (seen.has(b.id)) return [];
     seen.add(b.id);
+    if (b.type === "text") return [{ ...b, markdown: cleanCopy(b.markdown, 6000) ?? "" }];
     if (b.type === "records") {
       const entityId = resolve(b.entityId) as string;
       const has = fieldsOf(entityId);
       const fieldIds = b.fieldIds.filter((id) => has.has(id));
       return fieldIds.length
-        ? [{ ...b, entityId, fieldIds, sort: b.sort?.filter((s) => has.has(s.fieldId)) }]
+        ? [
+            {
+              ...b,
+              title: cleanCopy(b.title, 80),
+              entityId,
+              fieldIds,
+              sort: b.sort?.filter((s) => has.has(s.fieldId)),
+            },
+          ]
         : [];
     }
     if (b.type === "form") return formIds.has(b.viewId) ? [b] : [];
-    if (b.type === "hero" && b.ctaViewId && !formIds.has(b.ctaViewId)) {
-      const { ctaViewId: _drop, ...rest } = b;
-      return [rest];
+    if (b.type === "hero") {
+      const hero = {
+        ...b,
+        heading: cleanCopy(b.heading, 90) ?? "",
+        subheading: cleanCopy(b.subheading, 260),
+        ctaLabel: cleanCopy(b.ctaLabel, 30),
+      };
+      if (hero.ctaViewId && !formIds.has(hero.ctaViewId)) {
+        const { ctaViewId: _drop, ...rest } = hero;
+        return [rest];
+      }
+      return [hero];
     }
     return [b];
   });
@@ -800,4 +833,21 @@ export function mergeDateAndSlot(bp: Blueprint, samples: Design["samples"]): Des
     });
   }
   return out;
+}
+
+/** Generated page text, kept sane: runs of emoji (a model stuck in a loop) go, and long text stops at a sentence. */
+export function cleanCopy(text: string | undefined, max: number): string | undefined {
+  if (text === undefined) return undefined;
+  const noLoops = text
+    .replace(/(?:[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{200D}]\s*){4,}/gu, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  if (noLoops.length <= max) return noLoops;
+  const cut = noLoops.slice(0, max);
+  const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  return (
+    end > max * 0.5
+      ? cut.slice(0, end + 1)
+      : cut.slice(0, cut.lastIndexOf(" ") > 0 ? cut.lastIndexOf(" ") : max)
+  ).trim();
 }

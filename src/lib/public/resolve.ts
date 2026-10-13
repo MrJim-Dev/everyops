@@ -290,8 +290,8 @@ export function resolveBlocks(
         out.push({
           id: block.id,
           type: "hero",
-          heading: edited.heading ?? block.heading,
-          subheading: edited.subheading ?? block.subheading,
+          heading: clamp(edited.heading ?? block.heading, 120) ?? "",
+          subheading: clamp(edited.subheading ?? block.subheading, 400),
           ctaLabel: target ? (edited.ctaLabel ?? block.ctaLabel ?? "Book now") : undefined,
           ctaHref: target ? sitePath(slug, target) : undefined,
         });
@@ -353,4 +353,11 @@ export function resolvePage(
   if (view.type === "landing") return { id: view.id, name: view.name, type: "landing", blocks };
   const form = publicForm(bp, records, view);
   return form ? { id: view.id, name: view.name, type: "form", blocks, form } : null;
+}
+
+/** Hero text has to fit a hero. */
+function clamp(text: string | undefined, max: number): string | undefined {
+  if (!text || text.length <= max) return text;
+  const cut = text.slice(0, max);
+  return `${cut.slice(0, cut.lastIndexOf(" ") > 0 ? cut.lastIndexOf(" ") : max).trim()}…`;
 }

@@ -110,8 +110,8 @@ export const block = z.union([
   z.object({
     type: z.literal("hero"),
     id: z.string(),
-    heading: z.string(),
-    subheading: z.string().optional(),
+    heading: z.string().describe("A few words"),
+    subheading: z.string().optional().describe("One or two plain sentences, under 200 characters, no emoji"),
     ctaLabel: z.string().optional().describe("Button text, e.g. Book a court"),
     ctaViewId: z.string().optional().describe("The public form the button opens"),
   }),

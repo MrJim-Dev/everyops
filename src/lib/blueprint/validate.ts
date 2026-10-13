@@ -18,6 +18,7 @@ function checkExpr(bp: Blueprint, entity: Entity, src: string, path: string, err
       continue;
     }
     if (tail) {
+      if (field.type === "time_range" && (tail === "start" || tail === "end")) continue;
       const target = field.relation ? bp.entities.find((e) => e.id === field.relation?.entityId) : undefined;
       if (!target?.fields.some((f) => f.id === tail))
         errors.push({ path, message: `"${ref}" does not resolve through ${field.name}` });

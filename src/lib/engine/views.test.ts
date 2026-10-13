@@ -86,3 +86,33 @@ describe("page types", () => {
     );
   });
 });
+
+describe("time range ends in formulas", () => {
+  it("reads slot.start, so evening pricing works", async () => {
+    const { applyOps } = await import("./changes");
+    const { computeAll } = await import("./compute");
+    const { blueprint, records } = courtBookingsSample(NOW);
+    const bp = applyOps(blueprint, [
+      {
+        op: "add_field",
+        entityId: "booking",
+        field: {
+          id: "evening_price",
+          name: "Evening price",
+          type: "formula",
+          formula: { expr: "hour(slot.start) >= 17 ? 500 : 400", resultType: "money" },
+        },
+      },
+    ]);
+    expect(validateBlueprint(bp)).toEqual([]);
+    const computed = computeAll(bp, records, NOW).filter((r) => r.entityId === "booking" && r.data.slot);
+    const evening = computed.find(
+      (r) => new Date((r.data.slot as { start: string }).start).getUTCHours() + 8 >= 17,
+    );
+    const morning = computed.find(
+      (r) => new Date((r.data.slot as { start: string }).start).getUTCHours() + 8 < 12,
+    );
+    expect(evening?.data.evening_price).toBe(500);
+    expect(morning?.data.evening_price).toBe(400);
+  });
+});

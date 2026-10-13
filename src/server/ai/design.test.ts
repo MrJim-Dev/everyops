@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
-import { ensurePages, mergeDateAndSlot, repairStructure } from "./design";
+import { cleanCopy, ensurePages, mergeDateAndSlot, repairStructure } from "./design";
 
 describe("ensurePages", () => {
   it("gives a record type without any screen its own page", () => {
@@ -138,5 +138,13 @@ describe("mergeDateAndSlot", () => {
       type: "formula",
       formula: { expr: "(hour(time) >= 17 ? court.evening_rate : court.day_rate) * duration_hours(time)" },
     });
+  });
+});
+
+describe("cleanCopy", () => {
+  it("drops an emoji loop and stops long text at a sentence", () => {
+    const looped = `Book your court today! Open 6 AM to 10 PM. Ready, set, smash! ${"🎉🏆✨🔥".repeat(200)}`;
+    expect(cleanCopy(looped, 260)).toBe("Book your court today! Open 6 AM to 10 PM. Ready, set, smash!");
+    expect(cleanCopy("A ".repeat(200), 50)?.length).toBeLessThanOrEqual(50);
   });
 });

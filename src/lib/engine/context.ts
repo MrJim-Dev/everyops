@@ -19,6 +19,13 @@ export function recordContext(
       const [head, tail] = path;
       if (tail === undefined) return data[head];
       const field = findField(entity, head);
+      // time.start and time.end read the two ends of a time range.
+      if (field?.type === "time_range" && (tail === "start" || tail === "end")) {
+        const range = data[head];
+        return range && typeof range === "object" && !Array.isArray(range)
+          ? (range as Record<string, Value>)[tail]
+          : undefined;
+      }
       if (field?.type !== "relation" || !field.relation) return undefined;
       const linkedId = data[head];
       if (typeof linkedId !== "string") return undefined;
