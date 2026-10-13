@@ -208,7 +208,9 @@ export const design = z.object({
         ),
       }),
     )
-    .describe("3 to 5 realistic sample records for each main record type (up to 24 in total). Never give values for formula or rollup fields."),
+    .describe(
+      "3 to 5 realistic sample records for each main record type (up to 24 in total). Never give values for formula or rollup fields.",
+    ),
 });
 export type Design = z.infer<typeof design>;
 
