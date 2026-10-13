@@ -66,6 +66,8 @@ export type Workspace = {
   currentVersion: number;
   records: DataRecord[];
   changes: ChangeEntry[];
+  /** Markdown of document pages, by view id. Edited like records, so staff can write them too. */
+  docs?: Record<string, PageDoc>;
   /** Filled in by the server from the workspace table. */
   ownerId?: string;
   owner?: { name: string; email: string };
@@ -78,6 +80,8 @@ export type Workspace = {
 
 /** The parts of a workspace stored in its JSON document. */
 export type WorkspaceDoc = Omit<Workspace, "ownerId" | "owner" | "members" | "invites">;
+
+export type PageDoc = { body: string; updatedAt: string };
 
 export type NewWorkspace = {
   name: string;

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { FieldValue } from "@/components/records/field-value";
 import { useRecordPanels } from "@/components/records/record-panels";
 import { StatusBadge } from "@/components/records/status-badge";
+import { StatusMenu } from "@/components/records/status-menu";
 import { useRecordActions } from "@/components/workspace/use-record-actions";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { getEntity, getField, optionOf, recordTitle } from "@/lib/blueprint/lookup";
@@ -179,6 +180,8 @@ function KanbanCard({
             <span key={id} className={cn("min-w-0", field.type === "date" && "ml-auto")}>
               {field.type === "select" ? (
                 optionOf(field, record.data[id])?.label
+              ) : field.type === "status" ? (
+                <StatusMenu record={record} field={field} className="text-[12px]" />
               ) : (
                 <FieldValue field={field} value={record.data[id]} />
               )}

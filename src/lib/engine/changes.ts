@@ -27,7 +27,11 @@ export type ChangeOp =
   | { op: "rename_workspace"; name: string }
   | { op: "add_entity"; entity: Entity }
   | { op: "add_system"; system: System }
-  | { op: "add_rule"; rule: Rule };
+  | { op: "add_rule"; rule: Rule }
+  /** Moves a view (tab) to another page. A page left with nothing on it is removed. */
+  | { op: "move_view"; viewId: string; systemId: string }
+  | { op: "rename_system"; systemId: string; name: string }
+  | { op: "rename_view"; viewId: string; name: string };
 
 /** Data edits a plan may make after its design changes: add records or change field values. */
 export type RecordOp =
@@ -64,7 +68,11 @@ export type Impact = {
 export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
   const next: Blueprint = structuredClone(bp);
   next.version = bp.version + 1;
-  for (const op of ops) {
+  const addTo = (list: string[] | undefined, id: string) => {
+    if (list && !list.includes(id)) list.push(id);
+  };
+  // Ops are copied so applying a plan never changes the plan itself (it's applied once to rehearse, then for real).
+  for (const op of structuredClone(ops)) {
     switch (op.op) {
       case "add_field": {
         const entity = next.entities.find((e) => e.id === op.entityId);
@@ -78,8 +86,9 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         break;
       }
       case "add_view": {
+        if (next.views.some((v) => v.id === op.view.id)) break;
         next.views.push(op.view);
-        next.systems.find((s) => s.id === op.systemId)?.viewIds.push(op.view.id);
+        addTo(next.systems.find((s) => s.id === op.systemId)?.viewIds, op.view.id);
         break;
       }
       case "add_view_field": {
@@ -88,8 +97,9 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         break;
       }
       case "add_widget": {
+        if (next.widgets.some((w) => w.id === op.widget.id)) break;
         next.widgets.push(op.widget);
-        next.systems.find((s) => s.id === op.systemId)?.widgetIds.push(op.widget.id);
+        addTo(next.systems.find((s) => s.id === op.systemId)?.widgetIds, op.widget.id);
         break;
       }
       case "rename_workspace":
@@ -104,6 +114,24 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "add_rule":
         if (!next.rules.some((r) => r.id === op.rule.id)) next.rules.push(op.rule);
         break;
+      case "move_view": {
+        const target = next.systems.find((s) => s.id === op.systemId);
+        if (!target || !next.views.some((v) => v.id === op.viewId)) break;
+        for (const s of next.systems) s.viewIds = s.viewIds.filter((id) => id !== op.viewId);
+        target.viewIds.push(op.viewId);
+        next.systems = next.systems.filter((s) => s.viewIds.length + s.widgetIds.length > 0);
+        break;
+      }
+      case "rename_system": {
+        const system = next.systems.find((s) => s.id === op.systemId);
+        if (system) system.name = op.name;
+        break;
+      }
+      case "rename_view": {
+        const view = next.views.find((v) => v.id === op.viewId);
+        if (view) view.name = op.name;
+        break;
+      }
     }
   }
   return next;

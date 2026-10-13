@@ -105,14 +105,29 @@ export const view = z.object({
   id: z.string(),
   entityId: z.string(),
   name: z.string(),
-  type: z.enum(["table", "kanban", "calendar", "slot_grid", "checkout", "approval_queue"]),
-  fieldIds: z.array(z.string()).optional().describe("table: columns"),
+  type: z.enum([
+    "table",
+    "kanban",
+    "calendar",
+    "slot_grid",
+    "checkout",
+    "approval_queue",
+    "form",
+    "notes",
+    "document",
+  ]),
+  fieldIds: z.array(z.string()).optional().describe("table: columns; form: the fields asked, in order"),
   filter: z.string().optional().describe("table, kanban, calendar: formula that keeps matching records"),
   sort: z.array(sort).optional().describe("table"),
   statusFieldId: z.string().optional().describe("kanban, approval_queue: a status field"),
   cardFieldIds: z.array(z.string()).optional().describe("kanban: fields shown on cards"),
   dateFieldId: z.string().optional().describe("calendar: date, datetime or time_range field"),
-  titleFieldId: z.string().optional().describe("calendar"),
+  titleFieldId: z.string().optional().describe("calendar, notes"),
+  bodyFieldId: z.string().optional().describe("notes: a long_text field holding the note's markdown"),
+  metaFieldIds: z.array(z.string()).optional().describe("notes: fields shown under each note's title"),
+  intro: z.string().optional().describe("form: one line above the form"),
+  submitLabel: z.string().optional().describe("form: the button, e.g. Book court"),
+  starter: z.string().optional().describe("document: the page's starting markdown"),
   productEntityId: z.string().optional().describe("checkout: products; the view's entity is the order"),
   lineEntityId: z.string().optional().describe("checkout: order line items"),
   paymentFieldId: z.string().optional().describe("checkout: payment method field on the order"),
@@ -133,9 +148,14 @@ export const widget = z.object({
   metric: z.object({ op: z.enum(["count", "sum", "avg"]), fieldId: z.string().optional() }),
   chart: z
     .object({
-      kind: z.enum(["line", "bar"]),
-      dateFieldId: z.string(),
+      kind: z.enum(["line", "bar", "area", "donut"]),
+      dateFieldId: z.string().optional().describe("over time: the date field to bucket by"),
       bucket: z.enum(["day", "week", "month"]),
+      groupByFieldId: z
+        .string()
+        .optional()
+        .describe("by category: a select, status, relation or text field; required for donut"),
+      splitByFieldId: z.string().optional().describe("one series per option of this select or status field"),
     })
     .optional(),
   target: z.number().optional().describe("progress only"),
@@ -235,7 +255,18 @@ Rules for a valid blueprint:
   booking.resourceFieldId (relation to the resource), booking.timeFieldId (time_range with range "times") and
   booking.statusFieldId. Only use it for bookings of courts, rooms or similar.
 - checkout needs product, order and line-item types (line items have parent set to the order). Only for selling.
-- Every system lists at least one view or widget. Put an Overview system first with 3 to 6 widgets.
+- form views are a page that is just the form to add one record type (fieldIds, intro, submitLabel). notes views
+  are a notebook over a record type with a text title and a long_text body (titleFieldId, bodyFieldId).
+  document views are one free markdown page with entityId "" and a starter outline. Use them when asked.
+- Charts plot over time (dateFieldId, bucket; kind line, area or bar) or by category (groupByFieldId; kind bar
+  or donut). A reports page is a system with only widgets: stats for totals and several charts.
+- Systems are the sidebar pages. Put an Overview system first with 3 to 6 widgets, then one page per area the
+  owner manages day to day, usually 3 to 6 pages: each main record type (bookings, courts, players, clients,
+  products, tasks…) gets its own page with its own views, e.g. "Bookings" (schedule and list), "Courts" (all
+  courts), "Players" (all players). Views on one page are tabs of the same work. When the brief asks for a
+  separate page (a calendar page, a pipeline page), make it its own system with that view, and don't repeat
+  the view as a tab elsewhere. Line-item record types stay inside their parent's page.
+  Every system lists at least one view or widget, and page names are short nouns.
 - Money is PHP. Use realistic Filipino business details in samples, dated around today.
 
 The two examples below are valid blueprints from EveryOps's template library. Follow their conventions.`;

@@ -8,6 +8,9 @@ export function describeBlueprint(bp: Blueprint): string[] {
     approval_queue: "Approval queue",
     kanban: "Board",
     calendar: "Calendar",
+    form: "Form",
+    notes: "Notebook",
+    document: "Pages",
   };
   const screens = [...new Set(bp.views.map((v) => names[v.type]).filter((n): n is string => !!n))];
   return [

@@ -88,7 +88,7 @@ Gemini runs only on the server, through Vertex AI in `asia-southeast1`, signed i
 | `src/app/api/ai/plan-change/route.ts` | `POST` endpoint: signed-in users only, size-limited, rate-limited |
 | `src/lib/assistant/ai-client.ts` | Browser helper used by Ask EveryOps; falls back to the built-in planner only if Gemini is unreachable |
 | `src/server/ai/interview*.ts` | Setup conversation: asks short follow-up questions with tap-to-send suggestions, keeps a profile of the business, and decides when to design |
-| `src/server/ai/design*.ts` | Designs the workspace (blueprint plus sample records) from the conversation's brief, tidies small slips, validates it, and repairs up to twice |
+| `src/server/ai/design*.ts` | Designs the workspace (blueprint plus sample records) from the conversation's brief, with one sidebar page per area the owner manages; tidies small slips, gives any record type left without a screen its own page (`ensurePages`), validates it, and repairs up to twice |
 | `src/app/api/ai/interview`, `src/app/api/ai/design` | The setup endpoints used by `src/components/setup/setup-interview.tsx` |
 | `src/server/ai/assistant*.ts` | The workspace assistant: answers questions from the workspace's own data, asks one short question when a request is unclear, or returns a change plan (design ops plus record creates and updates), validated and rehearsed on a copy, with one repair attempt |
 | `src/app/api/ai/assistant/route.ts` | `POST` endpoint: loads the workspace from the database with the caller's role. Owners and admins can change the design, staff can add and update records, viewers can only ask |
@@ -108,7 +108,8 @@ The model is `gemini-3.5-flash` (`GEMINI_MODEL`). Conversation turns take 3–10
 
 - Saves are last-write-wins per workspace: two people editing the same workspace at the same moment can overwrite each other.
 - The interviewer guides booking businesses. Other business types are pointed to a matching community system.
-- The assistant can add fields, record types, views, dashboard widgets, sections and rules, and create or update records. It doesn't delete fields, systems or records; it says so and points to Settings.
+- The assistant can add fields, record types, views, dashboard widgets, pages and rules, move a tab onto its own page, rename pages and tabs, and create or update records. It doesn't delete fields, pages or records; it says so and points to Settings.
+- Status badges in tables, kanban cards and the record panel are menus: click one to change the status in place (owners, admins and staff).
 - Assistant conversations live in the browser tab's memory; the changes they make are saved with the workspace and listed in History.
 - Official community systems keep their sample authors and usage counts. Invites are links; email isn't sent yet.
 

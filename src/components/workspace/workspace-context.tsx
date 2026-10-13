@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from "react";
 import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
+import type { PageDoc } from "@/lib/store/workspace-model";
 import type { Role } from "@/lib/store/workspaces";
 
 /**
@@ -25,6 +26,9 @@ export type WorkspaceApi = {
   data: WorkspaceData;
   /** Saves new records after an engine mutation. */
   commit: (next: WorkspaceData) => void;
+  /** Markdown of document pages, by view id. */
+  docs: Record<string, PageDoc>;
+  saveDoc: (viewId: string, body: string) => void;
 };
 
 const WorkspaceContext = createContext<WorkspaceApi | null>(null);

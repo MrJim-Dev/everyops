@@ -8,11 +8,14 @@ import { blueprintOf, roleOf, useWorkspaces } from "@/lib/store/workspaces";
 import { WorkspaceProvider } from "./workspace-context";
 import { WorkspaceMissing } from "./workspace-missing";
 
+const NO_DOCS = {};
+
 /** Provides a saved workspace from this browser's storage. */
 export function LiveWorkspace({ slug, children }: { slug: string; children: ReactNode }) {
   const hydrated = useHydrated();
   const workspace = useWorkspaces((s) => s.workspaces[slug]);
   const setRecords = useWorkspaces((s) => s.setRecords);
+  const setDoc = useWorkspaces((s) => s.setDoc);
   const open = useWorkspaces((s) => s.open);
   const me = useWorkspaces((s) => s.owner);
 
@@ -21,6 +24,7 @@ export function LiveWorkspace({ slug, children }: { slug: string; children: Reac
   }, [hydrated, slug, open]);
 
   const commit = useCallback((next: WorkspaceData) => setRecords(slug, next.records), [setRecords, slug]);
+  const saveDoc = useCallback((viewId: string, body: string) => setDoc(slug, viewId, body), [setDoc, slug]);
 
   const value = useMemo(() => {
     if (!workspace) return null;
@@ -36,8 +40,10 @@ export function LiveWorkspace({ slug, children }: { slug: string; children: Reac
       records: workspace.records,
       data: { blueprint, records: workspace.records },
       commit,
+      docs: workspace.docs ?? NO_DOCS,
+      saveDoc,
     };
-  }, [workspace, slug, commit, me]);
+  }, [workspace, slug, commit, saveDoc, me]);
 
   if (!hydrated) return <ShellSkeleton />;
   if (!value) return <WorkspaceMissing />;

@@ -128,8 +128,40 @@ export type ApprovalQueueView = ViewBase & {
   rejectLabel: string;
   detailFieldIds: string[];
 };
+/** A page that is just the form for adding one record type, e.g. a booking form for the front desk. */
+export type FormView = ViewBase & {
+  type: "form";
+  /** Fields in the order they're asked; empty means every editable field. */
+  fieldIds: string[];
+  intro?: string;
+  submitLabel?: string;
+};
+/** A notebook over one record type: a list of notes beside a markdown editor for the selected one. */
+export type NotesView = ViewBase & {
+  type: "notes";
+  titleFieldId: string;
+  /** A long_text field holding markdown. */
+  bodyFieldId: string;
+  /** Extra fields shown under each note's title, e.g. a tag or a date. */
+  metaFieldIds?: string[];
+};
+/** A free page of markdown. It has no record type: entityId is "", and the text lives in the workspace's docs. */
+export type DocumentView = ViewBase & {
+  type: "document";
+  /** Markdown shown until someone edits the page. */
+  starter?: string;
+};
 
-export type View = TableView | KanbanView | CalendarView | SlotGridView | CheckoutView | ApprovalQueueView;
+export type View =
+  | TableView
+  | KanbanView
+  | CalendarView
+  | SlotGridView
+  | CheckoutView
+  | ApprovalQueueView
+  | FormView
+  | NotesView
+  | DocumentView;
 
 export type ViewType = View["type"];
 
@@ -141,9 +173,12 @@ export type Widget = {
   type: "stat" | "chart" | "progress" | "list";
   metric: { op: "count" | "sum" | "avg"; fieldId?: string };
   chart?: {
-    kind: "line" | "bar";
-    dateFieldId: string;
+    kind: "line" | "bar" | "area" | "donut";
+    /** Over time: buckets by this date field. */
+    dateFieldId?: string;
     bucket: "day" | "week" | "month";
+    /** By category instead of over time: one bar or slice per option or linked record. Donuts need it. */
+    groupByFieldId?: string;
     /** Optional second series, e.g. expenses next to revenue. */
     splitByFieldId?: string;
   };

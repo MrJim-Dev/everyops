@@ -4,6 +4,7 @@ import { CaretDownIcon, CaretUpIcon } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { FieldValue } from "@/components/records/field-value";
 import { useRecordPanels } from "@/components/records/record-panels";
+import { StatusMenu } from "@/components/records/status-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { displayKind, isNumericKind } from "@/lib/blueprint/field-kind";
@@ -124,7 +125,11 @@ export function TableView({ view }: { view: TableViewConfig }) {
                           numeric && "text-right",
                         )}
                       >
-                        <FieldValue field={field} value={row.data[field.id]} />
+                        {field.type === "status" ? (
+                          <StatusMenu record={row} field={field} />
+                        ) : (
+                          <FieldValue field={field} value={row.data[field.id]} />
+                        )}
                       </TableCell>
                     );
                   })}

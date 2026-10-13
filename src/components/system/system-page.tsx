@@ -10,7 +10,7 @@ import { CREATABLE, ViewRenderer } from "@/components/views/view-renderer";
 import { Dashboard } from "@/components/widgets/dashboard";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useAssistant } from "@/lib/assistant/panel-store";
-import { getEntity, getSystem, getView } from "@/lib/blueprint/lookup";
+import { findEntity, getSystem, getView } from "@/lib/blueprint/lookup";
 import type { View } from "@/lib/blueprint/types";
 import { canEdit } from "@/lib/store/workspaces";
 
@@ -33,7 +33,7 @@ export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: s
 
   const views = system.viewIds.map((id) => getView(ws.blueprint, id)).filter((v): v is View => !!v);
   const active = views.find((v) => v.id === viewId) ?? views[0];
-  const entity = active ? getEntity(ws.blueprint, active.entityId) : undefined;
+  const entity = active ? findEntity(ws.blueprint, active.entityId) : undefined;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

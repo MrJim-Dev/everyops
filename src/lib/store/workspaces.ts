@@ -42,6 +42,7 @@ type State = {
   open: (slug: string) => void;
   createWorkspace: (input: NewWorkspace) => string;
   setRecords: (slug: string, records: DataRecord[]) => void;
+  setDoc: (slug: string, viewId: string, body: string) => void;
   saveSetup: (slug: string, progress: SetupProgress) => void;
   finishSetup: (slug: string, data: WorkspaceData, name: string, summary: string) => void;
   applyChange: (slug: string, plan: ChangePlan) => ChangeEntry | null;
@@ -235,6 +236,12 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
     },
 
     setRecords: (slug, records) => update(slug, (ws) => ({ ...ws, records })),
+
+    setDoc: (slug, viewId, body) =>
+      update(slug, (ws) => ({
+        ...ws,
+        docs: { ...ws.docs, [viewId]: { body, updatedAt: new Date().toISOString() } },
+      })),
 
     saveSetup: (slug, progress) =>
       update(slug, (ws) => (ws.setup ? { ...ws, setup: { ...ws.setup, progress } } : ws)),

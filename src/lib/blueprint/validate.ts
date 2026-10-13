@@ -31,6 +31,14 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
   const entityIds = new Set(bp.entities.map((e) => e.id));
   const viewIds = new Set(bp.views.map((v) => v.id));
   const widgetIds = new Set(bp.widgets.map((w) => w.id));
+  for (const [kind, ids] of [
+    ["view", bp.views.map((v) => v.id)],
+    ["widget", bp.widgets.map((w) => w.id)],
+    ["page", bp.systems.map((s) => s.id)],
+    ["record type", bp.entities.map((e) => e.id)],
+  ] as const)
+    for (const id of new Set(ids.filter((id, i) => ids.indexOf(id) !== i)))
+      errors.push({ path: kind, message: `Duplicate ${kind} id "${id}"` });
 
   bp.entities.forEach((entity, ei) => {
     const fieldIds = new Set<string>();
@@ -65,6 +73,7 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
 
   bp.views.forEach((view, vi) => {
     const path = `views.${vi}`;
+    if (view.type === "document") return;
     const entity = bp.entities.find((e) => e.id === view.entityId);
     if (!entity) {
       errors.push({ path, message: `View "${view.name}" uses a missing entity` });
@@ -103,6 +112,14 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
       case "approval_queue":
         missing([view.statusFieldId, ...view.detailFieldIds]);
         break;
+      case "form":
+        missing(view.fieldIds);
+        break;
+      case "notes":
+        missing([view.titleFieldId, view.bodyFieldId, ...(view.metaFieldIds ?? [])]);
+        if (entity.fields.find((f) => f.id === view.bodyFieldId)?.type !== "long_text")
+          errors.push({ path, message: "A notebook's body must be a long text field" });
+        break;
     }
   });
 
@@ -120,6 +137,15 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
     const entity = bp.entities.find((e) => e.id === widget.entityId);
     if (!entity) errors.push({ path: `widgets.${wi}`, message: `${widget.title} uses a missing entity` });
     else if (widget.filter) checkExpr(bp, entity, widget.filter, `widgets.${wi}`, errors);
+    const chart = widget.type === "chart" ? widget.chart : undefined;
+    if (entity && widget.type === "chart") {
+      const path = `widgets.${wi}`;
+      const has = (id?: string) => !!id && entity.fields.some((f) => f.id === id);
+      if (!chart || (!has(chart.dateFieldId) && !has(chart.groupByFieldId)))
+        errors.push({ path, message: `${widget.title} needs a date field or a field to group by` });
+      else if (chart.kind === "donut" && !has(chart.groupByFieldId))
+        errors.push({ path, message: `${widget.title}: a donut needs a field to group by` });
+    }
   });
 
   bp.rules.forEach((rule, ri) => {

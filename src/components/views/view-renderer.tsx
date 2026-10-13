@@ -4,7 +4,10 @@ import type { View } from "@/lib/blueprint/types";
 import { ApprovalQueueView } from "./approval-queue-view";
 import { CalendarView } from "./calendar-view";
 import { CheckoutView } from "./checkout-view";
+import { DocumentView } from "./document-view";
+import { FormView } from "./form-view";
 import { KanbanView } from "./kanban-view";
+import { NotesView } from "./notes-view";
 import { SlotGridView } from "./slot-grid-view";
 import { TableView } from "./table-view";
 
@@ -23,6 +26,12 @@ export function ViewRenderer({ view }: { view: View }) {
       return <CheckoutView key={view.id} view={view} />;
     case "approval_queue":
       return <ApprovalQueueView key={view.id} view={view} />;
+    case "form":
+      return <FormView key={view.id} view={view} />;
+    case "notes":
+      return <NotesView key={view.id} view={view} />;
+    case "document":
+      return <DocumentView key={view.id} view={view} />;
   }
 }
 

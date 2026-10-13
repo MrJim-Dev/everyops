@@ -28,12 +28,16 @@ const designOp = z.object({
     "add_widget",
     "add_system",
     "add_rule",
+    "move_view",
   ]),
   entityId: z.string().optional().describe("add_field, update_field: the record type"),
   fieldId: z.string().optional().describe("update_field, add_view_field"),
-  viewId: z.string().optional().describe("add_view_field: an existing or new table view"),
-  systemId: z.string().optional().describe("add_view, add_widget: the sidebar section it goes in"),
-  name: z.string().optional().describe("rename_workspace"),
+  viewId: z
+    .string()
+    .optional()
+    .describe("add_view_field: an existing or new table view; move_view: the view to move"),
+  systemId: z.string().optional().describe("add_view, add_widget, move_view: the page it goes on"),
+  name: z.string().optional().describe("rename_workspace: the new name"),
   field: field.optional().describe("add_field"),
   patch: patch.optional().describe("update_field; the type can't change"),
   entity: entity.optional().describe("add_entity: a new record type"),
@@ -75,6 +79,15 @@ export const assistantAnswer = z.object({
     facts: z.array(z.object({ label: z.string(), value: z.string() })),
     steps: z.array(z.object({ kind: z.enum(["add", "change"]), label: z.string(), detail: z.string() })),
     ops: z.array(designOp).describe("Design changes, applied first"),
+    renames: z
+      .array(
+        z.object({
+          kind: z.enum(["page", "tab"]),
+          id: z.string().describe("The page's (system) or tab's (view) id"),
+          newName: z.string(),
+        }),
+      )
+      .describe("Pages and tabs to rename"),
     recordOps: z.array(recordOp).describe("Data changes, applied after the design changes"),
   }),
 });
@@ -95,6 +108,27 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   relation field (add_field on the existing type, or a relation field in the new entity); add_system for a sidebar
   section, then add_view (a table, plus a kanban board if it has a status) and optionally add_widget in the existing
   overview section. Use add_rule for automations.
+- Pages: each sidebar page is a system; its views are the tabs on that page. A new page for something that already
+  exists ("a separate page for courts", "give the calendar its own page") is add_system plus add_view (a new view
+  of that record type) or move_view (move an existing tab there; the old page keeps its other tabs). Give every
+  page a clear name and icon, and new views a short name ("All courts", "Calendar"). Rename pages and tabs with
+  renames (kind page or tab, the id, the new name), never with ops. Several pages in one plan are fine when the
+  person asks for them.
+- View types: table (fieldIds), kanban (statusFieldId of a status field), calendar (dateFieldId of a date,
+  datetime or time_range field), slot_grid (booking schedule; only for a booking record type that already has
+  booking settings), approval_queue (statusFieldId), checkout (only for selling), and:
+  - form: a page that is just the form for adding one record type ("a page for the booking form"): fieldIds in
+    the order asked, intro (one line), submitLabel ("Book court").
+  - notes: a notebook with a list of notes and a markdown editor ("a note taking page"). It needs a record type
+    with a text title and a long_text body: add_entity (e.g. Note: title, body long_text, plus tags or a date if
+    useful) unless one exists; set titleFieldId, bodyFieldId and optional metaFieldIds.
+  - document: one free page of markdown the team edits ("a markdown page", "our policies", "an SOP page"). Its
+    entityId is "" (no record type); put a helpful outline in starter (markdown).
+- Reports and totals pages: add_system with no views and several add_widget on it; a page without views shows
+  its widgets as a dashboard. stat for totals (metric count/sum/avg, optional filter), chart for graphs: over
+  time with dateFieldId plus bucket (kind line, area or bar), or by category with groupByFieldId (a select,
+  status, relation or text field; kind bar or donut), optional splitByFieldId for one series per option. list
+  for a short list. Make each widget answer one question with a clear title ("Revenue by court").
 - Data changes: create_record or update_record with recordIds from the data. You can't delete records or fields: say
   where to do it by hand instead.
 - "this", "here" and "the page" mean the current page. Keep plans as small as the request needs.

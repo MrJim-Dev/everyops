@@ -167,9 +167,10 @@ export async function saveWorkspace(userId: string, ws: Workspace): Promise<Save
   if (access.role === "viewer") return { ok: false, status: 403, message: "Viewers can't make changes." };
 
   if (access.role === "staff") {
-    // Staff edit records only; the blueprint, history and settings stay as the owner left them.
+    // Staff edit records and page text only; the blueprint, history and settings stay as the owner left them.
     const records: DataRecord[] = doc.records;
-    await sql`update workspace set doc = jsonb_set(doc, '{records}', ${JSON.stringify(records)}::jsonb), updated_at = now()
+    const docs = doc.docs && typeof doc.docs === "object" ? doc.docs : {};
+    await sql`update workspace set doc = jsonb_set(jsonb_set(doc, '{records}', ${JSON.stringify(records)}::jsonb), '{docs}', ${JSON.stringify(docs)}::jsonb), updated_at = now()
       where id = ${ws.slug}`.execute(db);
     return { ok: true };
   }

@@ -28,7 +28,7 @@ import type { FieldError } from "@/lib/engine/records";
 import { formatDateTime } from "@/lib/format";
 import { FieldValue } from "./field-value";
 import { RecordFieldsForm } from "./record-fields-form";
-import { StatusPill } from "./status-badge";
+import { StatusMenu } from "./status-menu";
 
 /** Side panel for one record: properties, its line items, and the next sensible action. */
 export function RecordSheet({ recordId, onClose }: { recordId: string | null; onClose: () => void }) {
@@ -83,7 +83,7 @@ function RecordSheetBody({
           <SheetTitle className="truncate text-[17px] font-semibold">
             {recordTitle(entity, record)}
           </SheetTitle>
-          {current ? <StatusPill label={current.label} tone={current.tone} /> : null}
+          {status ? <StatusMenu record={record} field={status} pill /> : null}
         </div>
       </SheetHeader>
 

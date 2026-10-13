@@ -5,6 +5,8 @@ import type {
   Entity,
   Field,
   FieldValue,
+  IconName,
+  NotesView,
   Rule,
   View,
   Widget,
@@ -65,6 +67,24 @@ export function toView(v: Design["views"][number]): View {
         rejectLabel: v.rejectLabel ?? "Decline",
         detailFieldIds: v.detailFieldIds ?? [],
       };
+    case "form":
+      return {
+        ...base,
+        type: "form",
+        fieldIds: v.fieldIds ?? [],
+        ...(v.intro ? { intro: v.intro } : {}),
+        ...(v.submitLabel ? { submitLabel: v.submitLabel } : {}),
+      };
+    case "notes":
+      return {
+        ...base,
+        type: "notes",
+        titleFieldId: v.titleFieldId ?? "",
+        bodyFieldId: v.bodyFieldId ?? "",
+        metaFieldIds: v.metaFieldIds ?? [],
+      };
+    case "document":
+      return { ...base, entityId: "", type: "document", ...(v.starter ? { starter: v.starter } : {}) };
   }
 }
 
@@ -211,9 +231,18 @@ export function tidy(bp: Blueprint): Blueprint {
   }
   const fieldsOf = (entityId: string) =>
     new Set(bp.entities.find((e) => e.id === entityId)?.fields.map((x) => x.id) ?? []);
-  bp.views = bp.views.filter((v) => entityIds.has(v.entityId));
+  bp.views = bp.views.filter((v) => (v.type === "document" ? true : entityIds.has(v.entityId)));
   for (const v of bp.views) {
+    if (v.type === "document") {
+      v.entityId = "";
+      continue;
+    }
     const has = fieldsOf(v.entityId);
+    if (v.type === "form") v.fieldIds = v.fieldIds.filter((id) => has.has(id));
+    if (v.type === "notes") {
+      const entity = bp.entities.find((e) => e.id === v.entityId);
+      if (entity) fillNotesView(v, entity);
+    }
     if (v.type === "table") {
       v.fieldIds = v.fieldIds.filter((id) => has.has(id));
       if (!v.fieldIds.length) v.fieldIds = [...has].slice(0, 5);
@@ -226,7 +255,15 @@ export function tidy(bp: Blueprint): Blueprint {
     if (!entityIds.has(w.entityId)) return false;
     const has = fieldsOf(w.entityId);
     if (w.metric.fieldId && !has.has(w.metric.fieldId)) return false;
-    if (w.type === "chart" && (!w.chart || !has.has(w.chart.dateFieldId))) return false;
+    if (w.type === "chart") {
+      const chart = w.chart;
+      if (!chart) return false;
+      if (chart.groupByFieldId && !has.has(chart.groupByFieldId)) delete chart.groupByFieldId;
+      if (chart.dateFieldId && !has.has(chart.dateFieldId)) delete chart.dateFieldId;
+      if (chart.splitByFieldId && !has.has(chart.splitByFieldId)) delete chart.splitByFieldId;
+      if (chart.kind === "donut" && !chart.groupByFieldId) chart.kind = "bar";
+      if (!chart.groupByFieldId && !chart.dateFieldId) return false;
+    }
     if (w.list) w.list.fieldIds = w.list.fieldIds.filter((id) => has.has(id));
     if (w.type === "list" && !w.list?.fieldIds.length) return false;
     return true;
@@ -388,7 +425,7 @@ export async function designWorkspace(brief: string, workspaceName: string): Pro
       if (result.retryable && attempt < 1) continue;
       return { ok: false, message: result.error };
     }
-    const bp = tidy(toBlueprint(result.data));
+    const bp = ensurePages(tidy(toBlueprint(result.data)));
     const errors = [...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`), ...extraChecks(bp)];
     if (!errors.length) {
       const records = computeAll(bp, toRecords(bp, result.data.samples, now), now);
@@ -407,4 +444,78 @@ export async function designWorkspace(brief: string, workspaceName: string): Pro
     ok: false,
     message: "I couldn't design a valid workspace for that yet. Add a detail or two and try again.",
   };
+}
+
+const PAGE_ICONS: [RegExp, IconName][] = [
+  [/court|room|venue|table|space|resource/, "court"],
+  [/player|client|customer|member|guest|staff|employee|people|person|team|contact|supplier/, "users"],
+  [/product|item|inventory|stock|menu|ingredient/, "package"],
+  [/order|sale|invoice|payment|expense|transaction|receipt/, "receipt"],
+  [/booking|appointment|reservation|event|schedule|shift|leave/, "calendar"],
+  [/campaign|post|content/, "megaphone"],
+];
+
+/**
+ * Every main record type gets a page people can manage it from. Gemini sometimes folds everything
+ * into one section (bookings with the courts inside); this adds a plain table page for any record type
+ * that has no screen anywhere. Line items (records with a parent) stay inside their parent.
+ */
+export function ensurePages(bp: Blueprint): Blueprint {
+  const shown = new Set(
+    bp.systems.flatMap((s) => s.viewIds).map((id) => bp.views.find((v) => v.id === id)?.entityId),
+  );
+  const taken = new Set([...bp.views.map((v) => v.id), ...bp.systems.map((s) => s.id)]);
+  const unique = (id: string) => {
+    let out = id;
+    for (let n = 2; taken.has(out); n++) out = `${id}_${n}`;
+    taken.add(out);
+    return out;
+  };
+  for (const e of bp.entities) {
+    if (e.parent || shown.has(e.id)) continue;
+    const viewId = unique(`${e.id}_all`);
+    bp.views.push({
+      id: viewId,
+      entityId: e.id,
+      name: `All ${e.pluralName.toLowerCase()}`,
+      type: "table",
+      fieldIds: e.fields
+        .filter((f) => f.type !== "long_text")
+        .slice(0, 6)
+        .map((f) => f.id),
+    });
+    const key = `${e.id} ${e.pluralName}`.toLowerCase();
+    bp.systems.push({
+      id: unique(`${e.id}_page`),
+      name: e.pluralName,
+      icon: PAGE_ICONS.find(([re]) => re.test(key))?.[1] ?? "briefcase",
+      viewIds: [viewId],
+      widgetIds: [],
+    });
+  }
+  return bp;
+}
+
+/**
+ * A notebook needs a title and a markdown body. Points the view at the record type's name field and its first
+ * long text field, adding a "Body" field if the record type has none.
+ */
+export function fillNotesView(view: NotesView, entity: Entity) {
+  const has = (id: string | undefined) => !!id && entity.fields.some((f) => f.id === id);
+  if (!has(view.titleFieldId)) view.titleFieldId = entity.primaryFieldId;
+  if (!has(view.bodyFieldId) || entity.fields.find((f) => f.id === view.bodyFieldId)?.type !== "long_text") {
+    let body = entity.fields.find((f) => f.type === "long_text");
+    if (!body) {
+      body = {
+        id: entity.fields.some((f) => f.id === "body") ? "note_body" : "body",
+        name: "Body",
+        type: "long_text",
+      };
+      entity.fields.push(body);
+    }
+    view.bodyFieldId = body.id;
+  }
+  view.metaFieldIds = (view.metaFieldIds ?? []).filter(
+    (id) => has(id) && id !== view.titleFieldId && id !== view.bodyFieldId,
+  );
 }

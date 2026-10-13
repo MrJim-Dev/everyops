@@ -13,16 +13,26 @@ export function RecordFieldsForm({
   errors,
   onChange,
   idPrefix,
+  fieldIds,
 }: {
   entity: Entity;
   values: RecordData;
   errors: EngineError[];
   onChange: (fieldId: string, value: RecordData[string]) => void;
   idPrefix: string;
+  /** Which fields to ask, in order. Required fields are always included. Defaults to every editable field. */
+  fieldIds?: string[];
 }) {
+  const editable = editableFields(entity);
+  const fields = fieldIds?.length
+    ? [
+        ...fieldIds.flatMap((id) => editable.filter((f) => f.id === id)),
+        ...editable.filter((f) => f.required && !fieldIds.includes(f.id)),
+      ]
+    : editable;
   return (
     <FieldGroup className="gap-4">
-      {editableFields(entity).map((field) => {
+      {fields.map((field) => {
         const error = errors.find((e) => e.fieldId === field.id);
         const id = `${idPrefix}-${field.id}`;
         const inline = field.type === "checkbox";

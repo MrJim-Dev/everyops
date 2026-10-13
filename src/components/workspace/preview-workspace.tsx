@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { ShellSkeleton } from "@/components/shell/shell-skeleton";
 import type { WorkspaceData } from "@/lib/blueprint/types";
 import { useCatalogLoaded, useCatalogSystem } from "@/lib/community/use-catalog";
+import type { PageDoc } from "@/lib/store/workspace-model";
 import { WorkspaceProvider } from "./workspace-context";
 import { WorkspaceMissing } from "./workspace-missing";
 
@@ -16,6 +17,7 @@ export function PreviewWorkspace({ systemId, children }: { systemId: string; chi
   // Community systems load from the server; wait for them before deciding a system doesn't exist.
   const checked = useCatalogLoaded();
   const [data, setData] = useState<WorkspaceData | null>(null);
+  const [docs, setDocs] = useState<Record<string, PageDoc>>({});
 
   // Sample data is dated around "today", so build it in the browser only.
   useEffect(() => {
@@ -36,9 +38,12 @@ export function PreviewWorkspace({ systemId, children }: { systemId: string; chi
             records: data.records,
             data,
             commit: setData,
+            docs,
+            saveDoc: (viewId: string, body: string) =>
+              setDocs((d) => ({ ...d, [viewId]: { body, updatedAt: new Date().toISOString() } })),
           }
         : null,
-    [data, system],
+    [data, system, docs],
   );
 
   if (!system) return checked ? <WorkspaceMissing kind="system" /> : <ShellSkeleton />;
