@@ -2,7 +2,7 @@
 
 Date: 2026-10-13 · Status: written, awaiting James's review · Competition: Google Cloud AI Builder Cup 2026 (submission closes 2026-10-18)
 
-Companion documents: ../../../../AI Builder Cup 2026.md (event facts), ../../../../Concept - Self-Configuring Business Workspace.md (concept), ../../../../UI Mockups/v2-minimal/ (visual reference only).
+Companion documents: ../../../../AI Builder Cup 2026.md (event facts), ../../../../Concept - Self-Configuring Business Workspace.md (concept), ../../../../UI Mockups/ (visual reference only).
 
 ## 1. Shared understanding
 
