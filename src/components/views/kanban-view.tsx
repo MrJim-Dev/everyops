@@ -12,6 +12,7 @@ import type { DataRecord, Entity, KanbanView as KanbanConfig } from "@/lib/bluep
 import { recordContext } from "@/lib/engine/context";
 import { run, truthy } from "@/lib/engine/expr";
 import { applyFilter } from "@/lib/engine/query";
+import { useFreshStore } from "@/lib/motion/fresh";
 import { todayKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +23,7 @@ export function KanbanView({ view }: { view: KanbanConfig }) {
   const entity = getEntity(blueprint, view.entityId);
   const status = getField(entity, view.statusFieldId);
   const longText = entity.fields.find((f) => f.type === "long_text");
+  const fresh = useFreshStore((s) => s.ids);
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
 
@@ -88,6 +90,7 @@ export function KanbanView({ view }: { view: KanbanConfig }) {
                     entity={entity}
                     record={card}
                     dragging={dragging === card.id}
+                    fresh={!!fresh[card.id]}
                     onOpen={() => openRecord(card.id)}
                     onDragStart={() => setDragging(card.id)}
                     onDragEnd={() => {
@@ -119,6 +122,7 @@ function KanbanCard({
   entity,
   record,
   dragging,
+  fresh,
   onOpen,
   onDragStart,
   onDragEnd,
@@ -128,6 +132,7 @@ function KanbanCard({
   entity: Entity;
   record: DataRecord;
   dragging: boolean;
+  fresh: boolean;
   onOpen: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -144,7 +149,8 @@ function KanbanCard({
       className={cn(
         "relative flex cursor-grab flex-col gap-2 rounded-lg border bg-card p-3 text-[13px] transition-[border-color,opacity] duration-150",
         "hover:border-foreground/20 has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-ring/50 active:cursor-grabbing",
-        dragging && "opacity-50",
+        dragging && "scale-[0.98] opacity-50",
+        fresh && "animate-flash",
       )}
     >
       <h3 className="font-medium leading-snug">

@@ -13,6 +13,8 @@ import { displayKind, isNumericKind } from "@/lib/blueprint/field-kind";
 import { getEntity, getField, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { ApprovalQueueView as ApprovalConfig } from "@/lib/blueprint/types";
 import { sortRecords } from "@/lib/engine/query";
+import { useFreshStore } from "@/lib/motion/fresh";
+import { cn } from "@/lib/utils";
 import { ViewEmpty } from "./view-empty";
 import { ToolbarSummary, ViewToolbar } from "./view-toolbar";
 
@@ -26,6 +28,7 @@ export function ApprovalQueueView({ view }: { view: ApprovalConfig }) {
   const { blueprint, records } = useWorkspace();
   const { openRecord } = useRecordPanels();
   const actions = useRecordActions();
+  const fresh = useFreshStore((s) => s.ids);
   const entity = getEntity(blueprint, view.entityId);
   const status = getField(entity, view.statusFieldId);
   const details = view.detailFieldIds.map((id) => getField(entity, id));
@@ -121,7 +124,10 @@ export function ApprovalQueueView({ view }: { view: ApprovalConfig }) {
                   <button
                     type="button"
                     onClick={() => openRecord(r.id)}
-                    className="flex h-10 w-full items-center gap-3 px-5 text-left text-[13px] outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted"
+                    className={cn(
+                      "flex h-10 w-full items-center gap-3 px-5 text-left text-[13px] outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted",
+                      fresh[r.id] && "animate-flash",
+                    )}
                   >
                     <span className="min-w-0 flex-1 truncate">{recordTitle(entity, r)}</span>
                     <span className="hidden text-muted-foreground sm:inline">

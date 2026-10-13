@@ -12,6 +12,7 @@ import { displayKind } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, recordTitle } from "@/lib/blueprint/lookup";
 import { applyOps, computeImpact } from "@/lib/engine/changes";
 import { formatMoney } from "@/lib/format";
+import { markFresh } from "@/lib/motion/fresh";
 import { useWorkspaces } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 
@@ -80,10 +81,18 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
     if (!plan) return;
     const entry = applyChange(ws.id, plan);
     if (!entry) return;
+    const touched = [...new Set(entry.recordChanges.map((c) => c.recordId))];
+    markFresh(touched);
     toast.success(`${plan.title} applied`, {
       description: `Version ${entry.toVersion} is live.`,
       duration: 10_000,
-      action: { label: "Undo", onClick: () => undoChange(ws.id, entry.id) },
+      action: {
+        label: "Undo",
+        onClick: () => {
+          undoChange(ws.id, entry.id);
+          markFresh(touched);
+        },
+      },
     });
     setRequest("");
     setResult(null);
@@ -153,15 +162,21 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
 
   return (
     <div className="flex flex-col gap-5">
-      <h3 className="text-[15px] font-semibold">
+      <h3 className="animate-rise text-[15px] font-semibold">
         Review {plan.title.charAt(0).toLowerCase() + plan.title.slice(1)}
       </h3>
-      <blockquote className="rounded-lg border bg-muted/40 px-4 py-3 text-[14px]">
+      <blockquote
+        className="animate-rise stagger rounded-lg border bg-muted/40 px-4 py-3 text-[14px]"
+        style={{ "--i": 1 } as React.CSSProperties}
+      >
         “{plan.request}”
       </blockquote>
 
       {plan.facts.length ? (
-        <dl className="grid grid-cols-2 overflow-hidden rounded-lg border">
+        <dl
+          className="animate-rise stagger grid grid-cols-2 overflow-hidden rounded-lg border"
+          style={{ "--i": 2 } as React.CSSProperties}
+        >
           {plan.facts.map((fact, i) => (
             <div
               key={fact.label}
@@ -178,7 +193,10 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
         </dl>
       ) : null}
 
-      <section className="flex flex-col gap-2">
+      <section
+        className="animate-rise stagger flex flex-col gap-2"
+        style={{ "--i": 3 } as React.CSSProperties}
+      >
         <h3 className="text-[13px] font-semibold">What will change</h3>
         <ul className="divide-y rounded-lg border">
           {plan.steps.map((step) => (
@@ -209,7 +227,10 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
       </section>
 
       {impact ? (
-        <section className="flex flex-col gap-2">
+        <section
+          className="animate-rise stagger flex flex-col gap-2"
+          style={{ "--i": 4 } as React.CSSProperties}
+        >
           <h3 className="text-[13px] font-semibold">Impact on existing records</h3>
           {impact.errors.length ? (
             <ul className="rounded-lg border border-destructive/40 px-4 py-3 text-[13px] text-destructive">

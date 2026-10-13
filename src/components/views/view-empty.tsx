@@ -21,7 +21,7 @@ export function ViewEmpty({
   onAction?: () => void;
 }) {
   return (
-    <Empty className="py-16">
+    <Empty className="animate-rise py-16">
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <TrayIcon />

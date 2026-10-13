@@ -14,19 +14,24 @@ export function SystemCard({
   system,
   selected,
   onSelect,
+  index,
 }: {
   system: CatalogSystem;
   selected?: boolean;
   onSelect: () => void;
+  /** Position in a grid; staggers the first-load entrance. */
+  index?: number;
 }) {
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
+      style={index === undefined ? undefined : ({ "--i": index } as React.CSSProperties)}
       className={cn(
-        "flex flex-col gap-3 rounded-lg border p-2 pb-3 text-left outline-none transition-[border-color,background-color] duration-150",
-        "hover:border-foreground/20 focus-visible:ring-2 focus-visible:ring-ring/50",
+        "flex flex-col gap-3 rounded-lg border p-2 pb-3 text-left outline-none transition-[border-color,background-color,transform] duration-150",
+        "hover:border-foreground/20 focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.99]",
+        index !== undefined && "animate-rise stagger",
         selected && "border-primary/70 bg-primary/[0.04]",
       )}
     >

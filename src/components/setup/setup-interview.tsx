@@ -2,8 +2,9 @@
 
 import { ArrowUpIcon, CheckCircleIcon, CircleDashedIcon, SparkleIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { UseSystemDialog } from "@/components/community/use-system-dialog";
+import { TypingIndicator } from "@/components/motion/typing-indicator";
 import { SystemIcon } from "@/components/system-icon";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -50,6 +51,16 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
   );
   const [notes, setNotes] = useState<string[]>(progress?.notes ?? []);
   const [draft, setDraft] = useState("");
+  // A short "thinking" beat between steps keeps the conversation readable. It stays brief
+  // (under a second) so it never feels like waiting.
+  const [thinking, setThinking] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
 
   // Keep progress in the workspace so a refresh resumes where the owner left off.
   useEffect(() => {
@@ -104,18 +115,33 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
   const missing = visible.some(
     (q) => q.kind !== "text" && (answers[q.id] === undefined || answers[q.id] === ""),
   );
-  const next = () => {
-    const upcoming = steps[stepIndex + 1];
-    if (upcoming) setAnswers((a) => ({ ...suggestedAnswers([upcoming]), ...a }));
-    setStepIndex((i) => i + 1);
+  const advance = (apply: () => void, building: boolean) => {
+    setThinking(true);
+    timer.current = setTimeout(
+      () => {
+        apply();
+        setThinking(false);
+      },
+      building ? 700 : 450,
+    );
   };
-  const useDefaults = () => {
-    setAnswers((a) => ({
-      ...suggestedAnswers(steps),
-      ...Object.fromEntries(Object.entries(a).filter(([, v]) => v !== "")),
-    }));
-    setStepIndex(steps.length);
-  };
+  const next = () =>
+    advance(
+      () => {
+        const upcoming = steps[stepIndex + 1];
+        if (upcoming) setAnswers((a) => ({ ...suggestedAnswers([upcoming]), ...a }));
+        setStepIndex((i) => i + 1);
+      },
+      stepIndex + 1 >= steps.length,
+    );
+  const useDefaults = () =>
+    advance(() => {
+      setAnswers((a) => ({
+        ...suggestedAnswers(steps),
+        ...Object.fromEntries(Object.entries(a).filter(([, v]) => v !== "")),
+      }));
+      setStepIndex(steps.length);
+    }, true);
   const create = () => {
     if (!built) return;
     const name = String(answers.name || "My venue");
@@ -166,8 +192,14 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
         ))}
         {notes.length ? <AssistantMessage>Noted. I'll keep that in your profile.</AssistantMessage> : null}
 
-        {!done ? (
+        {thinking ? (
           <AssistantMessage>
+            <TypingIndicator
+              label={stepIndex + 1 >= steps.length ? "Designing your workspace" : "Hulma is thinking"}
+            />
+          </AssistantMessage>
+        ) : !done ? (
+          <AssistantMessage key={step.id}>
             <p className="mb-3">
               {stepIndex === 0 ? "Let's set up your bookings. A few quick questions." : step.intro}
             </p>
@@ -180,13 +212,18 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
               </div>
               <FieldGroup className="gap-5">
                 {visible.map((q, i) => (
-                  <QuestionField
+                  <div
                     key={q.id}
-                    index={i + 1}
-                    question={q}
-                    value={answers[q.id]}
-                    onChange={(value) => setAnswers((a) => ({ ...a, [q.id]: value }))}
-                  />
+                    className="animate-rise stagger"
+                    style={{ "--i": i + 1 } as React.CSSProperties}
+                  >
+                    <QuestionField
+                      index={i + 1}
+                      question={q}
+                      value={answers[q.id]}
+                      onChange={(value) => setAnswers((a) => ({ ...a, [q.id]: value }))}
+                    />
+                  </div>
                 ))}
               </FieldGroup>
               <div className="mt-5 flex items-center gap-3 border-t pt-4">
@@ -262,7 +299,7 @@ export function SetupInterview({ prompt, progress }: { prompt: string; progress?
                 className={cn("flex items-center gap-2", i > stepIndex && "text-muted-foreground")}
               >
                 {i < stepIndex ? (
-                  <CheckCircleIcon className="size-4 text-primary" />
+                  <CheckCircleIcon className="size-4 animate-pop text-primary" />
                 ) : (
                   <CircleDashedIcon className="size-4 text-muted-foreground" />
                 )}

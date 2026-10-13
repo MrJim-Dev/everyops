@@ -8,6 +8,7 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { getEntity, getField, optionOf, recordsOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { SlotGridView as SlotGridConfig, TimeRange } from "@/lib/blueprint/types";
 import { formatDate, formatRange, formatTime, isTimeRange } from "@/lib/format";
+import { useFreshStore } from "@/lib/motion/fresh";
 import { addDays, at, dateKey, hhmm, manilaParts, minutesOf, todayKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { DateStepper } from "./date-stepper";
@@ -34,6 +35,7 @@ export function SlotGridView({ view }: { view: SlotGridConfig }) {
   const config = resourceEntity.resource ?? { opensAt: "08:00", closesAt: "20:00", slotMinutes: 60 };
   const status = getField(entity, booking.statusFieldId);
 
+  const fresh = useFreshStore((s) => s.ids);
   const today = todayKey();
   const [day, setDay] = useState(today);
   const opens = minutesOf(config.opensAt);
@@ -170,11 +172,17 @@ export function SlotGridView({ view }: { view: SlotGridConfig }) {
                         type="button"
                         onClick={() => openRecord(b.id)}
                         style={{ top: top + 2, height: height - 4 }}
-                        className="absolute inset-x-1.5 flex overflow-hidden rounded-md border bg-card text-left outline-none transition-[border-color,transform] duration-150 hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.98]"
+                        className={cn(
+                          "absolute inset-x-1.5 flex overflow-hidden rounded-md border bg-card text-left outline-none transition-[border-color,transform] duration-150 hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.98]",
+                          fresh[b.id] && "animate-flash",
+                        )}
                       >
                         <span
                           aria-hidden="true"
-                          className={cn("w-[3px] shrink-0", TONE_BAR[option?.tone ?? "neutral"])}
+                          className={cn(
+                            "w-[3px] shrink-0 transition-colors duration-300",
+                            TONE_BAR[option?.tone ?? "neutral"],
+                          )}
                         />
                         <span className="flex min-w-0 flex-1 items-center gap-2 px-2.5">
                           <span className="min-w-0 flex-1">
@@ -202,7 +210,7 @@ export function SlotGridView({ view }: { view: SlotGridConfig }) {
                 className="pointer-events-none absolute right-0 left-[70px] z-10 flex items-center"
                 style={{ top: ((nowMinutes - opens) / step) * ROW }}
               >
-                <span className="size-1.5 rounded-full bg-primary" />
+                <span className="size-1.5 animate-live rounded-full bg-primary" />
                 <span className="h-px flex-1 bg-primary/70" />
               </div>
             ) : null}

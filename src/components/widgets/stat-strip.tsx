@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedValue } from "@/components/motion/animated-value";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Widget } from "@/lib/blueprint/types";
 import { widgetValue } from "@/lib/engine/aggregate";
@@ -26,7 +27,7 @@ export function StatStrip({ widgets }: { widgets: Widget[] }) {
                 value < 0 && "text-destructive",
               )}
             >
-              {format(value)}
+              <AnimatedValue value={format(value)} />
             </dd>
           </div>
         );

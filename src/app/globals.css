@@ -54,6 +54,119 @@
 }
 
 /*
+ * Motion system (Emil Kowalski): purposeful, fast (150–300ms), strong ease-out,
+ * transform + opacity only. Frequent and keyboard-driven actions stay instant.
+ */
+@theme {
+  --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+
+  /* Page-level entrance for rarely seen surfaces (home, community, setup). */
+  --animate-rise: rise 320ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  /* A record that was just created or changed: brief accent glow that settles. */
+  --animate-flash: flash 1100ms cubic-bezier(0.23, 1, 0.32, 1);
+  /* A value that just changed (totals, stats). */
+  --animate-value: value-in 220ms cubic-bezier(0.23, 1, 0.32, 1);
+  /* Small confirmations (badges, checks). */
+  --animate-pop: pop 200ms cubic-bezier(0.23, 1, 0.32, 1);
+  /* Content swap inside a button: blur masks the crossfade. */
+  --animate-swap: swap 240ms cubic-bezier(0.23, 1, 0.32, 1);
+  /* "Live" indicator on the schedule's current-time dot. */
+  --animate-live: live 2400ms cubic-bezier(0.23, 1, 0.32, 1) infinite;
+  /* Assistant typing dots. */
+  --animate-typing: typing 1100ms ease-in-out infinite;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+  @keyframes flash {
+    0% {
+      box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary) 70%, transparent);
+      background-color: color-mix(in oklab, var(--primary) 12%, transparent);
+      transform: scale(0.985);
+    }
+    35% {
+      transform: scale(1);
+    }
+    100% {
+      box-shadow: 0 0 0 1px transparent;
+    }
+  }
+  @keyframes value-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: scale(0.85);
+    }
+  }
+  @keyframes swap {
+    from {
+      opacity: 0;
+      filter: blur(2px);
+      transform: scale(0.97);
+    }
+  }
+  @keyframes live {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 55%, transparent);
+    }
+    70%,
+    100% {
+      box-shadow: 0 0 0 6px transparent;
+    }
+  }
+  @keyframes typing {
+    0%,
+    100% {
+      opacity: 0.3;
+      transform: translateY(0);
+    }
+    50% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+}
+
+/* Stagger siblings: set --i on each item. Short steps keep it from feeling slow. */
+@utility stagger {
+  animation-delay: calc(min(var(--i, 0), 10) * 45ms);
+}
+
+/* Elements that enter when inserted (cart lines, new cards). Transitions stay interruptible. */
+@utility enter-up {
+  transition:
+    opacity 220ms var(--ease-out-strong),
+    transform 220ms var(--ease-out-strong);
+  @starting-style {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@utility enter-right {
+  transition:
+    opacity 200ms var(--ease-out-strong),
+    transform 200ms var(--ease-out-strong);
+  @starting-style {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+}
+@utility enter-bottom {
+  transition: transform 260ms var(--ease-drawer);
+  @starting-style {
+    transform: translateY(100%);
+  }
+}
+
+/*
  * Hulma is dark only. One accent (muted teal), warm neutrals, no pure black.
  * Light tokens are intentionally absent until a light theme is designed.
  */

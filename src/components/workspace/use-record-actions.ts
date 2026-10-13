@@ -10,6 +10,7 @@ import {
   type MutationResult,
   updateRecord,
 } from "@/lib/engine/records";
+import { markFresh } from "@/lib/motion/fresh";
 import { useWorkspace } from "./workspace-context";
 
 /** Record mutations bound to the current workspace. Rule notices become toasts. */
@@ -21,6 +22,7 @@ export function useRecordActions() {
     (result: MutationResult) => {
       if (result.ok) {
         commit(result.data);
+        markFresh([result.record.id]);
         for (const notice of result.notices) toast(notice);
       }
       return result;

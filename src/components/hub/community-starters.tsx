@@ -21,8 +21,13 @@ export function CommunityStarters() {
         </Link>
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {CATALOG.slice(0, 3).map((system) => (
-          <SystemCard key={system.id} system={system} onSelect={() => router.push(`/preview/${system.id}`)} />
+        {CATALOG.slice(0, 3).map((system, i) => (
+          <SystemCard
+            key={system.id}
+            index={i + 4}
+            system={system}
+            onSelect={() => router.push(`/preview/${system.id}`)}
+          />
         ))}
       </div>
     </section>

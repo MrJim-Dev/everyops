@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { SegmentedControl } from "@/components/motion/segmented-control";
 import {
   Select,
   SelectContent,
@@ -10,7 +11,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SearchInput } from "@/components/views/search-input";
 import { ViewEmpty } from "@/components/views/view-empty";
 import { CATALOG, CATEGORIES } from "@/lib/catalog";
@@ -39,20 +39,15 @@ export function CommunityBrowser() {
       <div className="flex min-w-0 flex-col gap-5">
         <div className="flex flex-wrap items-center gap-3">
           <SearchInput value={query} onChange={setQuery} placeholder="Find a system" />
-          <ToggleGroup
-            value={[category]}
-            onValueChange={(v) => setCategory(v[0] ?? "all")}
-            size="sm"
-            spacing={1}
-            aria-label="Category"
-          >
-            <ToggleGroupItem value="all">All</ToggleGroupItem>
-            {CATEGORIES.map((c) => (
-              <ToggleGroupItem key={c.id} value={c.id}>
-                {c.label}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+          <SegmentedControl
+            label="Category"
+            value={category}
+            onValueChange={setCategory}
+            options={[
+              { value: "all", label: "All" },
+              ...CATEGORIES.map((c) => ({ value: c.id, label: c.label })),
+            ]}
+          />
           <Select value={sort} onValueChange={(v) => setSort(v as keyof typeof SORTS)} items={SORTS}>
             <SelectTrigger size="sm" className="ml-auto w-[132px]" aria-label="Sort">
               <SelectValue />
@@ -72,9 +67,10 @@ export function CommunityBrowser() {
           <ViewEmpty title="No systems match" description="Try another word or category." />
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {systems.map((s) => (
+            {systems.map((s, i) => (
               <SystemCard
                 key={s.id}
+                index={i}
                 system={s}
                 selected={s.id === selected.id}
                 onSelect={() => {

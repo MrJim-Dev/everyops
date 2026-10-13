@@ -1,12 +1,13 @@
 "use client";
 
-import { MinusIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
+import { CheckIcon, MinusIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AnimatedValue } from "@/components/motion/animated-value";
+import { SegmentedControl } from "@/components/motion/segmented-control";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useRecordActions } from "@/components/workspace/use-record-actions";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { getEntity, getField, recordsOf, recordTitle } from "@/lib/blueprint/lookup";
@@ -51,6 +52,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
   const [method, setMethod] = useState(payment.options?.[0]?.id ?? "cash");
   const [cash, setCash] = useState("");
   const orderRef = useRef<HTMLElement>(null);
+  const [justSold, setJustSold] = useState<string | null>(null);
 
   const products = useMemo(
     () =>
@@ -119,6 +121,10 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
     );
     setCart([]);
     setCash("");
+    if (statusId !== "held") {
+      setJustSold(code);
+      setTimeout(() => setJustSold(null), 1400);
+    }
   };
 
   return (
@@ -127,20 +133,15 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
         <div className="flex flex-col gap-3 border-b px-5 py-3">
           <SearchInput value={query} onChange={setQuery} placeholder="Search products" />
           {categoryField?.options ? (
-            <ToggleGroup
-              value={[category]}
-              onValueChange={(v) => setCategory(v[0] ?? "all")}
-              size="sm"
-              spacing={1}
-              aria-label="Category"
-            >
-              <ToggleGroupItem value="all">All</ToggleGroupItem>
-              {categoryField.options.map((o) => (
-                <ToggleGroupItem key={o.id} value={o.id}>
-                  {o.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+            <SegmentedControl
+              label="Category"
+              value={category}
+              onValueChange={setCategory}
+              options={[
+                { value: "all", label: "All" },
+                ...categoryField.options.map((o) => ({ value: o.id, label: o.label })),
+              ]}
+            />
           ) : null}
         </div>
         <ul className="divide-y lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
@@ -154,7 +155,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
                   type="button"
                   disabled={soldOut}
                   onClick={() => add(p.id)}
-                  className="flex h-14 w-full items-center gap-4 px-5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted disabled:opacity-50"
+                  className="group flex h-14 w-full items-center gap-4 px-5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted disabled:opacity-50"
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13.5px] font-medium">
@@ -170,9 +171,11 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
                     <span className="text-[12px] text-warning">{left} left</span>
                   ) : null}
                   {inCart ? (
-                    <span className="font-mono text-[12px] text-primary tabular">×{inCart}</span>
+                    <span key={inCart} className="animate-pop font-mono text-[12px] text-primary tabular">
+                      ×{inCart}
+                    </span>
                   ) : null}
-                  <span className="flex size-9 items-center justify-center rounded-md border">
+                  <span className="flex size-9 items-center justify-center rounded-md border transition-[transform,background-color] duration-150 ease-out group-hover:bg-muted group-active:scale-90">
                     <PlusIcon className="size-4" />
                   </span>
                 </button>
@@ -205,7 +208,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
               {cart.map((item) => {
                 const p = byId(item.productId);
                 return (
-                  <li key={item.productId} className="flex items-center gap-3 py-3">
+                  <li key={item.productId} className="enter-right flex items-center gap-3 py-3">
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-medium">
                         {p ? recordTitle(product, p) : "Removed"}
@@ -254,28 +257,20 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
         <div className="flex flex-col gap-4 border-t px-5 py-4">
           <div className="flex items-baseline justify-between">
             <span className="text-[13px] text-muted-foreground">Total</span>
-            <span className="font-mono text-[22px] font-semibold tabular">{formatMoney(total)}</span>
+            <AnimatedValue
+              value={formatMoney(total)}
+              className="font-mono text-[22px] font-semibold tabular"
+            />
           </div>
           <div className="flex flex-col gap-2">
-            <Label className="text-[12px] text-muted-foreground">Payment method</Label>
-            <ToggleGroup
-              value={[method]}
-              onValueChange={(v) => v[0] && setMethod(v[0])}
-              variant="outline"
-              spacing={0}
-              className="w-full"
-              aria-label="Payment method"
-            >
-              {(payment.options ?? []).map((o) => (
-                <ToggleGroupItem
-                  key={o.id}
-                  value={o.id}
-                  className="h-9 flex-1 data-pressed:bg-primary/15 data-pressed:text-foreground"
-                >
-                  {o.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+            <span className="text-[12px] text-muted-foreground">Payment method</span>
+            <SegmentedControl
+              label="Payment method"
+              variant="boxed"
+              value={method}
+              onValueChange={setMethod}
+              options={(payment.options ?? []).map((o) => ({ value: o.id, label: o.label }))}
+            />
           </div>
           {isCash ? (
             <div className="grid grid-cols-2 items-end gap-3">
@@ -311,11 +306,23 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
           ) : null}
           <Button
             size="lg"
-            className="h-11 text-[14px]"
-            disabled={cart.length === 0 || shortBy > 0}
+            disabled={cart.length === 0 || shortBy > 0 || !!justSold}
             onClick={() => complete("completed")}
+            className={cn("h-11 text-[14px]", justSold && "disabled:opacity-100")}
           >
-            Complete sale · {formatMoney(total)}
+            <span
+              key={justSold ?? "idle"}
+              className={cn("inline-flex items-center gap-1.5", justSold && "animate-swap")}
+            >
+              {justSold ? (
+                <>
+                  <CheckIcon data-icon="inline-start" />
+                  Sale {justSold} completed
+                </>
+              ) : (
+                <>Complete sale · {formatMoney(total)}</>
+              )}
+            </span>
           </Button>
           {orderStatus?.options?.some((o) => o.id === "held") ? (
             <Button variant="outline" disabled={cart.length === 0} onClick={() => complete("held")}>
@@ -327,7 +334,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
 
       {/* Phones: the order sits below the products, so keep the total one tap away. */}
       {cart.length ? (
-        <div className="sticky bottom-0 border-t bg-background/95 p-3 backdrop-blur-sm lg:hidden">
+        <div className="enter-bottom sticky bottom-0 border-t bg-background/95 p-3 backdrop-blur-sm lg:hidden">
           <Button
             size="lg"
             className="h-11 w-full text-[14px]"

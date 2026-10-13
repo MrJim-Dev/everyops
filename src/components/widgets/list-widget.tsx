@@ -7,11 +7,14 @@ import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
 import type { Widget } from "@/lib/blueprint/types";
 import { widgetRows } from "@/lib/engine/aggregate";
 import { sortRecords } from "@/lib/engine/query";
+import { useFreshStore } from "@/lib/motion/fresh";
+import { cn } from "@/lib/utils";
 import { WidgetFrame } from "./widget-frame";
 
 export function ListWidget({ widget, viewHref }: { widget: Widget; viewHref?: string }) {
   const { blueprint, records } = useWorkspace();
   const { openRecord } = useRecordPanels();
+  const fresh = useFreshStore((s) => s.ids);
   const entity = getEntity(blueprint, widget.entityId);
   const config = widget.list ?? { fieldIds: [], limit: 5 };
   const all = sortRecords(widgetRows(blueprint, widget, records), config.sort);
@@ -32,7 +35,10 @@ export function ListWidget({ widget, viewHref }: { widget: Widget; viewHref?: st
               <button
                 type="button"
                 onClick={() => openRecord(r.id)}
-                className="flex min-h-11 w-full items-center gap-3 px-5 py-1.5 text-left text-[13px] outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted"
+                className={cn(
+                  "flex min-h-11 w-full items-center gap-3 px-5 py-1.5 text-left text-[13px] outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted",
+                  fresh[r.id] && "animate-flash",
+                )}
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{recordTitle(entity, r)}</span>

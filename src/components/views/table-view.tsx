@@ -10,6 +10,7 @@ import { displayKind, isNumericKind } from "@/lib/blueprint/field-kind";
 import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
 import type { Sort, TableView as TableViewConfig } from "@/lib/blueprint/types";
 import { applyFilter, searchRecords, sortRecords } from "@/lib/engine/query";
+import { useFreshStore } from "@/lib/motion/fresh";
 import { cn } from "@/lib/utils";
 import { SearchInput } from "./search-input";
 import { ViewEmpty } from "./view-empty";
@@ -20,6 +21,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
   const { openRecord, openCreate } = useRecordPanels();
   const entity = getEntity(blueprint, view.entityId);
   const fields = view.fieldIds.map((id) => getField(entity, id));
+  const fresh = useFreshStore((s) => s.ids);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort[] | undefined>(view.sort);
 
@@ -105,7 +107,10 @@ export function TableView({ view }: { view: TableViewConfig }) {
                   tabIndex={0}
                   onClick={() => openRecord(row.id)}
                   onKeyDown={(e) => e.key === "Enter" && openRecord(row.id)}
-                  className="h-10 cursor-default outline-none focus-visible:bg-muted"
+                  className={cn(
+                    "h-10 cursor-default outline-none focus-visible:bg-muted",
+                    fresh[row.id] && "animate-flash",
+                  )}
                 >
                   {fields.map((field, i) => {
                     const numeric = isNumericKind(displayKind(blueprint, field));

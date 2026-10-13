@@ -1,9 +1,9 @@
 "use client";
 
 import { PlusIcon, SparkleIcon } from "@phosphor-icons/react";
-import Link from "next/link";
 import { useState } from "react";
 import { ChangeSheet } from "@/components/changes/change-sheet";
+import { ViewTabs } from "@/components/motion/view-tabs";
 import { useRecordPanels } from "@/components/records/record-panels";
 import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,6 @@ import { Dashboard } from "@/components/widgets/dashboard";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { getEntity, getSystem, getView } from "@/lib/blueprint/lookup";
 import type { View } from "@/lib/blueprint/types";
-import { cn } from "@/lib/utils";
 
 /** One system page: header, view tabs, and the active view or dashboard. */
 export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: string }) {
@@ -57,30 +56,16 @@ export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: s
         }
       />
       {views.length > 1 ? (
-        <nav aria-label={`${system.name} views`} className="flex shrink-0 gap-5 border-b px-5">
-          {views.map((view) => {
-            const selected = view.id === active?.id;
-            return (
-              <Link
-                key={view.id}
-                href={`${ws.basePath}/${system.id}/${view.id}`}
-                aria-current={selected ? "page" : undefined}
-                className={cn(
-                  "relative py-2.5 text-[13px] outline-none transition-colors focus-visible:text-foreground",
-                  selected ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {view.name}
-                {selected ? (
-                  <span
-                    aria-hidden="true"
-                    className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-primary"
-                  />
-                ) : null}
-              </Link>
-            );
-          })}
-        </nav>
+        <ViewTabs
+          groupId={`${ws.id}:${system.id}`}
+          label={`${system.name} views`}
+          activeId={active?.id}
+          items={views.map((view) => ({
+            id: view.id,
+            href: `${ws.basePath}/${system.id}/${view.id}`,
+            label: view.name,
+          }))}
+        />
       ) : (
         <div className="border-b" />
       )}

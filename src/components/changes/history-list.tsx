@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ViewEmpty } from "@/components/views/view-empty";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { formatDateTime } from "@/lib/format";
+import { markFresh } from "@/lib/motion/fresh";
 import { useWorkspaces } from "@/lib/store/workspaces";
 
 export function HistoryList() {
@@ -58,7 +59,14 @@ export function HistoryList() {
               </p>
             </div>
             {isCurrent ? (
-              <Button variant="outline" size="sm" onClick={() => undo(ws.id, entry.id)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  undo(ws.id, entry.id);
+                  markFresh([...new Set(entry.recordChanges.map((c) => c.recordId))]);
+                }}
+              >
                 <ArrowCounterClockwiseIcon data-icon="inline-start" />
                 Undo
               </Button>

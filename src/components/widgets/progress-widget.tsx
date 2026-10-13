@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedValue } from "@/components/motion/animated-value";
 import { Progress } from "@/components/ui/progress";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Widget } from "@/lib/blueprint/types";
@@ -20,7 +21,8 @@ export function ProgressWidget({ widget }: { widget: Widget }) {
       <div className="flex flex-col gap-3 px-5 pb-5">
         <div className="flex items-baseline justify-between gap-3">
           <span className="font-mono text-[15px] tabular">
-            {format(value)} <span className="text-muted-foreground">of {format(target)}</span>
+            <AnimatedValue value={format(value)} />{" "}
+            <span className="text-muted-foreground">of {format(target)}</span>
           </span>
           <span
             className={cn("text-[12.5px] tabular", percent > 100 ? "text-warning" : "text-muted-foreground")}

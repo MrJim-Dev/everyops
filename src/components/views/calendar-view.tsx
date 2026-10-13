@@ -7,6 +7,7 @@ import { getEntity, getField, optionOf, recordTitle } from "@/lib/blueprint/look
 import type { CalendarView as CalendarConfig, DataRecord, FieldValue } from "@/lib/blueprint/types";
 import { applyFilter } from "@/lib/engine/query";
 import { formatMonth, formatTime, isTimeRange } from "@/lib/format";
+import { useFreshStore } from "@/lib/motion/fresh";
 import { addDays, at, dateKey, daysBetween, startOfMonthKey, todayKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { DateStepper } from "./date-stepper";
@@ -47,6 +48,7 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
   const entity = getEntity(blueprint, view.entityId);
   const dateField = getField(entity, view.dateFieldId);
   const status = entity.fields.find((f) => f.type === "status");
+  const fresh = useFreshStore((s) => s.ids);
   const today = todayKey();
   const [month, setMonth] = useState(startOfMonthKey(today));
 
@@ -147,7 +149,10 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
                     key={r.id}
                     type="button"
                     onClick={() => openRecord(r.id)}
-                    className="flex min-w-0 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-[12px] outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50"
+                    className={cn(
+                      "flex min-w-0 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-[12px] outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50",
+                      fresh[r.id] && "animate-flash",
+                    )}
                   >
                     <span
                       aria-hidden="true"
