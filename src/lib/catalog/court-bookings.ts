@@ -225,7 +225,7 @@ export function courtBookingsBlueprint(workspaceName = "Court bookings"): Bluepr
       },
       {
         id: "unpaid_list",
-        title: "Needs payment",
+        title: "Upcoming unpaid",
         entityId: "booking",
         type: "list",
         filter: "status == 'unpaid' && is_upcoming(slot)",

@@ -103,7 +103,7 @@ export function HistoryRoute() {
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <PageHeader
         title="History"
-        description={`Every version of ${ws.name}. Undo the latest change at any time.`}
+        description={`Every change to ${ws.name}, newest first. Undo the latest one at any time.`}
         className="border-b pb-3"
       />
       <HistoryList />

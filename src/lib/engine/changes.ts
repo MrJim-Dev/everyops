@@ -1,4 +1,5 @@
 import { findEntity } from "@/lib/blueprint/lookup";
+import { walkPath } from "@/lib/blueprint/paths";
 import type {
   Block,
   BlockItem,
@@ -20,6 +21,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { computeAll } from "./compute";
 import { recordContext } from "./context";
 import { parseExpr, run, truthy } from "./expr";
+import { completeRule } from "./rule-repair";
 
 /**
  * The only edits a change plan may make to the design. Every one is reversible: a change saves a whole new
@@ -40,6 +42,7 @@ export type ChangeOp =
   | { op: "rename_workspace"; name: string }
   | { op: "add_entity"; entity: Entity }
   | { op: "add_system"; system: System }
+  /** Adds an automation, or replaces the one with the same id (how an automation is fixed or changed). */
   | { op: "add_rule"; rule: Rule }
   /** Moves a view (tab) to another page. A page left with nothing on it is removed. */
   | { op: "move_view"; viewId: string; systemId: string }
@@ -235,12 +238,10 @@ function freezeDependents(bp: Blueprint, entityId: string, fieldId: string) {
       if (!f.formula) continue;
       const parsed = parseExpr(f.formula.expr);
       if (!parsed.ok) continue;
-      const reads = parsed.refs.some((ref) => {
-        const [head, tail] = ref.split(".");
-        if (e.id === entityId && head === fieldId) return true;
-        const link = e.fields.find((x) => x.id === head);
-        return !!tail && tail === fieldId && link?.relation?.entityId === entityId;
-      });
+      // Directly, or anywhere along a path of links ("delivery.supplier.lead_days").
+      const reads = parsed.refs.some((ref) =>
+        walkPath(bp, e, ref.split(".")).steps.some((s) => s.entity.id === entityId && s.field.id === fieldId),
+      );
       if (!reads) continue;
       f.type = f.formula.resultType;
       delete f.formula;
@@ -377,9 +378,15 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "add_system":
         if (!next.systems.some((s) => s.id === op.system.id)) next.systems.push(op.system);
         break;
-      case "add_rule":
-        if (!next.rules.some((r) => r.id === op.rule.id)) next.rules.push(op.rule);
+      case "add_rule": {
+        // Blanks with one sensible answer (which stock field, which quantity) are filled in; anything else that
+        // can't run is reported by validation, so the plan is corrected before anyone sees it.
+        const rule = completeRule(next, structuredClone(op.rule));
+        const at = next.rules.findIndex((r) => r.id === rule.id);
+        if (at >= 0) next.rules[at] = rule;
+        else next.rules.push(rule);
         break;
+      }
       case "move_view": {
         const target = next.systems.find((s) => s.id === op.systemId);
         if (!target || !next.views.some((v) => v.id === op.viewId)) break;

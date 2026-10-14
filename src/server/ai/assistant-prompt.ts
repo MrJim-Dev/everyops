@@ -250,7 +250,7 @@ export const assistantAnswer = z.object({
   reply: z
     .string()
     .describe(
-      "What you say to the person. Plain text; short paragraphs or '- ' bullets; no headings or tables.",
+      "What you say to the person. Plain text; short paragraphs separated by a blank line, with '- ' bullets or '1. ' items each on their own line; no headings or tables.",
     ),
   suggestions: z.array(z.string()).describe("0 to 3 short follow-ups the person might send next"),
   sources: z
@@ -383,6 +383,28 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   relation field (add_field on the existing type, or a relation field in the new entity); add_system for a sidebar
   section, then add_view (a table, plus a kanban board if it has a status) and optionally add_widget in the existing
   overview section. Use add_rule for automations.
+- Work out what the person is after, not only the words. "Add stock management", "add payroll", "track
+  memberships" name a whole area: build what running it takes in THIS workspace, following "What this request
+  usually involves" when it's given. Reuse and connect what exists: in a workspace that sells (orders, order lines
+  or a register), stock means stock on the products or menu items it sells, so they get stock on hand and a reorder
+  level and sales take from it; never a second list of items. A separate inventory of ingredients or supplies
+  (with recipes) is only for when the person mentions ingredients, supplies or raw materials. Add the records that move things (stock deliveries, stock
+  movements with a type in / out / adjustment and a reason, stock counts) and the pages and forms people use daily.
+  Totals stay in sync everywhere they move: receiving adds stock, sales and spoilage take it off (the existing
+  order lines too), an approved leave takes days off the balance, a payment lowers what's owed. In the reply, say
+  in one or two plain sentences what you connected and assumed (e.g. "sales now take items off stock"), so they
+  can say no. Ask first only when the answer changes the build a lot and nothing in the workspace hints at it.
+- Syncing totals is automatic: when a record type links to a record with a running total (stock, on hand,
+  balance, credits, points) and has a quantity, days or amount, EveryOps adds the automation (deliveries add,
+  sales, usage and spoilage take off, movements follow their type, a done status such as received or approved
+  makes it count) and lists it on the card. Don't write add_rule for those; just give the records the link and
+  the amount. Write add_rule for anything else, or when the person asks to change how a total moves ("count packs:
+  quantity times the product's pack size"): trigger created on the record that happens, an adjust_number action
+  with target relation (the link, e.g. product), fieldId the total it changes (stock, never the quantity) and delta
+  the formula (quantity * product.pack_size, -qty). add_rule with an existing id replaces that automation. The app
+  keeps them in step with edits and deletes; never adjust_number on updated. set_field computes a value instead
+  (target self, value "quantity * product.cost"). Automations only act on records saved after they exist, so when
+  records they should have counted are already there, also update_record the totals and say so in the reply.
 - Pages: each sidebar page is a system; its views are the tabs on that page. A new page for something that already
   exists ("a separate page for courts", "give the calendar its own page") is add_system plus add_view (a new view
   of that record type) or move_view (move an existing tab there; the old page keeps its other tabs). Give every
@@ -529,7 +551,8 @@ Public pages and their requests:
 
 ${PUBLIC_PAGES_GUIDE}
 
-Formula language: field ids (rate), relation paths (client.name), numbers, 'strings', true, false, null,
+Formula language: field ids (rate), relation paths up to three links (client.name, delivery.supplier.lead_days),
+numbers, 'strings', true, false, null,
 + - * / % == != < <= > >= && || ! and cond ? a : b. Functions: ${Object.keys(FUNCTIONS).join(", ")}.
 Status/select values compare to option ids. New ids are snake_case and must not clash with existing ones.
 

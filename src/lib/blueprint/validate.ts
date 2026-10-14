@@ -1,7 +1,8 @@
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
 import { displayKind } from "./field-kind";
-import type { Block, Blueprint, Entity, Field, FormExtras } from "./types";
+import { walkPath } from "./paths";
+import type { Block, Blueprint, Entity, Field, FormExtras, Rule } from "./types";
 
 export type ValidationError = { path: string; message: string };
 
@@ -19,18 +20,8 @@ function checkExpr(bp: Blueprint, entity: Entity, src: string, path: string, err
     return;
   }
   for (const ref of parsed.refs) {
-    const [head, tail] = ref.split(".");
-    const field = entity.fields.find((f) => f.id === head);
-    if (!field) {
-      errors.push({ path, message: `"${head}" is not a field on ${entity.name}` });
-      continue;
-    }
-    if (tail) {
-      if (field.type === "time_range" && (tail === "start" || tail === "end")) continue;
-      const target = field.relation ? bp.entities.find((e) => e.id === field.relation?.entityId) : undefined;
-      if (!target?.fields.some((f) => f.id === tail))
-        errors.push({ path, message: `"${ref}" does not resolve through ${field.name}` });
-    }
+    const { error } = walkPath(bp, entity, ref.split("."));
+    if (error) errors.push({ path, message: error });
   }
 }
 
@@ -261,10 +252,80 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
   bp.rules.forEach((rule, ri) => {
     const entity = bp.entities.find((e) => e.id === rule.trigger.entityId);
     if (!entity) errors.push({ path: `rules.${ri}`, message: `${rule.name} uses a missing entity` });
-    else if (rule.when) checkExpr(bp, entity, rule.when, `rules.${ri}`, errors);
+    else {
+      if (rule.when) checkExpr(bp, entity, rule.when, `rules.${ri}`, errors);
+      checkRule(bp, entity, rule, `rules.${ri}`, errors);
+    }
   });
 
   return errors;
+}
+
+const NUMERIC = new Set(["number", "money", "percent"]);
+const list = (fields: Field[]) => fields.map((f) => f.id).join(", ") || "none";
+
+/**
+ * An automation must do something real: each change points at a link of the record that triggers it and a field
+ * of the record it changes, with a formula that reads real fields. Without this a rule with a blank field saved
+ * fine and quietly did nothing ("Add stock on delivery" that never added stock).
+ */
+function checkRule(bp: Blueprint, source: Entity, rule: Rule, path: string, errors: ValidationError[]) {
+  const say = (message: string) => errors.push({ path, message: `Automation "${rule.name}": ${message}` });
+  const t = rule.trigger;
+  if (t.event === "status_changed") {
+    const status = source.fields.find((f) => f.id === t.fieldId);
+    if (!status || (status.type !== "status" && status.type !== "select"))
+      say(`status_changed needs trigger.fieldId, a status field of ${source.name}`);
+    else if (t.to && !status.options?.some((o) => o.id === t.to))
+      say(
+        `${status.name} has no option "${t.to}" (options: ${(status.options ?? []).map((o) => o.id).join(", ")})`,
+      );
+  }
+  if (!rule.actions.length) say("it has no actions");
+  for (const action of rule.actions) {
+    if (action.type === "notify") {
+      if (!action.message.trim()) say("the notice has no message");
+      continue;
+    }
+    let target = source;
+    if (action.target.kind === "relation") {
+      const linkId = action.target.fieldId;
+      const link = source.fields.find((f) => f.id === linkId);
+      const linked = bp.entities.find((e) => e.id === link?.relation?.entityId);
+      if (!link || link.type !== "relation" || !linked) {
+        say(
+          `target.fieldId "${linkId}" isn't a link on ${source.name} (links: ${list(source.fields.filter((f) => f.type === "relation"))})`,
+        );
+        continue;
+      }
+      target = linked;
+    }
+    const field = target.fields.find((f) => f.id === action.fieldId);
+    if (!field) {
+      say(
+        `fieldId "${action.fieldId}" isn't a field of ${target.name}; say which one it changes (fields: ${list(target.fields)})`,
+      );
+      continue;
+    }
+    if (field.type === "formula" || field.type === "rollup") {
+      say(`${target.name}'s ${field.name} is calculated, so an automation can't change it`);
+      continue;
+    }
+    if (action.type === "set_field") {
+      checkExpr(bp, source, action.value, path, errors);
+      continue;
+    }
+    if (!NUMERIC.has(field.type))
+      say(`${target.name}'s ${field.name} isn't a number, so it can't be added to`);
+    const delta = action.delta.trim();
+    if (!delta || delta === "0")
+      say(`it adds nothing to ${field.name}; delta is a formula such as quantity or -qty`);
+    else checkExpr(bp, source, delta, path, errors);
+    if (t.event === "updated")
+      say(
+        `adding to ${field.name} on every edit counts it again each time. Trigger it when the record is created (later edits and deletes are kept in step) or when its status changes`,
+      );
+  }
 }
 
 /** Blocks on public pages: live data must point at real fields, and links at real forms. */

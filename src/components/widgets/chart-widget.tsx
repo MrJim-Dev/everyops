@@ -20,6 +20,7 @@ import type { Widget } from "@/lib/blueprint/types";
 import { chartData } from "@/lib/engine/aggregate";
 import { metricFormatter } from "@/lib/engine/metric-format";
 import { formatNumber, formatPercent } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { WidgetFrame } from "./widget-frame";
 
 const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -59,7 +60,7 @@ export function ChartWidget({ widget }: { widget: Widget }) {
           formatter={(v, name) => (
             <div className="flex w-full items-center justify-between gap-4">
               <span className="text-muted-foreground">{config[String(name)]?.label}</span>
-              <span className="font-mono tabular">{format(Number(v))}</span>
+              <span className="tabular-nums">{format(Number(v))}</span>
             </div>
           )}
         />
@@ -89,11 +90,16 @@ export function ChartWidget({ widget }: { widget: Widget }) {
       {tooltip}
     </>
   );
-  const height = horizontal ? Math.max(220, points.length * 30 + 40) : 220;
+  // Horizontal bars take the height their categories need; a time chart fills what the dashboard gives it.
+  const height = horizontal ? Math.max(220, points.length * 30 + 40) : undefined;
 
   return (
-    <WidgetFrame title={widget.title} aside={legend}>
-      <ChartContainer config={config} className="aspect-auto w-full px-3 pb-3" style={{ height }}>
+    <WidgetFrame title={widget.title} aside={legend} className={height ? undefined : "flex-1"}>
+      <ChartContainer
+        config={config}
+        className={cn("aspect-auto w-full px-3 pb-3", !height && "min-h-[220px] flex-1")}
+        style={height ? { height } : undefined}
+      >
         {kind === "bar" || byCategory ? (
           <BarChart
             data={points}
@@ -181,7 +187,7 @@ function DonutChart({
                     formatter={(v, name) => (
                       <div className="flex w-full items-center justify-between gap-4">
                         <span className="text-muted-foreground">{String(name)}</span>
-                        <span className="font-mono tabular">{format(Number(v))}</span>
+                        <span className="tabular-nums">{format(Number(v))}</span>
                       </div>
                     )}
                   />
@@ -212,8 +218,8 @@ function DonutChart({
                   style={{ background: color(i) }}
                 />
                 <span className="min-w-0 flex-1 truncate">{s.label}</span>
-                <span className="font-mono tabular text-[12.5px]">{format(s.value)}</span>
-                <span className="w-12 text-right font-mono tabular text-[12px] text-muted-foreground">
+                <span className="tabular-nums text-[12.5px]">{format(s.value)}</span>
+                <span className="w-12 text-right tabular-nums text-[12px] text-muted-foreground">
                   {formatPercent(Math.round((s.value / total) * 100))}
                 </span>
               </li>
