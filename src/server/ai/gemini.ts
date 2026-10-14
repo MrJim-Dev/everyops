@@ -50,6 +50,15 @@ type Input = {
   /** Leave unset: Gemini 3 models are tuned for the default temperature and can loop when it is lowered. */
   temperature?: number;
   timeoutMs?: number;
+  /**
+   * Cancels the call when no part of the answer has arrived for this long: Vertex now and then stalls a call midway,
+   * and a stalled call should be replaced in seconds while a slow one that keeps streaming is left to finish.
+   */
+  idleMs?: number;
+  /** The same, before the first part, which comes only after the model has thought (defaults to idleMs). */
+  firstPartMs?: number;
+  /** Called with each part that streams in (generateJsonHedged uses it to tell a stalled call from a slow one). */
+  onProgress?: () => void;
   /** Fixes known harmless slips in Gemini's JSON before it's checked against the schema. */
   repair?: (json: unknown) => unknown;
   /** Overrides the model's default reasoning depth. Leave unset for Gemini 3 models. */
@@ -179,8 +188,21 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
   const started = Date.now();
   // Our own controller stops a runaway; the caller's signal (a hedged twin answered) and the timeout stop it too.
   const stop = new AbortController();
-  const signals = [AbortSignal.timeout(input.timeoutMs ?? 20_000), stop.signal];
+  // A call with no new part for idleMs is stalled: this controller stops it.
+  const idle = new AbortController();
+  const signals = [AbortSignal.timeout(input.timeoutMs ?? 20_000), stop.signal, idle.signal];
   if (input.signal) signals.push(input.signal);
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let stalled = false;
+  const quietFor = (ms: number | undefined) => {
+    clearTimeout(idleTimer);
+    if (ms)
+      idleTimer = setTimeout(() => {
+        stalled = true;
+        idle.abort();
+      }, ms);
+  };
+  let firstMs: number | undefined;
   let runaway: string | null = null;
   let text = "";
   const contents: Content[] = [
@@ -192,6 +214,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
     const rounds = input.tools ? (input.tools.maxRounds ?? 3) + 1 : 1;
     for (let round = 0; round < rounds; round++) {
       const last = round === rounds - 1;
+      quietFor(input.firstPartMs ?? input.idleMs);
       const stream = await gemini().models.generateContentStream({
         model: GEMINI_MODEL,
         contents,
@@ -221,6 +244,9 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
         | undefined;
       text = "";
       for await (const chunk of stream) {
+        firstMs ??= Date.now() - started;
+        quietFor(input.idleMs);
+        input.onProgress?.();
         parts.push(...(chunk.candidates?.[0]?.content?.parts ?? []));
         const part = (chunk.candidates?.[0]?.content?.parts ?? [])
           .filter((p) => typeof p.text === "string" && !p.thought)
@@ -234,6 +260,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           break;
         }
       }
+      quietFor(undefined);
       usage.input += roundUsage?.promptTokenCount ?? 0;
       usage.output += roundUsage?.candidatesTokenCount ?? 0;
       usage.thinking += roundUsage?.thoughtsTokenCount ?? 0;
@@ -279,6 +306,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
         task: input.task,
         model: GEMINI_MODEL,
         ms,
+        ...(firstMs === undefined ? {} : { firstMs }),
         ...tokens,
         ...(input.tools ? { calls } : {}),
       }),
@@ -314,6 +342,19 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
     const message = error instanceof Error ? error.message : String(error);
     if (input.signal?.aborted) return { ok: false, error: "Cancelled.", retryable: false };
     if (runaway) return { ok: false, error: "Gemini got stuck repeating itself.", retryable: true };
+    if (stalled) {
+      console.warn(
+        JSON.stringify({
+          event: "gemini_stalled",
+          task: input.task,
+          model: GEMINI_MODEL,
+          ms: Date.now() - started,
+          firstMs,
+          chars: text.length,
+        }),
+      );
+      return { ok: false, error: "Gemini took too long to answer.", retryable: true };
+    }
     console.error(JSON.stringify({ event: "gemini_error", task: input.task, model: GEMINI_MODEL, message }));
     const timedOut = /abort|timeout/i.test(message);
     return {
@@ -321,6 +362,8 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       error: timedOut ? "Gemini took too long to answer." : "Gemini is unavailable right now.",
       retryable: timedOut,
     };
+  } finally {
+    clearTimeout(idleTimer);
   }
 }
 
@@ -340,13 +383,14 @@ function withoutNulls(value: unknown): unknown {
  * generateJson with hedging: Vertex now and then stalls a call outright, so if the first call hasn't answered after
  * `hedgeMs` an identical second one starts, and the first good answer wins (the other is cancelled). A call that
  * fails fast and can be retried starts the next attempt straight away. A stall then costs seconds, not a timeout.
+ * With afterSilence, hedgeMs counts from the last part that streamed in, so a long answer that keeps coming gets no twin.
  */
 export function generateJsonHedged<T>(
   schema: z.ZodType<T>,
   input: Input,
-  options: { hedgeMs: number; attempts?: number },
+  options: { hedgeMs: number; attempts?: number; afterSilence?: boolean },
 ): Promise<GenerateResult<T>> {
-  return hedged((signal) => generateJson(schema, { ...input, signal }), {
+  return hedged((signal, progress) => generateJson(schema, { ...input, signal, onProgress: progress }), {
     ...options,
     onHedge: (attempt) => console.info(JSON.stringify({ event: "gemini_hedge", task: input.task, attempt })),
   });
@@ -354,14 +398,18 @@ export function generateJsonHedged<T>(
 
 type Outcome = { ok: true } | { ok: false; retryable: boolean };
 
-/** Runs `run` and, while no good answer is in, a fresh copy every `hedgeMs` (or at once after a retryable failure). */
+/**
+ * Runs `run` and, while no good answer is in, a fresh copy every `hedgeMs` (or at once after a retryable failure).
+ * With afterSilence, a call's hedgeMs starts over each time it reports progress, and each call starts at most one twin.
+ */
 export function hedged<R extends Outcome>(
-  run: (signal: AbortSignal) => Promise<R>,
+  run: (signal: AbortSignal, progress: () => void) => Promise<R>,
   {
     hedgeMs,
     attempts = 3,
+    afterSilence = false,
     onHedge,
-  }: { hedgeMs: number; attempts?: number; onHedge?: (attempt: number) => void },
+  }: { hedgeMs: number; attempts?: number; afterSilence?: boolean; onHedge?: (attempt: number) => void },
 ): Promise<R> {
   return new Promise((resolve) => {
     let started = 0;
@@ -380,12 +428,22 @@ export function hedged<R extends Outcome>(
       running++;
       const controller = new AbortController();
       controllers.push(controller);
-      const hedge = setTimeout(() => {
-        if (done || started >= attempts) return;
-        onHedge?.(started + 1);
-        launch();
-      }, hedgeMs);
-      void run(controller.signal).then((result) => {
+      let fired = false;
+      let hedge: ReturnType<typeof setTimeout> | undefined;
+      const wait = () => {
+        clearTimeout(hedge);
+        hedge = setTimeout(() => {
+          fired = true;
+          if (done || started >= attempts) return;
+          onHedge?.(started + 1);
+          launch();
+        }, hedgeMs);
+      };
+      wait();
+      const progress = () => {
+        if (afterSilence && !fired && !done) wait();
+      };
+      void run(controller.signal, progress).then((result) => {
         running--;
         clearTimeout(hedge);
         if (done) return;
