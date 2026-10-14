@@ -125,7 +125,7 @@ Gemini runs only on the server, through Vertex AI in `asia-southeast1`, signed i
 | `src/app/api/ai/interview`, `src/app/api/ai/design` | The setup endpoints used by `src/components/setup/setup-interview.tsx` |
 | `src/server/ai/assistant*.ts` | The workspace assistant: answers questions from the workspace's own data, asks one short question when a request is unclear, or returns a change plan (design ops plus record creates and updates), validated and rehearsed on a copy, with one repair attempt |
 | `src/app/api/ai/assistant/route.ts` | `POST` endpoint: loads the workspace from the database with the caller's role. Owners and admins can change the design, staff can add and update records, viewers can only ask |
-| `src/components/assistant/assistant-panel.tsx`, `src/lib/assistant/panel-store.ts` | The collapsible side panel (⌘J, the sidebar's Assistant entry, or Ask AI on any system page; a sheet on phones). Plans show as cards with Apply, Not now and Undo, and land in History |
+| `src/components/assistant/assistant-panel.tsx`, `src/lib/assistant/panel-store.ts` | Ask EveryOps as a side panel (⌘J, the sidebar's Ask EveryOps entry, or Ask EveryOps on any system page; a sheet on phones). Owners and admins can expand it to the full Ask EveryOps page, the same conversation, and go back with Side panel. Plans show as cards with Apply, Not now and Undo, and land in History |
 
 The model is `gemini-3.5-flash` (`GEMINI_MODEL`). Conversation turns take 3–10 seconds and a design about 20. Leave temperature at its default and only lower thinking for the designer and the assistant: lowering them elsewhere made Gemini 3 models loop, and the `global` endpoint stalled often, which is why the regional endpoint is used.
 

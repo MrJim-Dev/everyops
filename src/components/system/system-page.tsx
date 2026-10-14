@@ -44,7 +44,7 @@ export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: s
             {ws.mode === "live" && !assistantOpen ? (
               <Button variant="ghost" size="sm" onClick={() => openAssistant(true)}>
                 <SparkleIcon data-icon="inline-start" />
-                Ask AI
+                Ask EveryOps
               </Button>
             ) : null}
             {active && entity && CREATABLE.includes(active.type) && canEdit(ws.role) ? (
