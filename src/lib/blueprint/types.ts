@@ -122,6 +122,11 @@ export type CheckoutView = ViewBase & {
   productEntityId: string;
   lineEntityId: string;
   paymentFieldId: string;
+  /**
+   * Optional order fields the Register also asks (a note, a table). Required order fields a sale can't fill by
+   * itself, such as a branch, are always asked, listed here or not.
+   */
+  fieldIds?: string[];
 };
 export type ApprovalQueueView = ViewBase & {
   type: "approval_queue";

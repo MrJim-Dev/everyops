@@ -195,14 +195,14 @@ export const designOp = z.union([
   }),
   z.object({
     op: z.literal("update_view"),
-    viewId: z.string().describe("A table, kanban, approval_queue, form or landing view"),
+    viewId: z.string().describe("A table, kanban, approval_queue, checkout, form or landing view"),
     public: z.boolean().optional().describe("Make it a public page anyone with the link can use"),
     intro: z.string().optional(),
     fieldIds: z
       .array(z.string())
       .optional()
       .describe(
-        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, or form questions. Forms: '# Step title' before each step's fields makes it a multi-step form, and '@block_id' in a step shows one of the form's blocks there instead of below the form (e.g. ['# Payment', '@how_to_pay', 'method', 'reference']). Start from the form's current fields listed with its tab and keep everything you weren't asked to change",
+        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, optional order fields a checkout register asks, or form questions. Forms: '# Step title' before each step's fields makes it a multi-step form, and '@block_id' in a step shows one of the form's blocks there instead of below the form (e.g. ['# Payment', '@how_to_pay', 'method', 'reference']). Start from the form's current fields listed with its tab and keep everything you weren't asked to change",
       ),
   }),
   z.object({
@@ -374,6 +374,10 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   column the person didn't ask to remove. "Move Amount before Status", "put Court first", "order the columns
   Player, Court, Slot" are all one update_view. "This table" means the current tab. Use the step detail to show
   the new order, e.g. "Player, Court, Slot, Status". Hiding a column keeps its data.
+- Register (checkout view): it asks the cashier for every required order field it can't fill itself (a branch,
+  a table) and lists them with its tab ("the register asks: …"). To put a field on the Register, make it a
+  required field of the order (update_field required true, or add_field), or list an optional one with
+  update_view fieldIds on the checkout view. Only describe inputs that the tab's list shows.
 - New areas ("I also want to manage my clients"): add_entity with its fields; link it to existing record types with a
   relation field (add_field on the existing type, or a relation field in the new entity); add_system for a sidebar
   section, then add_view (a table, plus a kanban board if it has a status) and optionally add_widget in the existing

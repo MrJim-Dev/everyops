@@ -188,6 +188,12 @@ export const view = z.union([
     productEntityId: z.string().describe("Products; the view's entity is the order"),
     lineEntityId: z.string().describe("Order line items"),
     paymentFieldId: z.string().describe("Payment method field on the order"),
+    fieldIds: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Optional order fields the cashier also fills (table, note). Required order fields such as a branch are always asked",
+      ),
   }),
   z.object({
     ...viewBase,
@@ -540,6 +546,9 @@ Rules for a valid blueprint:
 - "A calendar page" means a page with a calendar view (people switch it between month, week and day); a booking
   schedule (slot_grid) is the day-by-court grid. Booking businesses usually want both.
 - checkout needs product, order and line-item types (line items have parent set to the order). Only for selling.
+  The Register fills the order's code, date, status, totals, cash, change, cashier and customer itself, and asks
+  the cashier for every other required order field (a branch, a table), so a multi-branch store makes branch a
+  required relation on the order and it shows up on the Register.
 - form views are a page that is just the form to add one record type (fieldIds, intro). notes views
   are a notebook over a record type with a text title and a long_text body (titleFieldId, bodyFieldId).
   document views are one free markdown page with entityId "" and a starter outline. canvas views are a free
