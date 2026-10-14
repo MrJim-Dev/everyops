@@ -31,6 +31,7 @@ import { attachmentParts } from "./attachments";
 import { DESIGN_SYSTEM, type Design, designRequest } from "./design-prompt";
 import { generateJsonHedged } from "./gemini";
 import { referencesText, setupReferences } from "./references";
+import { fillEmptySamples } from "./samples";
 
 const SLOT_MINUTES = [15, 30, 60, 90, 120] as const;
 const pick = <T extends object>(source: T, keys: (keyof T)[]) =>
@@ -758,11 +759,17 @@ export function toFieldValue(
 }
 
 /** Converts sample values (strings) into typed record data, dropping anything that doesn't fit. */
-function toRecords(bp: Blueprint, samples: Design["samples"], now: Date): DataRecord[] {
+export function toRecords(bp: Blueprint, samples: Design["samples"], now: Date): DataRecord[] {
   const stamp = now.toISOString();
   const ids = new Map<string, string>();
   for (const [i, s] of samples.entries()) ids.set(s.ref, `${s.entityId}_${i + 1}`);
-  return samples.flatMap((s, i) => {
+  const primaryOf = (entityId: string) => bp.entities.find((e) => e.id === entityId)?.primaryFieldId;
+  const titles = new Map(
+    samples.map((s) => [s.ref, s.values.find((v) => v.fieldId === primaryOf(s.entityId))?.value]),
+  );
+  const counts = new Map<string, number>();
+  const dropped: Record<string, number> = {};
+  const records = samples.flatMap((s, i) => {
     const entity = bp.entities.find((e) => e.id === s.entityId);
     if (!entity) return [];
     const data: Record<string, FieldValue> = {};
@@ -772,9 +779,27 @@ function toRecords(bp: Blueprint, samples: Design["samples"], now: Date): DataRe
       const converted = toFieldValue(field, value, (v) => ids.get(v));
       if (converted !== undefined) data[field.id] = converted;
     }
-    if (!data[entity.primaryFieldId]) return [];
+    const n = (counts.get(entity.id) ?? 0) + 1;
+    counts.set(entity.id, n);
+    // A line item's own name is often a Title field Gemini leaves empty (it fills the order, the product and the
+    // quantity). It takes the name of what it links to, e.g. the product, else "Order line 2", instead of being dropped.
+    const primary = entity.fields.find((f) => f.id === entity.primaryFieldId);
+    if (!data[entity.primaryFieldId] && primary?.type === "text" && Object.keys(data).length) {
+      const linked = entity.fields
+        .filter((f) => f.type === "relation" && f.id !== entity.parent?.fieldId)
+        .map((f) => s.values.find((v) => v.fieldId === f.id)?.value)
+        .map((ref) => (ref ? titles.get(ref) : undefined))
+        .find((t) => !!t);
+      data[primary.id] = linked ?? `${entity.name} ${n}`;
+    }
+    if (!data[entity.primaryFieldId]) {
+      dropped[entity.id] = (dropped[entity.id] ?? 0) + 1;
+      return [];
+    }
     return [{ id: `${s.entityId}_${i + 1}`, entityId: entity.id, data, createdAt: stamp, updatedAt: stamp }];
   });
+  if (Object.keys(dropped).length) console.warn(JSON.stringify({ event: "design_samples_dropped", dropped }));
+  return records;
 }
 
 const EXAMPLES = (() => {
@@ -872,8 +897,10 @@ export async function designWorkspace(
     }
     const { data, samples, name, bp, partial, errors } = built;
     if (!errors.length) {
+      // Record types the design left without samples (line items, most often) get theirs from one small call.
+      const filled = await fillEmptySamples(bp, samples, now);
       // Samples in the wrong year (the right month and day, but 2023) move to this year.
-      const dated = samplesThisYear(bp, toRecords(bp, samples, now), now);
+      const dated = samplesThisYear(bp, toRecords(bp, filled, now), now);
       if (dated.fields) console.info(JSON.stringify({ event: "design_samples_moved", fields: dated.fields }));
       const records = computeAll(bp, dated.records, now);
       return {

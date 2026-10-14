@@ -435,7 +435,7 @@ export const design = z.object({
       }),
     )
     .describe(
-      "3 to 5 realistic sample records for each main record type (up to 24 in total). Never give values for formula or rollup fields.",
+      "2 to 3 realistic sample records for every record type, including line items (2 to 3 lines under a parent sample, so its totals aren't zero) and day-to-day records like attendance, orders or payslips; up to 36 in total. Never give values for formula or rollup fields.",
     ),
 });
 export type Design = z.infer<typeof design>;
