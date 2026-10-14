@@ -4,6 +4,7 @@ import type { ChatTurn } from "@/lib/store/workspace-model";
 import { promptWithFiles } from "./attachments";
 import { generateJson } from "./gemini";
 import { INTERVIEW_SYSTEM, type Turn, turn } from "./interview-prompt";
+import { referencesText, setupReferences } from "./references";
 
 export type InterviewResult = { ok: true; turn: Turn } | { ok: false; message: string };
 
@@ -18,9 +19,15 @@ export async function interviewTurn(
       return `${m.role === "user" ? "Owner" : "You"}: ${m.text || "(sent files)"}${files}`;
     })
     .join("\n\n");
+  // What businesses like this one need and how similar community systems are built, matched on what the owner said.
+  const said = messages
+    .filter((m) => m.role === "user")
+    .map((m) => m.text)
+    .join("\n");
+  const references = referencesText(await setupReferences(said));
   const prompt = await promptWithFiles(
     userId,
-    `Conversation so far:\n\n${transcript}`,
+    `${references}\n\nConversation so far:\n\n${transcript}`,
     attachmentsIn(messages),
     "Write your next turn.",
   );
@@ -29,6 +36,10 @@ export async function interviewTurn(
       system: INTERVIEW_SYSTEM,
       prompt,
       task: "interview",
+      // A full brief for a business with public pages, add-ons and payments runs 3–6k characters and takes 10–20 s;
+      // a real runaway is still caught early (filler without spaces, endless numbers) or past 9k characters.
+      timeoutMs: 40_000,
+      maxStringChars: 9000,
     });
     if (result.ok) {
       const t = result.data;
@@ -42,6 +53,7 @@ export async function interviewTurn(
           ...t,
           suggestions: t.action === "ask" ? t.suggestions.slice(0, 4) : [],
           profile: t.profile.slice(0, 12),
+          plan: t.plan.slice(0, 8),
         },
       };
     }

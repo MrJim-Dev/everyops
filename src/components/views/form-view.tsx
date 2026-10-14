@@ -93,8 +93,12 @@ export function FormView({ view }: { view: FormViewConfig }) {
             [view.extras.itemFieldId]: item.id,
           };
           if (view.extras.quantityFieldId) data[view.extras.quantityFieldId] = extras[item.id];
-          for (const f of line.fields)
-            if (f.required && f.type === "number" && data[f.id] === undefined) data[f.id] = 1;
+          // Other counts start at 1, and the line's own name (a Title field) is the item's.
+          for (const f of line.fields) {
+            if (data[f.id] !== undefined) continue;
+            if (f.required && f.type === "number") data[f.id] = 1;
+            if ((f.required || f.id === line.primaryFieldId) && f.type === "text") data[f.id] = item.title;
+          }
           actions.create(line.id, data);
         }
       setCreatedId(result.record.id);

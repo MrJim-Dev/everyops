@@ -8,6 +8,7 @@ import type {
   Entity,
   Field,
   FieldValue,
+  FormStep,
   IconName,
   NotesView,
   Rule,
@@ -23,6 +24,7 @@ import { hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
 import { DESIGN_SYSTEM, type Design, designRequest } from "./design-prompt";
 import { generateJsonHedged } from "./gemini";
+import { referencesText, setupReferences } from "./references";
 
 const SLOT_MINUTES = [15, 30, 60, 90, 120] as const;
 const pick = <T extends object>(source: T, keys: (keyof T)[]) =>
@@ -91,6 +93,7 @@ export function toView(v: Design["views"][number]): View {
         ...(v.blocks?.length ? { blocks: v.blocks as Block[] } : {}),
         ...(v.steps?.length ? { steps: v.steps } : {}),
         ...(v.steps?.length && v.review ? { review: true } : {}),
+        ...(v.extras ? { extras: { ...v.extras } } : {}),
       };
     case "notes":
       return {
@@ -290,15 +293,20 @@ export function tidy(bp: Blueprint): Blueprint {
     if (v.type === "form") {
       v.fieldIds = v.fieldIds.filter((id) => has.has(id));
       if (v.blocks) v.blocks = tidyBlocks(v.blocks, resolve, fieldsOf, formIds);
+      tidyFormExtras(bp, v, resolve);
+      if (v.public) tidyPublicForm(bp, v);
       if (v.steps) {
-        // Each field in one step, only real fields, and no empty steps.
+        // Each field in one step, only real fields (tidyPublicForm may have added guest details), and no empty
+        // steps except the one holding the add-ons.
+        const real = fieldsOf(v.entityId);
         const seen = new Set<string>();
         v.steps = v.steps
           .map((s) => ({
             ...s,
-            fieldIds: s.fieldIds.filter((id) => has.has(id) && !seen.has(id) && seen.add(id)),
+            fieldIds: s.fieldIds.filter((id) => real.has(id) && !seen.has(id) && seen.add(id)),
           }))
-          .filter((s) => s.fieldIds.length);
+          .map(({ extras, ...s }): FormStep => (extras && v.extras ? { ...s, extras } : s))
+          .filter((s) => s.fieldIds.length || s.extras);
         if (v.steps.length < 2) {
           delete v.steps;
           delete v.review;
@@ -409,11 +417,17 @@ export function tidy(bp: Blueprint): Blueprint {
 }
 
 /** Problems the generic validator doesn't catch but would break a screen. */
-function extraChecks(bp: Blueprint): string[] {
+function extraChecks(bp: Blueprint, brief: string): string[] {
   const errors: string[] = [];
   const entityIds = new Set(bp.entities.map((e) => e.id));
   const viewIds = new Set(bp.views.map((v) => v.id));
   if (!bp.systems.length) errors.push("The workspace has no systems.");
+  // The brief is the plan the owner agreed to; a public booking page it lists can't be left out.
+  if (
+    /public (booking|order|request|inquiry|reservation|form)|booking page|book online/i.test(brief) &&
+    !bp.views.some((v) => v.type === "form" && v.public)
+  )
+    errors.push("The brief asks for a public page customers use, but no form view has public true.");
   for (const e of bp.entities) {
     const primary = e.fields.find((f) => f.id === e.primaryFieldId);
     if (primary && (primary.type === "formula" || primary.type === "rollup"))
@@ -543,7 +557,11 @@ export async function designWorkspace(
   files?: { userId: string; attachments: AttachmentRef[] },
 ): Promise<DesignResult> {
   const now = new Date();
-  const context = `Examples:\n${EXAMPLES}\n\nToday in Manila: ${todayKey(now)}\nWorkspace name: ${workspaceName || "choose one"}\n\nBrief:\n${brief}`;
+  // What businesses like this one need and how similar community systems are built; the designer fills gaps from it.
+  const references = referencesText(
+    await setupReferences(brief).catch(() => ({ playbooks: [], systems: [] })),
+  );
+  const context = `Examples:\n${EXAMPLES}\n\nToday in Manila: ${todayKey(now)}\nWorkspace name: ${workspaceName || "choose one"}\n\nBrief:\n${brief}\n\nReferences:\n${references}`;
   // The owner's files go with the first request; a repair works from the previous design, which already used them.
   const fileParts = files ? await attachmentParts(files.userId, files.attachments) : [];
   let prompt: string | Part[] = fileParts.length
@@ -574,7 +592,10 @@ export async function designWorkspace(
     const raw = toBlueprint(result.data);
     const samples = mergeDateAndSlot(raw, result.data.samples);
     const bp = ensurePages(repairStructure(tidy(raw)));
-    const errors = [...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`), ...extraChecks(bp)];
+    const errors = [
+      ...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`),
+      ...extraChecks(bp, brief),
+    ];
     if (!errors.length) {
       const records = computeAll(bp, toRecords(bp, samples, now), now);
       return {
@@ -592,6 +613,166 @@ export async function designWorkspace(
     ok: false,
     message: "I couldn't design a valid workspace for that yet. Add a detail or two and try again.",
   };
+}
+
+/**
+ * A public form is used by strangers, so it must say who they are, can't demand what they can't know, and should
+ * show how to pay. Gemini forgets each of these now and then: a booking page without a name or phone, a required
+ * "Booked via" dropdown, a GCash QR code the brief asked for but the page doesn't show.
+ */
+function tidyPublicForm(bp: Blueprint, v: Extract<View, { type: "form" }>) {
+  const entity = bp.entities.find((e) => e.id === v.entityId);
+  if (!entity) return;
+  const field = (id: string) => entity.fields.find((f) => f.id === id);
+  // Who is booking (a name) and how to reach them (a phone or email), asked as plain text.
+  const asked = (pattern: RegExp) =>
+    v.fieldIds.filter((id) => {
+      const f = field(id);
+      return f?.type === "text" && pattern.test(f.id);
+    });
+  const names = asked(/name|guest|customer|client|player/);
+  const reach = asked(/phone|mobile|cell|email|contact/);
+  const added = [
+    ...(names.length ? [] : [{ id: "guest_name", name: "Your name", type: "text" as const, required: true }]),
+    ...(reach.length
+      ? []
+      : [{ id: "guest_phone", name: "Mobile number", type: "text" as const, required: true }]),
+  ];
+  if (added.length) {
+    const ids = added.map((f) => f.id);
+    for (const f of added) if (!field(f.id)) entity.fields.push(f);
+    v.fieldIds.push(...ids);
+    if (v.steps?.length) {
+      // Next to the details already asked, else in a details step before the last one.
+      const known = [...names, ...reach];
+      const last = v.steps[v.steps.length - 1];
+      const home =
+        v.steps.find((s) => s.fieldIds.some((id) => known.includes(id))) ??
+        (/detail|contact|info|you/i.test(last.title) ? last : undefined);
+      if (home) home.fieldIds.push(...ids);
+      else
+        v.steps.splice(v.steps.length - 1, 0, { id: "your_details", title: "Your details", fieldIds: ids });
+    }
+  }
+  if (!names.length) {
+    // Staff see who booked on the page in the list as well.
+    const table = bp.views.find((x) => x.type === "table" && x.entityId === entity.id);
+    if (table?.type === "table" && !table.fieldIds.includes("guest_name"))
+      table.fieldIds.unshift("guest_name");
+  }
+  // Required fields the page doesn't ask for are added to it; a choice the business makes (Booked via) or a link
+  // to a private list (players) can't be answered by a visitor, so it stops being required.
+  const booking = entity.booking;
+  for (const f of entity.fields)
+    if (
+      f.required &&
+      !v.fieldIds.includes(f.id) &&
+      (f.type === "select" || f.type === "multi_select" || f.type === "relation") &&
+      f.id !== booking?.resourceFieldId
+    )
+      f.required = false;
+  // The ways to pay, shown on the form when the workspace keeps them.
+  const pay = bp.entities.find(
+    (e) =>
+      e.id !== entity.id &&
+      !e.parent &&
+      !e.resource &&
+      /payment|pay_/.test(e.id) &&
+      e.fields.some((f) => f.type === "image" || /account|qr|instruction/.test(f.id)),
+  );
+  if (pay && !v.blocks?.some((b) => b.type === "records" && b.entityId === pay.id)) {
+    const shown = [
+      pay.primaryFieldId,
+      ...pay.fields
+        .filter(
+          (f) =>
+            f.id !== pay.primaryFieldId && /type|method|provider|account|number|instruction|qr/.test(f.id),
+        )
+        .map((f) => f.id),
+    ].slice(0, 7);
+    const active = pay.fields.find((f) => /active|enabled|status/.test(f.id));
+    const filter =
+      active?.type === "checkbox"
+        ? `${active.id} == true`
+        : active?.type === "status" && active.options?.some((o) => o.id === "active")
+          ? `${active.id} == 'active'`
+          : undefined;
+    v.blocks = [
+      ...(v.blocks ?? []),
+      {
+        id: "how_to_pay",
+        type: "records",
+        title: "How to pay",
+        entityId: pay.id,
+        fieldIds: shown,
+        layout: "cards",
+        ...(filter ? { filter } : {}),
+      },
+    ];
+  }
+}
+
+/**
+ * A form's add-ons point at a line-item record type under the form's record type and its link to the items offered.
+ * Near misses are mended (a loose id, a missing parent, the wrong link or quantity field); anything else is dropped,
+ * since the form works without add-ons.
+ */
+function tidyFormExtras(
+  bp: Blueprint,
+  v: Extract<View, { type: "form" }>,
+  resolve: (id: string) => string | undefined,
+) {
+  // Gemini often plans an add-ons step without saying where the add-ons live; a form with that step, or a public
+  // form whose record type has add-on line items (add-ons, rentals, products), gets them anyway.
+  const wantsExtras = v.steps?.some((s) => s.extras);
+  if (!v.extras && (v.public || wantsExtras)) {
+    const line = bp.entities.find(
+      (e) =>
+        (e.parent
+          ? e.parent.entityId === v.entityId
+          : e.fields.some((f) => f.type === "relation" && f.relation?.entityId === v.entityId)) &&
+        e.fields.some((f) => f.type === "relation" && f.relation?.entityId !== v.entityId),
+    );
+    const item = line?.fields.find((f) => f.type === "relation" && f.relation?.entityId !== v.entityId);
+    const items = bp.entities.find((e) => e.id === item?.relation?.entityId);
+    const addOnLike = /add|extra|rental|equipment|gear|product|merch|upsell|inclusion/;
+    if (line && item && items && !items.resource && (wantsExtras || addOnLike.test(items.id))) {
+      const active = items.fields.find((f) => /active|available|in_stock/.test(f.id));
+      const filter =
+        active?.type === "checkbox"
+          ? `${active.id} == true`
+          : active?.type === "status" && active.options?.some((o) => o.id === "active")
+            ? `${active.id} == 'active'`
+            : undefined;
+      v.extras = { lineEntityId: line.id, itemFieldId: item.id, ...(filter ? { filter } : {}) };
+    }
+  }
+  const extras = v.extras;
+  if (!extras) return;
+  const line = bp.entities.find((e) => e.id === (resolve(extras.lineEntityId) ?? extras.lineEntityId));
+  const toParent = line?.fields.find((f) => f.type === "relation" && f.relation?.entityId === v.entityId);
+  if (line && !line.parent && toParent) line.parent = { entityId: v.entityId, fieldId: toParent.id };
+  const links =
+    line?.fields.filter((f) => f.type === "relation" && f.relation?.entityId !== v.entityId) ?? [];
+  const item = links.find((f) => f.id === extras.itemFieldId) ?? (links.length === 1 ? links[0] : undefined);
+  const items = bp.entities.find((e) => e.id === item?.relation?.entityId);
+  if (!line || line.parent?.entityId !== v.entityId || !item || !items) {
+    delete v.extras;
+    return;
+  }
+  extras.lineEntityId = line.id;
+  extras.itemFieldId = item.id;
+  const numbers = line.fields.filter((f) => f.type === "number");
+  const qty =
+    numbers.find((f) => f.id === extras.quantityFieldId) ??
+    numbers.find((f) => /qty|quantity|count|pcs/.test(f.id));
+  if (qty) extras.quantityFieldId = qty.id;
+  else delete extras.quantityFieldId;
+  // A filter may only name the items' own fields (active == true); one that names anything else is dropped.
+  const known = new Set(items.fields.map((f) => f.id));
+  const words = (extras.filter ?? "").replace(/'[^']*'/g, "").match(/[a-z_][a-z0-9_.]*\s*\(?/gi) ?? [];
+  const plain = words.filter((w) => !w.endsWith("(")).map((w) => w.trim());
+  if (plain.some((w) => !known.has(w) && !["true", "false", "null"].includes(w))) delete extras.filter;
 }
 
 /** Approval buttons say what they do: a status called "Confirmed" gets a "Confirm" button. */

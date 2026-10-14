@@ -203,6 +203,7 @@ export const view = z.union([
           title: z.string().describe("Short, e.g. Court and time, Your details"),
           description: z.string().optional(),
           fieldIds: z.array(z.string()).describe("This step's fields; each field in one step"),
+          extras: z.boolean().optional().describe("This step shows the add-ons picker; it may ask no fields"),
         }),
       )
       .optional()
@@ -212,6 +213,17 @@ export const view = z.union([
     submitLabel: z.string().optional().describe("e.g. Book court"),
     public: z.boolean().optional().describe("Anyone with the link can submit it (a public booking page)"),
     blocks: z.array(block).optional().describe("Shown with the form, e.g. active payment methods, FAQs"),
+    extras: z
+      .object({
+        lineEntityId: z
+          .string()
+          .describe("Line items whose parent is this form's record type, e.g. booking_addon"),
+        itemFieldId: z.string().describe("Their relation to the item picked, e.g. add_on"),
+        quantityFieldId: z.string().optional().describe("Their number field for how many"),
+        filter: z.string().optional().describe("Which items are offered, e.g. active == true"),
+      })
+      .optional()
+      .describe("Add-ons people pick with a quantity (paddle rental, balls); each becomes a line item"),
   }),
   z.object({
     ...viewBase,
@@ -496,8 +508,9 @@ Rules for a valid blueprint:
   with times of day (bookings, sales, orders) get a heatmap of busy hours.
 - Tables of money (bookings, orders, expenses) set totals true; a list that people sort into states (payment,
   approval, stage) can set groupByFieldId to that field.
-- Forms that ask more than 5 fields, and every public booking form, use steps (e.g. Court and time, Your details,
-  Payment) with review true. Each field goes in exactly one step.
+- Forms that ask more than 5 fields, every public booking form and every form with add-ons use steps (e.g. Court
+  and time, Add-ons with extras true and no fields, Your details, Payment) with review true. Each field goes in
+  exactly one step.
 - Systems are the sidebar pages. Put an Overview system first with 3 to 6 widgets, then one page per area the
   owner manages day to day, usually 3 to 6 pages: each main record type (bookings, courts, players, clients,
   products, tasks…) gets its own page with its own views, e.g. "Bookings" (schedule and list), "Courts" (all
@@ -513,6 +526,15 @@ Rules for a valid blueprint:
   come from the add-on records, and the total adds them up. Public visitors never see or enter prices. Overview stats for a booking business: booked value (sum of amount, not cancelled),
   bookings (count), average booking value (avg of amount), paid (sum of amount where paid), outstanding (sum where
   unpaid); charts of booking value and booking volume over time.
+- Add-ons and things sold with a booking or order (paddle rental, balls, towels, extra hour): an add-ons record type
+  (name, price, unit such as per hour or per piece, active checkbox) and booking add-ons line items with parent the
+  booking: a relation to the booking, a relation to the add-on, qty (number, required) and line_total (money
+  formula add_on.price * qty). The booking gets add_ons_total (rollup sum of line_total) and its total adds it. The
+  public form sets extras (lineEntityId booking_addon, itemFieldId add_on, quantityFieldId qty, filter
+  "active == true") so visitors pick add-ons with quantities.
+- Think ahead like a consultant who has set up many businesses like this one: build what they will need on day one
+  even when the brief doesn't spell it out (a public booking page, payment methods, add-ons, a customer list,
+  reports), guided by the references that follow the brief. Never build more than the business can use.
 
 ${PUBLIC_PAGES_GUIDE}
 

@@ -39,7 +39,13 @@ export type SetupDraft = {
   preview: { label: string; detail: string }[];
 };
 /** Where the setup conversation is, so a refresh or another device picks it up. */
-export type SetupProgress = { messages: ChatTurn[]; profile: ProfileLine[]; draft?: SetupDraft };
+export type SetupProgress = {
+  messages: ChatTurn[];
+  profile: ProfileLine[];
+  /** What Ask EveryOps plans to set up, shown beside the conversation. */
+  plan?: string[];
+  draft?: SetupDraft;
+};
 
 export type ChangeEntry = {
   id: string;

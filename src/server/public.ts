@@ -171,9 +171,13 @@ export async function submitPublicForm(
         if (!item || quantity < 1) continue;
         const lineData: RecordData = { [parentField]: result.record.id, [extras.itemFieldId]: item.id };
         if (extras.quantityFieldId) lineData[extras.quantityFieldId] = quantity;
-        // Other counts the line asks for (hours, nights) start at 1; the business can change them.
-        for (const f of line.fields)
-          if (f.required && f.type === "number" && lineData[f.id] === undefined) lineData[f.id] = 1;
+        // Other counts the line asks for (hours, nights) start at 1, and its own name (a Title field) is the item's;
+        // the business can change them.
+        for (const f of line.fields) {
+          if (lineData[f.id] !== undefined) continue;
+          if (f.required && f.type === "number") lineData[f.id] = 1;
+          if ((f.required || f.id === line.primaryFieldId) && f.type === "text") lineData[f.id] = item.title;
+        }
         const added = createRecord(data, line.id, lineData, now);
         if (!added.ok)
           return {

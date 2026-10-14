@@ -22,7 +22,12 @@ type AnyObject = z.ZodObject<z.ZodRawShape>;
 const assistantView = z.union(
   view.options.map((o) =>
     ["form", "landing"].includes(((o as AnyObject).shape.type as z.ZodLiteral<string>).value)
-      ? (o as AnyObject).omit({ blocks: true })
+      ? // Add-ons (extras) are set up by the designer; leaving them out keeps this schema under Gemini's budget.
+        (o as AnyObject).omit(
+          ((o as AnyObject).shape.type as z.ZodLiteral<string>).value === "form"
+            ? { blocks: true, extras: true }
+            : { blocks: true },
+        )
       : o,
   ) as unknown as [AnyObject, AnyObject, ...AnyObject[]],
 ) as unknown as typeof view; // blocks are added with add_block; toView gives a landing page an empty list
