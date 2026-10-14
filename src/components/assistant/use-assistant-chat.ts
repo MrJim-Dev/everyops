@@ -14,13 +14,23 @@ import { useCurrentUser } from "@/lib/auth/client";
 import type { ChangePlan } from "@/lib/engine/changes";
 import { markFresh } from "@/lib/motion/fresh";
 import { docKey } from "@/lib/public/resolve";
-import { blueprintOf } from "@/lib/store/workspace-model";
+import { revertChanges } from "@/lib/store/apply-plan";
+import { blueprintOf, type ChangeEntry } from "@/lib/store/workspace-model";
 import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
 
 const EMPTY: AssistantTurn[] = [];
 const NO_THREADS: ThreadSummary[] = [];
+const NO_CHANGES: ChangeEntry[] = [];
 /** One request per workspace can be stopped; kept outside React so the panel and the page share it. */
 const inFlight = new Map<string, AbortController>();
+
+/** What reverting from a message would do: the changes it undoes (newest first), or why it can't. */
+export type RevertPreview =
+  | { kind: "ready"; changes: ChangeEntry[] }
+  /** Newer changes made outside this conversation came after; they'd be lost, so History goes first. */
+  | { kind: "blocked"; blocking: ChangeEntry[] }
+  /** Staff can undo data changes, not the design or the team. */
+  | { kind: "not_allowed"; changes: ChangeEntry[] };
 
 type Reply =
   | {
@@ -121,6 +131,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
   const block = useScreen((s) => s.block);
   const applyChange = useWorkspaces((s) => s.applyChange);
   const undoChange = useWorkspaces((s) => s.undoChange);
+  const history = useWorkspaces((s) => s.workspaces[ws.id]?.changes ?? NO_CHANGES);
   const [input, setInput] = useState("");
   const textarea = useRef<HTMLTextAreaElement>(null);
   const files = useAttachments();
@@ -303,6 +314,61 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
     toast.success("Change undone");
   };
 
+  /** The changes still in effect that this conversation applied from the message at `index` on. */
+  const liveFrom = (index: number) => {
+    const ids = new Set(
+      turns.slice(index).flatMap((t) => (t.planState === "applied" && t.changeId ? [t.changeId] : [])),
+    );
+    return ids.size ? history.filter((c) => ids.has(c.id) && !c.undoneAt) : NO_CHANGES;
+  };
+
+  /** What reverting from a message would undo, checked on a copy first; null when there's nothing to revert. */
+  const previewRevert = (index: number): RevertPreview | null => {
+    const live = liveFrom(index);
+    const current = useWorkspaces.getState().workspaces[ws.id];
+    if (!live.length || !current) return null;
+    if (!manager && live.some((c) => c.fromVersion !== c.toVersion || c.teamBefore))
+      return { kind: "not_allowed", changes: live };
+    const dry = revertChanges(
+      current,
+      live.map((c) => c.id),
+    );
+    if (dry.ok) return { kind: "ready", changes: dry.undone };
+    return dry.blocking ? { kind: "blocked", blocking: dry.blocking } : null;
+  };
+
+  /** Undoes every change this conversation made from the message at `index` on, in one step. */
+  const revertFrom = (index: number): boolean => {
+    const live = liveFrom(index);
+    if (!live.length || pending) return false;
+    const result = useWorkspaces.getState().revertChanges(
+      ws.id,
+      live.map((c) => c.id),
+    );
+    if (!result.ok) {
+      toast.error("Couldn't revert these changes", {
+        description: result.blocking?.length
+          ? "A newer change came after them. Undo it in History first."
+          : "Nothing was changed. Try again, or undo them one at a time in History.",
+      });
+      return false;
+    }
+    // Plans undone here or earlier in History both show as undone in the conversation.
+    const after = useWorkspaces.getState().workspaces[ws.id]?.changes ?? NO_CHANGES;
+    const undone = new Set(after.filter((c) => c.undoneAt).map((c) => c.id));
+    const { patch } = useAssistant.getState();
+    turns.forEach((t, i) => {
+      if (i >= index && t.planState === "applied" && t.changeId && undone.has(t.changeId))
+        patch(ws.id, i, { planState: "undone" });
+    });
+    const count = result.undone.length;
+    patch(ws.id, index, { reverted: { count, at: new Date().toISOString() } });
+    toast.success(`Reverted ${count} ${count === 1 ? "change" : "changes"}`, {
+      description: "Your workspace is back to how it was before this message.",
+    });
+    return true;
+  };
+
   const dismiss = (index: number) => useAssistant.getState().patch(ws.id, index, { planState: "dismissed" });
   /** A fresh conversation; the current one stays in the list. */
   const clear = () => {
@@ -360,6 +426,10 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
     retry,
     apply,
     undo,
+    /** Whether the message at an index has changes after it that can be reverted. */
+    canRevertFrom: (index: number) => editor && liveFrom(index).length > 0,
+    previewRevert,
+    revertFrom,
     dismiss,
     clear,
     go,

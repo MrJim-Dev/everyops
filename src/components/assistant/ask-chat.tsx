@@ -87,7 +87,7 @@ export function AskChat() {
             </h2>
             <p className="mt-2 max-w-[460px] text-center text-[14px] text-muted-foreground text-pretty">
               Ask about your data or describe a change in your own words. You review every change before it's
-              applied, and you can undo it from History.
+              applied, and you can revert it from the chat or History.
             </p>
             <ChatComposer chat={chat} size="page" autoFocus hint={<SendHint />} className="mt-7 w-full" />
             <Suggestions

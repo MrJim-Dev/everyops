@@ -177,3 +177,32 @@ export function undoPlan(ws: Workspace, changeId: string, now = new Date()): Wor
     changes: ws.changes.map((c) => (c.id === changeId ? { ...c, undoneAt: now.toISOString() } : c)),
   };
 }
+
+export type RevertResult =
+  | { ok: true; workspace: Workspace; undone: ChangeEntry[] }
+  /** Changes still in effect that came after the oldest one asked for, and aren't part of the request. */
+  | { ok: false; blocking: ChangeEntry[] }
+  | { ok: false; blocking?: undefined };
+
+/**
+ * Undoes a set of changes in one go, newest first (a conversation's changes from one message on). Every change
+ * still in effect since the oldest of them must be in the set: a newer change made elsewhere would be lost or
+ * broken by the undo, so it is returned as blocking instead. Nothing changes unless every undo succeeds.
+ */
+export function revertChanges(ws: Workspace, ids: string[], now = new Date()): RevertResult {
+  const wanted = new Set(ids);
+  // History is newest first, so the span to undo runs from the top down to the oldest change asked for.
+  const live = ws.changes.flatMap((c, i) => (c.undoneAt ? [] : [{ c, i }]));
+  const oldest = Math.max(-1, ...live.filter((x) => wanted.has(x.c.id)).map((x) => x.i));
+  if (oldest < 0) return { ok: true, workspace: ws, undone: [] };
+  const span = live.filter((x) => x.i <= oldest).map((x) => x.c);
+  const blocking = span.filter((c) => !wanted.has(c.id));
+  if (blocking.length) return { ok: false, blocking };
+  let next = ws;
+  for (const c of span) {
+    const undone = undoPlan(next, c.id, now);
+    if (!undone) return { ok: false };
+    next = undone;
+  }
+  return { ok: true, workspace: next, undone: span };
+}
