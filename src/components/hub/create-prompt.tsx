@@ -3,12 +3,13 @@
 import { ArrowUpIcon, SparkleIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { AttachmentTray, ComposerTools } from "@/components/ai/composer-tools";
+import { AttachmentTray, ComposerTools, DropOverlay } from "@/components/ai/composer-tools";
 import { useAttachments } from "@/components/ai/use-attachments";
 import { useVoiceInput } from "@/components/ai/use-voice-input";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
 import { useAuthReady, useCurrentUser } from "@/lib/auth/client";
 import type { WorkspaceData } from "@/lib/blueprint/types";
+import { takePendingFiles } from "@/lib/pending-files";
 import { useHydrated } from "@/lib/store/use-hydrated";
 import { useWorkspaces } from "@/lib/store/workspaces";
 import { PENDING_KEY, StarterChips } from "./starters";
@@ -82,7 +83,9 @@ export function CreatePrompt() {
     create(text, files.refs);
   };
 
-  // Back from sign-in: put the prompt back, and continue once the account's workspaces have loaded.
+  // Back from sign-in: put the prompt back, and continue once the account's workspaces have loaded. Files picked
+  // on the landing page are uploaded first; setup starts when they're in (any that fail are reported and skipped).
+  const [resume, setResume] = useState<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: create only uses stable store and router references
   useEffect(() => {
     const pending = readPending();
@@ -90,8 +93,19 @@ export function CreatePrompt() {
     setPrompt(pending);
     if (!user || !storeReady) return;
     sessionStorage.removeItem(PENDING_KEY);
-    create(pending);
+    void takePendingFiles().then((kept) => {
+      if (!kept.length) return create(pending);
+      files.add(kept);
+      setResume(pending);
+    });
   }, [user, storeReady]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: create only uses stable store and router references
+  useEffect(() => {
+    if (resume === null || files.uploading) return;
+    setResume(null);
+    create(resume, files.refs);
+  }, [resume, files.uploading]);
 
   return (
     <div className="flex w-full flex-col items-center gap-5">
@@ -101,10 +115,10 @@ export function CreatePrompt() {
           e.preventDefault();
           start();
         }}
-        onDragOver={files.onDragOver}
-        onDrop={user ? files.onDrop : undefined}
+        {...(user ? files.dropProps : {})}
       >
-        <div className="rounded-2xl border border-foreground/10 bg-card/80 text-left shadow-[0_24px_70px_-36px_rgba(0,0,0,0.9)] backdrop-blur-md transition-[border-color,box-shadow] duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklab,var(--primary)_12%,transparent),0_24px_70px_-30px_color-mix(in_oklab,var(--primary)_40%,transparent)]">
+        <div className="relative rounded-2xl border border-foreground/10 bg-card/80 text-left shadow-[0_24px_70px_-36px_rgba(0,0,0,0.9)] backdrop-blur-md transition-[border-color,box-shadow] duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklab,var(--primary)_12%,transparent),0_24px_70px_-30px_color-mix(in_oklab,var(--primary)_40%,transparent)]">
+          <DropOverlay attachments={files} />
           <AttachmentTray attachments={files} className="px-3 pt-3" />
           <textarea
             ref={ref}

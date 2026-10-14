@@ -153,6 +153,37 @@
   animation-delay: calc(min(var(--i, 0), 10) * 45ms);
 }
 
+/* Page sections that rise in one after another, without setting --i by hand. */
+@utility stagger-children {
+  & > * {
+    animation: var(--animate-rise);
+  }
+  & > :nth-child(2) {
+    animation-delay: 50ms;
+  }
+  & > :nth-child(3) {
+    animation-delay: 100ms;
+  }
+  & > :nth-child(4) {
+    animation-delay: 150ms;
+  }
+  & > :nth-child(5) {
+    animation-delay: 200ms;
+  }
+  & > :nth-child(6) {
+    animation-delay: 250ms;
+  }
+  & > :nth-child(7) {
+    animation-delay: 300ms;
+  }
+  & > :nth-child(8) {
+    animation-delay: 350ms;
+  }
+  & > :nth-child(n + 9) {
+    animation-delay: 400ms;
+  }
+}
+
 /* Elements that enter when inserted (cart lines, new cards). Transitions stay interruptible. */
 @utility enter-up {
   transition:
@@ -237,6 +268,16 @@
   }
   ::selection {
     background: color-mix(in oklab, var(--primary) 35%, transparent);
+  }
+  /* Tailwind v4 dropped the pointer cursor on buttons; bring it back for anything clickable. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  /* Edge adds its own reveal and clear buttons; password fields use our show/hide toggle instead. */
+  input::-ms-reveal,
+  input::-ms-clear {
+    display: none;
   }
 }
 
@@ -460,6 +501,111 @@
   .spotlight:hover::before {
     opacity: 1;
   }
+}
+
+/*
+ * Toasts (Sonner). Sonner injects its own system font and colors; these rules win by specificity.
+ * Each type gets a tinted icon chip and a faint matching border; neutral toasts stay plain.
+ * Motion stays Sonner's (transitions, so rapid toasts retarget instead of restarting) on the
+ * strong ease-out curve. The global reduced-motion rule turns it off.
+ */
+[data-sonner-toaster].toaster {
+  font-family: var(--font-sans);
+  --width: 356px;
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast {
+  --tone: var(--muted-foreground);
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 16px 40px -16px rgb(0 0 0 / 0.75);
+  font-size: 13px;
+  transition-timing-function: var(--ease-out-strong);
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast[data-type="success"] {
+  --tone: var(--success);
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast[data-type="error"] {
+  --tone: var(--destructive);
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast[data-type="warning"] {
+  --tone: var(--warning);
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast[data-type="info"] {
+  --tone: var(--chart-4);
+}
+[data-sonner-toaster]
+  [data-sonner-toast].eo-toast:is(
+    [data-type="success"],
+    [data-type="error"],
+    [data-type="warning"],
+    [data-type="info"]
+  ) {
+  border-color: color-mix(in oklab, var(--tone) 28%, transparent);
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast [data-icon] {
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  flex-shrink: 0;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--tone);
+  background: color-mix(in oklab, var(--tone) 14%, transparent);
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast [data-icon] > * {
+  flex: none;
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast [data-icon] svg {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast [data-content] {
+  gap: 2px;
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast .eo-toast-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast .eo-toast-description {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast .eo-toast-action {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  transition: background-color 150ms ease;
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast .eo-toast-cancel {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+[data-sonner-toaster] [data-sonner-toast].eo-toast .eo-toast-close {
+  background: var(--popover);
+  border-color: color-mix(in oklab, var(--foreground) 12%, transparent);
+  color: var(--muted-foreground);
+}
+
+/* Native dropdown lists (public forms) follow the dark theme instead of the OS default. */
+select option {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
 }
 
 /* Respect reduced motion everywhere; !important is required to beat component-level durations. */

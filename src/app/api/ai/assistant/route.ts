@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { attachmentRef } from "@/lib/assistant/attachments";
+import { screenSchema } from "@/lib/assistant/screen";
 import { blueprintOf, canEdit, canManage } from "@/lib/store/workspace-model";
 import { assistantTurn } from "@/server/ai/assistant";
 import { takeAiToken } from "@/server/ai/rate-limit";
@@ -8,7 +9,7 @@ import { loadWorkspace } from "@/server/workspaces";
 
 const body = z.object({
   workspaceId: z.string().min(1),
-  page: z.string().max(200).default("Workspace"),
+  screen: screenSchema.default({ area: "home" }),
   messages: z
     .array(
       z.object({
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return Response.json({ ok: false, message: "Ask something first." }, { status: 400 });
   const found = await loadWorkspace(parsed.data.workspaceId, user.id);
   if (!found) return Response.json({ ok: false, message: "Workspace not found." }, { status: 404 });
-  const limit = takeAiToken(user.id);
+  const limit = await takeAiToken(user.id);
   if (!limit.ok)
     return Response.json(
       { ok: false, message: "That's a lot of questions. Wait a few minutes and try again." },
@@ -41,10 +42,12 @@ export async function POST(request: Request) {
     blueprint: blueprintOf(found.workspace),
     records: found.workspace.records,
     messages: parsed.data.messages,
-    page: parsed.data.page,
+    screen: parsed.data.screen,
+    docs: found.workspace.docs,
     canDesign: canManage(found.role),
     canEditRecords: canEdit(found.role),
     userId: user.id,
+    workspaceId: parsed.data.workspaceId,
   });
   return Response.json(result, { status: result.ok ? 200 : 502 });
 }

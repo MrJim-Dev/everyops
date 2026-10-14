@@ -5,15 +5,15 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function Page() {
   return (
-    <LegalPage title="Privacy Policy" updated="October 13, 2026">
+    <LegalPage title="Privacy Policy" updated="October 14, 2026">
       <h2>What we store</h2>
       <p>
         Your name, email, a salted hash of your password, and the workspaces, records and history you create.
       </p>
       <h2>Where it lives</h2>
       <p>
-        In this prototype, everything is stored in your browser on this device. Clearing site data removes it.
-        Nothing is sent to a server.
+        Your account and workspaces are stored in a database on Google Cloud in Singapore (asia-southeast1).
+        Pictures you add to records and pages are stored in Google Cloud Storage in the same region.
       </p>
       <h2>What we don't do</h2>
       <p>
@@ -22,8 +22,10 @@ export default function Page() {
       </p>
       <h2>AI processing</h2>
       <p>
-        When Gemini is connected, your descriptions and change requests will be sent to Google Cloud to design
-        and update your systems. This page will be updated before that happens.
+        When you use Ask EveryOps or the assistant, your messages, the workspace you're working in, and any
+        files you attach are sent to Gemini on Google Cloud (Vertex AI, asia-southeast1) to answer and to
+        design or update your systems. Attached files are stored in Google Cloud Storage under your account
+        and deleted 90 days after upload. Voice messages are turned into text and not stored.
       </p>
       <h2>Your choices</h2>
       <p>

@@ -142,8 +142,48 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
   bp.widgets.forEach((widget, wi) => {
     const entity = bp.entities.find((e) => e.id === widget.entityId);
     if (!entity) errors.push({ path: `widgets.${wi}`, message: `${widget.title} uses a missing entity` });
-    else if (widget.filter) checkExpr(bp, entity, widget.filter, `widgets.${wi}`, errors);
+    else if (widget.filter && !widget.calc) checkExpr(bp, entity, widget.filter, `widgets.${wi}`, errors);
     const chart = widget.type === "chart" ? widget.chart : undefined;
+    if (widget.calc && (widget.type === "stat" || widget.type === "progress")) {
+      const path = `widgets.${wi}.calc`;
+      const ids = new Set<string>();
+      for (const term of widget.calc.terms) {
+        if (!/^[a-z][a-z0-9_]*$/.test(term.id))
+          errors.push({ path, message: `${widget.title}: total "${term.id}" needs a snake_case name` });
+        if (ids.has(term.id))
+          errors.push({ path, message: `${widget.title}: total "${term.id}" is listed twice` });
+        ids.add(term.id);
+        const source = bp.entities.find((e) => e.id === term.entityId);
+        if (!source) {
+          errors.push({
+            path,
+            message: `${widget.title}: total "${term.id}" uses a missing entity "${term.entityId}"`,
+          });
+          continue;
+        }
+        if (term.op !== "count" && !source.fields.some((f) => f.id === term.fieldId))
+          errors.push({
+            path,
+            message: `${widget.title}: total "${term.id}" adds up "${term.fieldId ?? ""}", which isn't a field of ${source.name}`,
+          });
+        if (term.filter) checkExpr(bp, source, term.filter, path, errors);
+      }
+      if (!widget.calc.terms.length)
+        errors.push({ path, message: `${widget.title}: a formula needs at least one total` });
+      const parsed = parseExpr(widget.calc.expr);
+      if (!parsed.ok)
+        errors.push({
+          path,
+          message: `${widget.title}: formula "${widget.calc.expr}" is invalid: ${parsed.error}`,
+        });
+      else
+        for (const ref of parsed.refs)
+          if (!ids.has(ref))
+            errors.push({
+              path,
+              message: `${widget.title}: "${ref}" in the formula isn't one of its totals (${[...ids].join(", ")})`,
+            });
+    }
     if (entity && widget.type === "chart") {
       const path = `widgets.${wi}`;
       const has = (id?: string) => !!id && entity.fields.some((f) => f.id === id);

@@ -3,7 +3,7 @@
 import { ArrowRightIcon, MinusIcon, PencilSimpleIcon, PlusIcon } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AttachmentTray, ComposerTools } from "@/components/ai/composer-tools";
+import { AttachmentTray, ComposerTools, DropOverlay } from "@/components/ai/composer-tools";
 import { useAttachments } from "@/components/ai/use-attachments";
 import { useVoiceInput } from "@/components/ai/use-voice-input";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { EXAMPLE_REQUESTS } from "@/lib/assistant/planner";
 import { displayKind } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, recordTitle } from "@/lib/blueprint/lookup";
 import { applyOps, computeImpact } from "@/lib/engine/changes";
+import { optionUsage } from "@/lib/engine/options";
 import { formatMoney } from "@/lib/format";
 import { markFresh } from "@/lib/motion/fresh";
 import { useWorkspaces } from "@/lib/store/workspaces";
@@ -45,7 +46,7 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
       request.trim() || (files.refs.length ? "Update the workspace to match the attached files." : "");
     if (!text || pending || files.uploading) return;
     setPending(true);
-    const next = await requestPlan(ws.blueprint, text, files.refs);
+    const next = await requestPlan(ws.blueprint, text, files.refs, optionUsage(ws.blueprint, ws.records));
     setPending(false);
     setResult(next);
     if (next.ok) files.clear();
@@ -121,14 +122,14 @@ export function ChangePlanner({ onDone, autoFocus }: { onDone?: () => void; auto
   if (!plan) {
     return (
       <form
-        className="flex flex-col gap-3"
+        className="relative flex flex-col gap-3 rounded-lg"
         onSubmit={(e) => {
           e.preventDefault();
           void review();
         }}
-        onDragOver={files.onDragOver}
-        onDrop={files.onDrop}
+        {...files.dropProps}
       >
+        <DropOverlay attachments={files} />
         <AttachmentTray attachments={files} />
         <Textarea
           autoFocus={autoFocus}

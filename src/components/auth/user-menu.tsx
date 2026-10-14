@@ -9,7 +9,18 @@ import {
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,7 +41,7 @@ function useSignOut() {
   return async () => {
     await signOut();
     router.replace("/sign-in");
-    toast("Signed out");
+    toast.success("Signed out");
   };
 }
 
@@ -40,6 +51,8 @@ export function UserMenu({ variant }: { variant: "topbar" | "sidebar" }) {
   const router = useRouter();
   const signOut = useSignOut();
   const ready = useAuthReady();
+  const [confirmOut, setConfirmOut] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   if (!ready) return <span aria-hidden="true" className={variant === "sidebar" ? "h-9 flex-1" : "h-8 w-8"} />;
 
@@ -72,65 +85,89 @@ export function UserMenu({ variant }: { variant: "topbar" | "sidebar" }) {
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        className={cn(
-          "flex min-w-0 items-center gap-2 rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
-          variant === "sidebar"
-            ? "h-9 flex-1 px-1.5 hover:bg-sidebar-accent data-popup-open:bg-sidebar-accent"
-            : "h-8 px-1 hover:bg-muted data-popup-open:bg-muted",
-        )}
-        aria-label="Account"
-      >
-        <Avatar className={variant === "sidebar" ? "size-6" : "size-7"}>
-          <AvatarFallback className="text-[10px]">{initials(user.name)}</AvatarFallback>
-        </Avatar>
-        <span
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
           className={cn(
-            "min-w-0 truncate text-left text-[13px]",
-            variant === "sidebar" ? "flex-1 text-sidebar-foreground" : "hidden sm:inline",
+            "flex min-w-0 items-center gap-2 rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
+            variant === "sidebar"
+              ? "h-9 flex-1 px-1.5 hover:bg-sidebar-accent data-popup-open:bg-sidebar-accent"
+              : "h-8 px-1 hover:bg-muted data-popup-open:bg-muted",
           )}
+          aria-label="Account"
         >
-          {user.name}
-        </span>
-        {variant === "sidebar" ? (
-          <CaretUpDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        ) : null}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align={variant === "sidebar" ? "start" : "end"}
-        side={variant === "sidebar" ? "top" : "bottom"}
-        className="w-60"
-      >
-        <DropdownMenuGroup>
-          <DropdownMenuLabel className="flex flex-col gap-0.5 py-2">
-            <span className="truncate text-[13px] font-medium text-foreground">{user.name}</span>
-            <span className="truncate text-[12px] font-normal text-muted-foreground">{user.email}</span>
-          </DropdownMenuLabel>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => router.push("/workspaces")}>
-            <HouseIcon />
-            Your workspaces
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => router.push("/community")}>
-            <SquaresFourIcon />
-            Community systems
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => router.push("/account")}>
-            <UserCircleIcon />
-            Account settings
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuItem onClick={signOut}>
-            <SignOutIcon />
-            Sign out
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          <Avatar className={variant === "sidebar" ? "size-6" : "size-7"}>
+            <AvatarFallback className="text-[10px]">{initials(user.name)}</AvatarFallback>
+          </Avatar>
+          <span
+            className={cn(
+              "min-w-0 truncate text-left text-[13px]",
+              variant === "sidebar" ? "flex-1 text-sidebar-foreground" : "hidden sm:inline",
+            )}
+          >
+            {user.name}
+          </span>
+          {variant === "sidebar" ? (
+            <CaretUpDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          ) : null}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align={variant === "sidebar" ? "start" : "end"}
+          side={variant === "sidebar" ? "top" : "bottom"}
+          className="w-60"
+        >
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="flex flex-col gap-0.5 py-2">
+              <span className="truncate text-[13px] font-medium text-foreground">{user.name}</span>
+              <span className="truncate text-[12px] font-normal text-muted-foreground">{user.email}</span>
+            </DropdownMenuLabel>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuItem onClick={() => router.push("/workspaces")}>
+              <HouseIcon />
+              Your workspaces
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push("/community")}>
+              <SquaresFourIcon />
+              Community systems
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push("/account")}>
+              <UserCircleIcon />
+              Account settings
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuItem onClick={() => setConfirmOut(true)}>
+              <SignOutIcon />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <AlertDialog open={confirmOut} onOpenChange={(open) => !signingOut && setConfirmOut(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sign out of EveryOps?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You're signed in as {user.email}. You'll need your password to get back into your workspaces.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={signingOut}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={signingOut}
+              onClick={async () => {
+                setSigningOut(true);
+                await signOut();
+              }}
+            >
+              {signingOut ? "Signing out…" : "Sign out"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

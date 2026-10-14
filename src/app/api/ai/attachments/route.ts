@@ -1,4 +1,4 @@
-import { MAX_ATTACHMENT_BYTES } from "@/lib/assistant/attachments";
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_MB } from "@/lib/assistant/attachments";
 import { saveAttachment } from "@/server/ai/attachments";
 import { takeAiToken } from "@/server/ai/rate-limit";
 import { apiUser, sameOrigin } from "@/server/session-api";
@@ -13,8 +13,11 @@ export async function POST(request: Request) {
   if (!(file instanceof Blob) || !file.size)
     return Response.json({ ok: false, message: "Choose a file to attach." }, { status: 400 });
   if (file.size > MAX_ATTACHMENT_BYTES)
-    return Response.json({ ok: false, message: "That file is over 10 MB." }, { status: 413 });
-  if (!takeAiToken(`upload:${user.id}`, 60).ok)
+    return Response.json(
+      { ok: false, message: `That file is over ${MAX_ATTACHMENT_MB} MB.` },
+      { status: 413 },
+    );
+  if (!(await takeAiToken(`upload:${user.id}`, 60)).ok)
     return Response.json(
       { ok: false, message: "That's a lot of files. Wait a few minutes." },
       { status: 429 },
@@ -26,7 +29,7 @@ export async function POST(request: Request) {
       {
         ok: false,
         message:
-          "Attach an image, PDF, audio clip, or a text, CSV or JSON file. Save Word or Excel files as PDF or CSV first.",
+          "Attach an image, PDF, audio clip, Excel or Word file, or a text, CSV or JSON file. Save older .xls or .doc files as .xlsx or .docx first.",
       },
       { status: 415 },
     );

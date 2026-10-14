@@ -1,30 +1,36 @@
 "use client";
 
-import { CheckCircleIcon, InfoIcon, SpinnerIcon, WarningIcon, XCircleIcon } from "@phosphor-icons/react";
+import { CheckCircleIcon, InfoIcon, SpinnerGapIcon, WarningIcon, XCircleIcon } from "@phosphor-icons/react";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 
-// EveryOps ships dark only, so the toaster is pinned to the dark theme.
+/**
+ * EveryOps toasts: Geist, a tinted icon chip per type, and Sonner's own motion (interruptible
+ * transitions, swipe to dismiss) on the project's ease-out curve. Styles live in globals.css
+ * under "Toasts". Dark only, so the theme is pinned.
+ */
 function Toaster(props: ToasterProps) {
   return (
     <Sonner
       theme="dark"
-      className="toaster group"
+      className="toaster"
+      gap={8}
       icons={{
-        success: <CheckCircleIcon className="size-4 text-primary" />,
-        info: <InfoIcon className="size-4" />,
-        warning: <WarningIcon className="size-4 text-warning" />,
-        error: <XCircleIcon className="size-4 text-destructive" />,
-        loading: <SpinnerIcon className="size-4 animate-spin" />,
+        success: <CheckCircleIcon weight="fill" />,
+        info: <InfoIcon weight="fill" />,
+        warning: <WarningIcon weight="fill" />,
+        error: <XCircleIcon weight="fill" />,
+        loading: <SpinnerGapIcon className="animate-spin" />,
       }}
-      style={
-        {
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
-          "--border-radius": "var(--radius)",
-        } as React.CSSProperties
-      }
-      toastOptions={{ classNames: { toast: "cn-toast" } }}
+      toastOptions={{
+        classNames: {
+          toast: "eo-toast",
+          title: "eo-toast-title",
+          description: "eo-toast-description",
+          actionButton: "eo-toast-action",
+          cancelButton: "eo-toast-cancel",
+          closeButton: "eo-toast-close",
+        },
+      }}
       {...props}
     />
   );

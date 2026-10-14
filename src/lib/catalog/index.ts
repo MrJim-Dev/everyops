@@ -34,6 +34,8 @@ export type CatalogSystem = {
   includes: string[];
   /** Set for systems published by someone using EveryOps (not the curated catalog). */
   authorId?: string;
+  /** When it was published to Community (database systems only). */
+  publishedAt?: string;
   sample: (now: Date, workspaceName?: string) => WorkspaceData;
 };
 

@@ -2,12 +2,15 @@ import { type ReactNode, Suspense } from "react";
 import { RequireSession } from "@/components/auth/require-session";
 import { LiveWorkspaceLayout } from "@/components/routes/workspace-routes";
 import { ShellSkeleton } from "@/components/shell/shell-skeleton";
+import { SidebarPreference } from "@/components/shell/sidebar-preference";
 
 export default function WorkspaceLayout({ children, params }: LayoutProps<"/w/[workspace]">) {
   return (
     <Suspense fallback={<ShellSkeleton />}>
       <WorkspaceSession params={params}>
-        <LiveWorkspaceLayout params={params}>{children}</LiveWorkspaceLayout>
+        <SidebarPreference>
+          <LiveWorkspaceLayout params={params}>{children}</LiveWorkspaceLayout>
+        </SidebarPreference>
       </WorkspaceSession>
     </Suspense>
   );

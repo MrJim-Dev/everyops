@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useRecordPanels } from "@/components/records/record-panels";
 import { StatusBadge } from "@/components/records/status-badge";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { useReportView } from "@/lib/assistant/screen-store";
 import { getEntity, getField, optionOf, recordsOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { SlotGridView as SlotGridConfig, TimeRange } from "@/lib/blueprint/types";
 import { formatDate, formatRange, formatTime, isTimeRange } from "@/lib/format";
@@ -38,6 +39,7 @@ export function SlotGridView({ view }: { view: SlotGridConfig }) {
   const fresh = useFreshStore((s) => s.ids);
   const today = todayKey();
   const [day, setDay] = useState(today);
+  useReportView({ viewId: view.id, from: day, to: day, status: "active" });
   const opens = minutesOf(config.opensAt);
   const closes = minutesOf(config.closesAt);
   const step = config.slotMinutes;

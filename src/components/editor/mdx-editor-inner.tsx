@@ -88,7 +88,7 @@ export function MdxEditorInner({
           try {
             return await uploadImage(file, workspace.current);
           } catch (error) {
-            toast((error as Error).message);
+            toast.error((error as Error).message);
             throw error;
           }
         },

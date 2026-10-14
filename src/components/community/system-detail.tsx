@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CATEGORIES, type CatalogSystem } from "@/lib/catalog";
 import { BlueprintDialog } from "./blueprint-dialog";
 import { formatUses } from "./system-card";
-import { SystemThumbnail } from "./system-thumbnail";
+import { SystemShot } from "./system-shot";
 import { UseSystemButton } from "./use-system-dialog";
 
 /** Everything needed to decide on a system, laid out top to bottom in the side sheet. */
@@ -22,7 +22,9 @@ export function SystemDetail({ system }: { system: CatalogSystem }) {
     <div className="flex min-h-full flex-col">
       <div className="relative overflow-hidden border-b bg-shell px-6 pt-14">
         <div aria-hidden="true" className="bg-grid absolute inset-0" />
-        <SystemThumbnail system={system} className="relative translate-y-1.5 rounded-b-none border-b-0" />
+        <div className="relative overflow-hidden rounded-t-xl border border-b-0 border-foreground/10 shadow-[0_-12px_40px_-16px_rgba(0,0,0,0.8)]">
+          <SystemShot system={system} />
+        </div>
       </div>
       <div className="flex flex-1 flex-col gap-7 p-6">
         <div className="flex items-start gap-3">

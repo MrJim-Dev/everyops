@@ -54,7 +54,7 @@ export function StatusMenu({
   const choose = (value: unknown) => {
     if (typeof value !== "string" || value === current?.id) return;
     const result = actions.update(record.id, { [field.id]: value });
-    if (!result.ok) toast(result.errors[0]?.message ?? "That status couldn't be saved.");
+    if (!result.ok) toast.error(result.errors[0]?.message ?? "That status couldn't be saved.");
   };
 
   return (

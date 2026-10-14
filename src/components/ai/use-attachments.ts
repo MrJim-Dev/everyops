@@ -2,7 +2,13 @@
 
 import { type ClipboardEvent, type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { type AttachmentRef, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS } from "@/lib/assistant/attachments";
+import {
+  type AttachmentRef,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_MB,
+  MAX_ATTACHMENTS,
+} from "@/lib/assistant/attachments";
+import { isHeic, MAX_SOURCE_BYTES, prepareImage } from "@/lib/prepare-image";
 
 export type PendingFile = {
   key: string;
@@ -39,6 +45,8 @@ let counter = 0;
  */
 export function useAttachments() {
   const [items, setItems] = useState<PendingFile[]>([]);
+  /** Files are being dragged over the composer. */
+  const [dragging, setDragging] = useState(false);
   const count = useRef(0);
   count.current = items.length;
   const previews = useRef(new Set<string>());
@@ -54,25 +62,41 @@ export function useAttachments() {
     const files = [...list];
     if (!files.length) return;
     const room = MAX_ATTACHMENTS - count.current;
-    if (files.length > room) toast(`You can attach up to ${MAX_ATTACHMENTS} files to one message.`);
+    if (files.length > room) toast.warning(`You can attach up to ${MAX_ATTACHMENTS} files to one message.`);
     for (const file of files.slice(0, Math.max(room, 0))) {
-      if (file.size > MAX_ATTACHMENT_BYTES) {
-        toast(`"${file.name}" is over 10 MB.`);
+      // Photos are shrunk before upload, so a large one is fine; other files must already fit.
+      const photo = file.type.startsWith("image/") || isHeic(file);
+      if (file.size > (photo ? MAX_SOURCE_BYTES : MAX_ATTACHMENT_BYTES)) {
+        toast.warning(`"${file.name}" is over ${photo ? 40 : MAX_ATTACHMENT_MB} MB.`);
         continue;
       }
       const key = `f${++counter}`;
-      const preview = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
-      if (preview) previews.current.add(preview);
       count.current++;
-      setItems((s) => [...s, { key, name: file.name || "Pasted image", preview, status: "uploading" }]);
-      void upload(file).then((result) => {
+      setItems((s) => [...s, { key, name: file.name || "Pasted image", status: "uploading" }]);
+      void (async () => {
+        const ready = photo ? await prepareImage(file) : file;
+        if (ready.size > MAX_ATTACHMENT_BYTES) {
+          setItems((s) => s.filter((f) => f.key !== key));
+          toast(`"${file.name}" is over 10 MB.`);
+          return;
+        }
+        // Preview the prepared copy: browsers that can't show HEIC can show the JPEG made from it.
+        const preview =
+          ready.type.startsWith("image/") && ready.type !== "image/heic"
+            ? URL.createObjectURL(ready)
+            : undefined;
+        if (preview) {
+          previews.current.add(preview);
+          setItems((s) => s.map((f) => (f.key === key ? { ...f, preview, name: ready.name || f.name } : f)));
+        }
+        const result = await upload(ready);
         if (result.ok)
           setItems((s) => s.map((f) => (f.key === key ? { ...f, status: "ready", ref: result.ref } : f)));
         else {
           setItems((s) => s.filter((f) => f.key !== key));
-          toast(`Couldn't attach "${file.name || "the image"}"`, { description: result.message });
+          toast.error(`Couldn't attach "${file.name || "the image"}"`, { description: result.message });
         }
-      });
+      })();
     }
   }, []);
 
@@ -90,10 +114,17 @@ export function useAttachments() {
     [add],
   );
   const onDragOver = useCallback((e: DragEvent) => {
-    if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    setDragging(true);
+  }, []);
+  const onDragLeave = useCallback((e: DragEvent) => {
+    // Moving between children fires leave events too; only stop when the pointer leaves the composer.
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
   }, []);
   const onDrop = useCallback(
     (e: DragEvent) => {
+      setDragging(false);
       if (!e.dataTransfer.files.length) return;
       e.preventDefault();
       add(e.dataTransfer.files);
@@ -103,7 +134,9 @@ export function useAttachments() {
 
   const refs = items.flatMap((f) => (f.ref ? [f.ref] : []));
   const uploading = items.some((f) => f.status === "uploading");
-  return { items, refs, uploading, add, remove, clear, onPaste, onDragOver, onDrop };
+  /** Spread on the composer element to accept dropped files. */
+  const dropProps = { onDragEnter: onDragOver, onDragOver, onDragLeave, onDrop };
+  return { items, refs, uploading, dragging, add, remove, clear, onPaste, dropProps };
 }
 
 export type Attachments = ReturnType<typeof useAttachments>;

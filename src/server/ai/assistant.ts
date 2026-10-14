@@ -1,6 +1,7 @@
 import "server-only";
 import type { Part } from "@google/genai";
-import { type AttachmentRef, attachmentNames, attachmentsIn } from "@/lib/assistant/attachments";
+import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
+import { describeScreen, type Navigation, resolveGoTo, type Screen } from "@/lib/assistant/screen";
 import type {
   Block,
   Blueprint,
@@ -12,30 +13,49 @@ import type {
   Widget,
 } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
+import { widgetValue } from "@/lib/engine/aggregate";
 import { applyOps, type ChangeOp, type ChangePlan, commitChange, type RecordOp } from "@/lib/engine/changes";
+import { metricFormatter } from "@/lib/engine/metric-format";
+import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
 import { isPublic } from "@/lib/public/resolve";
 import { randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
 import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer } from "./assistant-prompt";
-import { attachmentParts } from "./attachments";
+import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
 import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
 import { generateJsonHedged } from "./gemini";
 
 export type AssistantMessage = { role: "user" | "assistant"; text: string; attachments?: AttachmentRef[] };
 export type AssistantResult =
-  | { ok: true; kind: "answer" | "plan" | "clarify"; reply: string; suggestions: string[]; plan?: ChangePlan }
+  | {
+      ok: true;
+      kind: "answer" | "plan" | "clarify";
+      reply: string;
+      suggestions: string[];
+      plan?: ChangePlan;
+      /** A checked page or record to open, now (open) or as a link. */
+      navigate?: Navigation;
+    }
   | { ok: false; message: string };
 
 const MAX_RECORD_CHARS = 120_000;
 
-/** Records as compact JSON lines per record type, cut off if the workspace is very large. */
-function recordContext(bp: Blueprint, records: DataRecord[]) {
+/**
+ * Records as compact JSON lines per record type, cut off if the workspace is very large. What the person is
+ * looking at goes first, so it's never the part that gets cut.
+ */
+function recordContext(bp: Blueprint, records: DataRecord[], focus: { ids: string[]; entityId?: string }) {
   const lines: string[] = [];
   let size = 0;
   let cut = false;
-  for (const e of bp.entities) {
-    const own = records.filter((r) => r.entityId === e.id);
+  const rank = new Map(focus.ids.map((id, i) => [id, i]));
+  const first = (r: DataRecord) => rank.get(r.id) ?? Number.MAX_SAFE_INTEGER;
+  const entities = [...bp.entities].sort(
+    (a, b) => Number(b.id === focus.entityId) - Number(a.id === focus.entityId),
+  );
+  for (const e of entities) {
+    const own = records.filter((r) => r.entityId === e.id).sort((a, b) => first(a) - first(b));
     lines.push(`## ${e.pluralName} (${e.id}): ${own.length} records`);
     for (const r of own) {
       const line = JSON.stringify({ id: r.id, ...r.data });
@@ -112,9 +132,11 @@ function toDesignOps(
   bp: Blueprint,
   raw: RawPlan["ops"],
   renames: RawPlan["renames"] = [],
+  formulas: RawPlan["formulas"] = [],
 ): { ops: ChangeOp[]; errors: string[] } {
   const ops: ChangeOp[] = [];
   const errors: string[] = [];
+  const formulaFor = new Set(formulas.map((f) => f.widgetId));
   // A plan that adds one new section usually means its new views and widgets go there.
   const newSystems = raw.flatMap((o) => (o.op === "add_system" && o.system ? [o.system.id] : []));
   const defaultSystem = newSystems.length === 1 ? newSystems[0] : undefined;
@@ -154,6 +176,24 @@ function toDesignOps(
           ops.push({ op: "add_widget", systemId, widget: structuredClone(o.widget) as Widget });
         else errors.push(`${at}: needs widget and systemId`);
         break;
+      case "update_widget": {
+        const widget = bp.widgets.find((w) => w.id === o.widgetId);
+        if (!widget) {
+          errors.push(
+            `${at}: widget "${o.widgetId}" doesn't exist (widgets: ${bp.widgets.map((w) => w.id).join(", ")})`,
+          );
+          break;
+        }
+        const patch: Extract<ChangeOp, { op: "update_widget" }>["patch"] = {
+          ...(o.title?.trim() ? { title: o.title.trim() } : {}),
+          ...(o.filter !== undefined ? { filter: o.filter } : {}),
+          ...(o.metric ? { metric: o.metric } : {}),
+          ...(o.target !== undefined ? { target: o.target } : {}),
+        };
+        if (Object.keys(patch).length) ops.push({ op: "update_widget", widgetId: widget.id, patch });
+        else if (!formulaFor.has(widget.id)) errors.push(`${at}: nothing to change`);
+        break;
+      }
       case "add_system":
         if (o.system) ops.push({ op: "add_system", system: { ...o.system, viewIds: [], widgetIds: [] } });
         else errors.push(`${at}: needs system`);
@@ -167,6 +207,25 @@ function toDesignOps(
         else errors.push(`${at}: needs viewId and systemId`);
         break;
       case "update_view": {
+        const view = bp.views.find((v) => v.id === o.viewId);
+        const entity = view && bp.entities.find((e) => e.id === view.entityId);
+        const unknown = entity
+          ? (o.fieldIds ?? []).filter((id) => !entity.fields.some((f) => f.id === id))
+          : [];
+        if (unknown.length && entity) {
+          errors.push(
+            `${at}: ${unknown.join(", ")} aren't fields of ${entity.id} (fields: ${entity.fields.map((f) => f.id).join(", ")})`,
+          );
+          break;
+        }
+        if (
+          view &&
+          o.fieldIds?.length &&
+          !["table", "kanban", "approval_queue", "form"].includes(view.type)
+        ) {
+          errors.push(`${at}: a ${view.type} view has no columns to order`);
+          break;
+        }
         const patch = {
           ...(o.public !== undefined ? { public: o.public } : {}),
           ...(o.intro ? { intro: o.intro } : {}),
@@ -185,6 +244,33 @@ function toDesignOps(
         });
         break;
     }
+  }
+  // Formula cards: the formula goes on a card added in this plan, or onto an existing card as an update.
+  for (const [i, f] of formulas.entries()) {
+    const { widgetId, ...rest } = f;
+    const calc = structuredClone(rest);
+    const added = ops.find((x) => x.op === "add_widget" && x.widget.id === widgetId);
+    const existing = bp.widgets.find((w) => w.id === widgetId);
+    const type = added?.op === "add_widget" ? added.widget.type : existing?.type;
+    if (!type) {
+      errors.push(
+        `formulas[${i}]: widget "${widgetId}" doesn't exist; add a stat with add_widget first (existing: ${bp.widgets.map((w) => w.id).join(", ")})`,
+      );
+      continue;
+    }
+    if (type !== "stat" && type !== "progress") {
+      errors.push(
+        `formulas[${i}]: "${widgetId}" is a ${type}; only stat and progress widgets take a formula`,
+      );
+      continue;
+    }
+    if (added?.op === "add_widget") {
+      added.widget.calc = calc;
+      continue;
+    }
+    const update = ops.find((x) => x.op === "update_widget" && x.widgetId === widgetId);
+    if (update?.op === "update_widget") update.patch.calc = calc;
+    else ops.push({ op: "update_widget", widgetId, patch: { calc } });
   }
   for (const [i, r] of renames.entries()) {
     const name = r.newName.trim();
@@ -216,7 +302,11 @@ function toDesignOps(
       ? id
       : (allEntities.find((e) => [e.id, e.name, e.pluralName].some((k) => norm(k) === norm(id)))?.id ?? id);
   for (const op of ops) {
-    if (op.op === "add_widget") op.widget.entityId = resolveEntity(op.widget.entityId);
+    const calc =
+      op.op === "add_widget" ? op.widget.calc : op.op === "update_widget" ? op.patch.calc : undefined;
+    if (calc) for (const t of calc.terms) t.entityId = resolveEntity(t.entityId);
+    if (op.op === "add_widget")
+      op.widget.entityId = calc?.terms[0] ? calc.terms[0].entityId : resolveEntity(op.widget.entityId);
     if (
       op.op === "add_view" &&
       op.view.type !== "document" &&
@@ -318,6 +408,7 @@ function toDesignOps(
     "add_block",
     "add_view_field",
     "add_widget",
+    "update_widget",
     "add_rule",
     "rename_system",
     "rename_view",
@@ -367,11 +458,16 @@ function toDesignOps(
   return { ops, errors };
 }
 
-function toRecordOps(
+/** Image field values of the form "attachment:<id>": an attached photo to copy into the workspace for the record. */
+const PHOTO_VALUE = /^attachment:(\S+)$/;
+
+async function toRecordOps(
   bp: Blueprint,
   records: DataRecord[],
   raw: RawPlan["recordOps"],
-): { ops: RecordOp[]; errors: string[] } {
+  /** Turns an attached photo's id into the workspace picture path, or null if it can't be used. */
+  photo: (attachmentId: string) => Promise<string | null>,
+): Promise<{ ops: RecordOp[]; errors: string[] }> {
   const errors: string[] = [];
   const refs = new Map<string, string>();
   for (const o of raw)
@@ -410,6 +506,16 @@ function toRecordOps(
         errors.push(`recordOps[${i}]: ${entity.name} has no field "${fieldId}"`);
         continue;
       }
+      const attached = field.type === "image" ? PHOTO_VALUE.exec(value.trim()) : null;
+      if (attached) {
+        const path = await photo(attached[1]);
+        if (path) data[field.id] = path;
+        else
+          errors.push(
+            `recordOps[${i}]: "${value}" isn't a photo attached in this conversation that a record can show (PNG, JPG, WebP or GIF)`,
+          );
+        continue;
+      }
       const v = toFieldValue(field, value, resolve(field.relation?.entityId));
       if (v === undefined)
         errors.push(`recordOps[${i}]: "${value}" doesn't fit ${entity.name}.${field.id} (${field.type})`);
@@ -434,11 +540,16 @@ export async function assistantTurn(input: {
   blueprint: Blueprint;
   records: DataRecord[];
   messages: AssistantMessage[];
-  page: string;
+  /** What the person has on screen. */
+  screen: Screen;
+  /** Text of document pages, by view id. */
+  docs?: Record<string, { body: string }>;
   canDesign: boolean;
   canEditRecords: boolean;
   /** The signed-in person; attachments are read from their own files only. */
   userId: string;
+  /** The workspace the plan is for; attached photos used in records are copied into its uploads. */
+  workspaceId: string;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
   const permissions = input.canDesign
@@ -446,9 +557,12 @@ export async function assistantTurn(input: {
     : input.canEditRecords
       ? "The person is staff: they can change data (records) but not the design. Don't plan design changes; say an owner or admin can."
       : "The person is a viewer: answer questions only. For changes, say an owner or admin can make them.";
+  const screen = describeScreen(bp, records, input.screen, input.docs);
   const context = `Today in Manila: ${todayKey()}
-Current page: ${input.page}
 ${permissions}
+
+What the person is looking at:
+${screen.text}
 
 Sidebar pages (in order), with their tabs:
 ${bp.systems
@@ -479,19 +593,29 @@ Blueprint:
 ${JSON.stringify(bp)}
 
 Records:
-${recordContext(bp, records)}
+${recordContext(bp, records, { ids: screen.focusIds, entityId: screen.entityId })}
 
 Conversation:
 ${input.messages
   .map((m) => {
-    const files = m.attachments?.length ? `\n[Attached: ${attachmentNames(m.attachments)}]` : "";
+    const files = m.attachments?.length
+      ? `\n[Attached: ${m.attachments.map((a) => `${a.name} (attachment:${a.id})`).join(", ")}]`
+      : "";
     return `${m.role === "user" ? "Person" : "You"}: ${m.text || "(sent files)"}${files}`;
   })
   .join("\n\n")}`;
 
   // Files the person attached follow the text on every attempt, including a repair.
-  const fileParts = await attachmentParts(input.userId, attachmentsIn(input.messages));
+  const attachments = attachmentsIn(input.messages);
+  const fileParts = await attachmentParts(input.userId, attachments);
   const withFiles = (text: string): string | Part[] => (fileParts.length ? [{ text }, ...fileParts] : text);
+  // Each attached photo is copied into the workspace at most once per turn, even across repair attempts.
+  const copies = new Map<string, Promise<string | null>>();
+  const photo = (id: string) => {
+    if (!attachments.some((a) => a.id === id && a.kind === "image")) return Promise.resolve(null);
+    if (!copies.has(id)) copies.set(id, copyPhotoToWorkspace(input.userId, id, input.workspaceId));
+    return copies.get(id) as Promise<string | null>;
+  };
   let prompt = withFiles(context);
   let repaired = false;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -513,9 +637,11 @@ ${input.messages
     if (!result.ok) return { ok: false, message: result.error };
     const a = result.data;
     const suggestions = a.suggestions.slice(0, 3);
-    if (a.kind !== "plan") return { ok: true, kind: a.kind, reply: a.reply, suggestions };
+    const navigate = resolveGoTo(bp, records, a.goTo, { screen: input.screen, canManage: input.canDesign });
+    const withNav = navigate ? { navigate } : {};
+    if (a.kind !== "plan") return { ok: true, kind: a.kind, reply: a.reply, suggestions, ...withNav };
 
-    const design = toDesignOps(bp, a.plan.ops, a.plan.renames);
+    const design = toDesignOps(bp, a.plan.ops, a.plan.renames, a.plan.formulas);
     const errors = [...design.errors];
     if (design.ops.length && !input.canDesign)
       errors.push("This person can't change the design; plan data changes only or explain who can.");
@@ -527,26 +653,43 @@ ${input.messages
       if ((op.op === "add_view" || op.op === "add_widget") && !next.systems.some((s) => s.id === op.systemId))
         errors.push(`${op.op}: section "${op.systemId}" doesn't exist`);
 
-    const recordPart = toRecordOps(next, records, a.plan.recordOps);
+    const recordPart = await toRecordOps(next, records, a.plan.recordOps, photo);
     errors.push(...recordPart.errors);
     if (recordPart.ops.length && !input.canEditRecords) errors.push("This person can't change data.");
-    if (!errors.length && recordPart.ops.length) {
+    if (!errors.length) {
       // Rehearse the data edits on a copy so validation, rules and booking conflicts are checked now.
       const staged = design.ops.length
         ? commitChange({ blueprint: bp, records }, next).data
         : { blueprint: bp, records };
-      errors.push(...applyRecordOps(staged, recordPart.ops).errors);
+      const rehearsal = recordPart.ops.length ? applyRecordOps(staged, recordPart.ops) : null;
+      if (rehearsal) errors.push(...rehearsal.errors);
+      // An option can only go once no record (after this plan's own edits) still uses it.
+      if (design.ops.length)
+        errors.push(...strandedOptions(bp, next, optionUsage(bp, rehearsal?.data.records ?? staged.records)));
     }
     if (!errors.length && (design.ops.length || recordPart.ops.length)) {
+      // Cards the plan adds or changes show their real new value, worked out on the rehearsed workspace.
+      const cardFacts = design.ops.flatMap((op) => {
+        const id =
+          op.op === "add_widget" ? op.widget.id : op.op === "update_widget" ? op.widgetId : undefined;
+        const w = id ? next.widgets.find((x) => x.id === id) : undefined;
+        if (!w || (w.type !== "stat" && w.type !== "progress")) return [];
+        return [{ label: w.title, value: metricFormatter(next, w)(widgetValue(next, w, records)) }];
+      });
+      const facts = [
+        ...cardFacts,
+        ...a.plan.facts.filter((f) => !cardFacts.some((c) => c.label === f.label)),
+      ];
       return {
         ok: true,
         kind: "plan",
         reply: a.reply,
         suggestions,
+        ...withNav,
         plan: {
           request: input.messages.at(-1)?.text ?? "",
           title: a.plan.title || "Workspace change",
-          facts: a.plan.facts.slice(0, 6),
+          facts: facts.slice(0, 6),
           steps: a.plan.steps.slice(0, 10),
           ops: design.ops,
           recordOps: recordPart.ops,

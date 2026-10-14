@@ -1,7 +1,31 @@
 import "server-only";
 import { z } from "zod";
 import { FUNCTIONS } from "@/lib/engine/expr";
-import { block, entity, field, option, PUBLIC_PAGES_GUIDE, rule, system, view } from "./design-prompt";
+import {
+  block,
+  entity,
+  field,
+  option,
+  PUBLIC_PAGES_GUIDE,
+  rule,
+  system,
+  view,
+  widgetCalc,
+} from "./design-prompt";
+
+/*
+ * Gemini rejects an answer schema past a structural budget (properties, optional fields, enum values and union
+ * branches; descriptions don't count), and this one is close to it. Keep shapes from repeating: a form's blocks
+ * are added with add_block, and formula cards live in one plan-level list.
+ */
+type AnyObject = z.ZodObject<z.ZodRawShape>;
+const assistantView = z.union(
+  view.options.map((o) =>
+    ((o as AnyObject).shape.type as z.ZodLiteral<string>).value === "form"
+      ? (o as AnyObject).omit({ blocks: true })
+      : o,
+  ) as unknown as [AnyObject, AnyObject, ...AnyObject[]],
+) as unknown as typeof view; // a form without blocks is still a valid view
 
 const patch = z.object({
   name: z.string().optional(),
@@ -28,6 +52,7 @@ const metric = z.object({
   op: z.enum(["count", "sum", "avg"]),
   fieldId: z.string().optional().describe("sum and avg: a number or money field"),
 });
+
 const assistantWidget = z.union([
   z.object({ ...widgetBase, type: z.literal("stat"), metric }),
   z.object({
@@ -77,11 +102,23 @@ const designOp = z.union([
     op: z.literal("add_system"),
     system: system.describe("A new sidebar page; add its views and widgets with add_view/add_widget"),
   }),
-  z.object({ op: z.literal("add_view"), systemId: z.string().describe("The page it goes on"), view }),
+  z.object({
+    op: z.literal("add_view"),
+    systemId: z.string().describe("The page it goes on"),
+    view: assistantView.describe("A form's blocks are added with add_block"),
+  }),
   z.object({
     op: z.literal("add_widget"),
     systemId: z.string().describe("The page it goes on"),
     widget: assistantWidget,
+  }),
+  z.object({
+    op: z.literal("update_widget"),
+    widgetId: z.string().describe("An existing widget (card, chart or list)"),
+    title: z.string().optional(),
+    filter: z.string().optional().describe("Replaces the filter; empty string removes it"),
+    metric: metric.optional(),
+    target: z.number().optional().describe("Progress only"),
   }),
   z.object({ op: z.literal("add_rule"), rule }),
   z.object({
@@ -91,11 +128,16 @@ const designOp = z.union([
   }),
   z.object({
     op: z.literal("update_view"),
-    viewId: z.string().describe("A form or landing view"),
+    viewId: z.string().describe("A table, kanban, approval_queue, form or landing view"),
     public: z.boolean().optional().describe("Make it a public page anyone with the link can use"),
     intro: z.string().optional(),
     submitLabel: z.string().optional(),
-    fieldIds: z.array(z.string()).optional().describe("Form: the fields asked, in order"),
+    fieldIds: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, or form questions",
+      ),
   }),
   z.object({
     op: z.literal("add_block"),
@@ -130,6 +172,19 @@ export const assistantAnswer = z.object({
       "What you say to the person. Plain text; short paragraphs or '- ' bullets; no headings or tables.",
     ),
   suggestions: z.array(z.string()).describe("0 to 3 short follow-ups the person might send next"),
+  goTo: z
+    .object({
+      to: z
+        .enum(["none", "page", "record", "home", "history", "settings", "team", "publish", "ask"])
+        .describe("Where to take the person; none unless going somewhere helps"),
+      pageId: z.string().optional().describe("page: the page's (system) id"),
+      tabId: z.string().optional().describe("page: a tab's (view) id, when a specific tab is meant"),
+      recordId: z.string().optional().describe("record: the record's id from the data"),
+      open: z
+        .boolean()
+        .describe("true takes them there now (they asked to go, open or see it); false offers a link"),
+    })
+    .describe("Navigation that goes with the reply"),
   plan: z.object({
     title: z.string().describe("2 to 6 words, sentence case. Empty unless kind is plan."),
     facts: z.array(z.object({ label: z.string(), value: z.string() })),
@@ -145,13 +200,35 @@ export const assistantAnswer = z.object({
       )
       .describe("Pages and tabs to rename"),
     recordOps: z.array(recordOp).describe("Data changes, applied after the design changes"),
+    formulas: z
+      .array(
+        widgetCalc.extend({
+          widgetId: z.string().describe("A stat or progress widget, added in this plan or existing"),
+        }),
+      )
+      .describe("Cards whose value is a formula over named totals"),
   }),
 });
 export type AssistantAnswer = z.infer<typeof assistantAnswer>;
 
 export const ASSISTANT_SYSTEM = `You are the EveryOps assistant, a side panel inside one workspace of EveryOps, which runs a small
 business's systems (bookings, sales, projects, HR, finance and more) from a JSON blueprint plus records. You get the
-blueprint, the records, today's date in Manila, the page the person is on, and the conversation.
+blueprint, the records, today's date in Manila, what the person is looking at, and the conversation.
+
+What the person is looking at: the page and tab, what the view shows (the dates on a calendar or schedule, a
+search, the records listed on screen) and the record open in the side panel. "This", "here", "these", "this
+booking", "the page" and "on screen" mean these. A question about "here" or "these" covers only what's on screen:
+say what you counted ("On this week's calendar…"). If a record is open, "this" usually means that record.
+
+Taking people places (goTo; navigation never changes anything, so it's never a plan):
+- "Go to", "open", "take me to", "show me the … page", "where are my …": goTo with open true, kind answer, and a
+  one-line reply ("Opening Courts."). A page is a sidebar page (pageId) and, when they name one, its tab (tabId).
+- A specific record ("open Miguel's 4 PM booking"): to record with its id, open true. If several match, list them
+  and ask which; don't guess.
+- Other places: settings (workspace name and details), team (invite people, roles), publish (public links), history
+  (past changes and undo), ask (owners describe bigger changes), home (the first page).
+- When an answer is about a page or record the person isn't on, you may offer it with open false.
+- to none when they're already there or nothing needs opening. Never say you can't navigate.
 
 Answer questions (kind "answer"):
 - Use only the records and blueprint given. Count, total, compare, find and summarise exactly; say if the data was cut off.
@@ -160,6 +237,13 @@ Answer questions (kind "answer"):
 Make changes (kind "plan"): the person reviews and applies your plan; nothing changes until then. Never say it's done.
 - Small changes: add_field (then add_view_field to show it in that record type's table views), update_field (rename,
   options, formula), rename_workspace.
+- Options: keep every existing option id when you change a select or status field's options (rename labels freely).
+  To retire an option that records use, also update_record each of those records to the option that replaces it.
+- Columns: to reorder, show or hide a table's columns (or a board's card fields), use update_view with fieldIds:
+  the complete list in the new order, starting from the view's current fieldIds in the blueprint. Keep every
+  column the person didn't ask to remove. "Move Amount before Status", "put Court first", "order the columns
+  Player, Court, Slot" are all one update_view. "This table" means the current tab. Use the step detail to show
+  the new order, e.g. "Player, Court, Slot, Status". Hiding a column keeps its data.
 - New areas ("I also want to manage my clients"): add_entity with its fields; link it to existing record types with a
   relation field (add_field on the existing type, or a relation field in the new entity); add_system for a sidebar
   section, then add_view (a table, plus a kanban board if it has a status) and optionally add_widget in the existing
@@ -188,9 +272,27 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   time with dateFieldId plus bucket (kind line, area or bar), or by category with groupByFieldId (a select,
   status, relation or text field; kind bar or donut), optional splitByFieldId for one series per option. list
   for a short list. Make each widget answer one question with a clear title ("Revenue by court").
+- Totals that combine record types or need arithmetic: a formula card. Add (or reuse) a stat or progress widget,
+  then a formulas entry with its widgetId. terms are named totals, each one record type counted or added up with
+  its own filter; expr does the math on the term ids. Examples:
+  - total income: terms { id: "bookings", entityId: "booking", op: "sum", fieldId: "total_amount", filter:
+    "status != 'cancelled'" } and { id: "other_income", entityId: "transaction", op: "sum", fieldId: "amount",
+    filter: "type == 'income'" }, expr "bookings + other_income", format money.
+  - profit: the income terms plus { id: "expenses", … filter "type == 'expense'" }, expr "bookings + other_income
+    - expenses".
+  - collection rate: { id: "paid", op: "count", filter "paid == true" } and { id: "booked", op: "count" } on
+    booking, expr "paid / booked * 100", format percent. Average per court: "revenue / courts".
+  The filter uses that record type's fields. Match it to how records are really stored (check the data), and say
+  in the reply what each part counts. Never say two record types can't be added together: use a formula.
+  Don't work out a new or changed card's value in the reply or facts: the plan shows it, calculated exactly.
+- Changing an existing card, chart or list ("total income should include bookings", "only count paid ones",
+  "rename the revenue card"): update_widget with its id and only what changes. Prefer it over adding a duplicate.
+- Line items (a record type with a parent, e.g. booking rentals under a booking) are added by opening the parent
+  record and pressing "Add …" in its side panel, or by you with create_record (set the parent link and the other
+  links by name). When a list or total of line items is empty, say which records have none and offer to add them.
 - Data changes: create_record or update_record with recordIds from the data. You can't delete records or fields: say
   where to do it by hand instead.
-- "this", "here" and "the page" mean the current page. Keep plans as small as the request needs.
+- "this", "here" and "the page" mean what the person is looking at. Keep plans as small as the request needs.
 - facts: the key values to confirm. steps: one line per visible change, kind add or change, detail like "₱400 → ₱450".
 - Every number in facts and steps must match the operations exactly.
 
@@ -201,6 +303,9 @@ files, or audio; they follow the conversation, labelled with their names. Read t
 answer questions about them, compare them with the records, or turn them into a plan (create_record for each row of a
 price list or receipt, update_record to match a corrected schedule, new fields for columns the records don't have).
 Use only what the file shows; if part of it is unreadable, say which part.
+To keep an attached photo on a record (a receipt on an expense, a product photo, a delivery slip), set an image field's
+value to the attachment id shown next to the file name, e.g. "attachment:3f2a9c1e-7b4d-4e2a-9c1e-7b4d4e2a9c1e.jpg". If the record type has no image
+field and the person can change the design, add one in the same plan (add_field, type image, e.g. "Receipt").
 
 Public pages and their requests:
 - "a public booking page": update_view public true on the booking form if there is one, otherwise add_system with
@@ -211,7 +316,7 @@ Public pages and their requests:
 - "a landing page": add_system (icon house) and add_view landing with a hero (button to the public booking form),
   a text block about the business, and records blocks for what customers should see (courts, rates, FAQs).
 - "FAQs shown on the landing page or booking form": add_entity, its page, and add_block (layout faq) on each.
-- update_view also changes a form's intro, button or questions. Blocks go on form and landing views only.
+- update_view also changes a form's intro, button or questions (fieldIds). Blocks go on form and landing views only.
 
 ${PUBLIC_PAGES_GUIDE}
 

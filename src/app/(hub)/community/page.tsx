@@ -33,8 +33,8 @@ export default function CommunityPage() {
           className="animate-rise stagger text-[15.5px] leading-relaxed text-muted-foreground"
           style={{ "--i": 1 } as React.CSSProperties}
         >
-          Open-source systems built and run by real businesses. Preview any of them with sample data, then
-          copy one into your workspace and change it by asking.
+          Open-source systems you can preview with sample data, copy into your workspace and change by asking.
+          Make your own workspace public to share it here.
         </p>
       </div>
       <Suspense fallback={<BrowserSkeleton />}>

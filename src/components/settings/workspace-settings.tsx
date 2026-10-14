@@ -1,16 +1,15 @@
 "use client";
 
-import { DownloadSimpleIcon, TrashIcon } from "@phosphor-icons/react";
+import { CopyIcon, DownloadSimpleIcon, SignOutIcon, TrashIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { downloadText, fileSlug } from "@/lib/download";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatNumber } from "@/lib/format";
 import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
 import { SettingsPage, SettingsSection } from "./settings-section";
@@ -25,74 +24,103 @@ export function WorkspaceSettings() {
   if (!workspace) return null;
   const manager = canManage(ws.role);
   const owner = ws.role === "owner" && !ws.isShared;
+  const changed = name.trim().length > 0 && name.trim() !== ws.name;
 
-  const counts = ws.blueprint.entities.map((e) => ({
-    label: e.pluralName,
-    count: ws.records.filter((r) => r.entityId === e.id).length,
-  }));
   const saveName = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || name.trim() === ws.name) return;
+    if (!changed) return;
     rename(ws.id, name);
     toast.success("Workspace renamed", { description: "You can undo it from History." });
   };
+  const copyUrl = async () => {
+    const url = `${window.location.origin}/w/${ws.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Workspace link copied");
+    } catch {
+      toast.info("Workspace link", { description: url });
+    }
+  };
+  const download = (file: string, data: unknown) => downloadText(file, JSON.stringify(data, null, 2));
+
+  const details: [string, React.ReactNode][] = [
+    ["Owner", workspace.owner?.name ?? "You"],
+    ["Created", formatDate(workspace.createdAt, { withYear: true })],
+    [
+      "Version",
+      <Link key="v" href={`${ws.basePath}/history`} className="text-primary hover:underline">
+        v{workspace.currentVersion}, see history
+      </Link>,
+    ],
+    ["Systems", formatNumber(ws.blueprint.systems.length)],
+    ["Records", formatNumber(ws.records.length)],
+    [
+      "Based on",
+      workspace.source ? (
+        <Link key="s" href={`/preview/${workspace.source.systemId}`} className="hover:underline">
+          Community system v{workspace.source.version}
+        </Link>
+      ) : (
+        "Built with Ask EveryOps"
+      ),
+    ],
+  ];
 
   return (
     <SettingsPage>
-      <SettingsSection title="General" description="How this workspace appears to you and your team.">
-        <form onSubmit={saveName} className="flex flex-col gap-3">
-          <Field>
-            <FieldLabel htmlFor="workspace-name">Workspace name</FieldLabel>
-            <div className="flex gap-2">
-              <Input
-                id="workspace-name"
-                className="h-9"
-                value={name}
-                readOnly={!manager}
-                onChange={(e) => setName(e.target.value)}
-              />
-              {manager ? (
-                <Button
-                  type="submit"
-                  variant="outline"
-                  className="h-9"
-                  disabled={!name.trim() || name.trim() === ws.name}
-                >
-                  Save
-                </Button>
-              ) : null}
+      <form onSubmit={saveName}>
+        <SettingsSection
+          title="Workspace name"
+          description="Shown in the sidebar, the workspace switcher and invites."
+          footer={
+            manager
+              ? "Renames are versioned and can be undone from History."
+              : "Only the owner or an admin can rename this workspace."
+          }
+          action={
+            manager ? (
+              <Button type="submit" size="sm" disabled={!changed}>
+                Save
+              </Button>
+            ) : null
+          }
+        >
+          <Input
+            id="workspace-name"
+            aria-label="Workspace name"
+            className="h-9 max-w-[360px]"
+            maxLength={60}
+            value={name}
+            readOnly={!manager}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </SettingsSection>
+      </form>
+
+      <SettingsSection
+        title="Workspace link"
+        description="Anyone on the team can open the workspace from this address."
+        action={
+          <Button variant="outline" size="sm" onClick={copyUrl}>
+            <CopyIcon data-icon="inline-start" />
+            Copy link
+          </Button>
+        }
+        footer="People need an account and an invite to get in."
+      >
+        <div className="flex h-9 max-w-[420px] items-center rounded-lg border bg-background/60 px-3 font-mono text-[12.5px] text-muted-foreground">
+          <span className="truncate">/w/{ws.id}</span>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Details" description="What this workspace is made of.">
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-foreground/[0.07] sm:grid-cols-3">
+          {details.map(([label, value]) => (
+            <div key={label} className="flex min-w-0 flex-col gap-0.5 bg-background px-4 py-3">
+              <dt className="text-[12px] text-muted-foreground">{label}</dt>
+              <dd className="truncate text-[13.5px] font-medium">{value}</dd>
             </div>
-            <FieldDescription>
-              {manager
-                ? "Renames are versioned like any other change."
-                : "Only the owner or an admin can rename this workspace."}
-            </FieldDescription>
-          </Field>
-        </form>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px] sm:grid-cols-3">
-          <div>
-            <dt className="text-muted-foreground">Created</dt>
-            <dd>{formatDate(workspace.createdAt, { withYear: true })}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Version</dt>
-            <dd className="tabular">
-              v{workspace.currentVersion} ·{" "}
-              <Link href={`${ws.basePath}/history`} className="text-primary hover:underline">
-                History
-              </Link>
-            </dd>
-          </div>
-          {workspace.source ? (
-            <div>
-              <dt className="text-muted-foreground">Based on</dt>
-              <dd>
-                <Link href={`/preview/${workspace.source.systemId}`} className="hover:underline">
-                  Community system v{workspace.source.version}
-                </Link>
-              </dd>
-            </div>
-          ) : null}
+          ))}
         </dl>
       </SettingsSection>
 
@@ -100,38 +128,21 @@ export function WorkspaceSettings() {
         title="Export"
         description="Your data is yours. The blueprint is the whole system design; records are the data inside it."
       >
-        <ul className="flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-muted-foreground">
-          {counts.map((c) => (
-            <li key={c.label} className="tabular">
-              {c.count} {c.label.toLowerCase()}
-            </li>
-          ))}
-        </ul>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            onClick={() =>
-              downloadText(
-                `${fileSlug(ws.name)}-blueprint-v${workspace.currentVersion}.json`,
-                JSON.stringify(ws.blueprint, null, 2),
-              )
+        <div className="divide-y rounded-lg border">
+          <ExportRow
+            title="Blueprint"
+            detail={`Systems, fields, screens and rules, version ${workspace.currentVersion}`}
+            onDownload={() =>
+              download(`${fileSlug(ws.name)}-blueprint-v${workspace.currentVersion}.json`, ws.blueprint)
             }
-          >
-            <DownloadSimpleIcon data-icon="inline-start" />
-            Blueprint (JSON)
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() =>
-              downloadText(
-                `${fileSlug(ws.name)}-records.json`,
-                JSON.stringify({ blueprint: ws.blueprint, records: ws.records }, null, 2),
-              )
+          />
+          <ExportRow
+            title="Blueprint and records"
+            detail={`Everything above plus ${formatNumber(ws.records.length)} records`}
+            onDownload={() =>
+              download(`${fileSlug(ws.name)}-records.json`, { blueprint: ws.blueprint, records: ws.records })
             }
-          >
-            <DownloadSimpleIcon data-icon="inline-start" />
-            Blueprint and records
-          </Button>
+          />
         </div>
       </SettingsSection>
 
@@ -139,12 +150,12 @@ export function WorkspaceSettings() {
         <SettingsSection
           title="Delete workspace"
           tone="danger"
-          description="Removes this workspace, its records and its history. This can't be undone."
-        >
-          <div>
+          description="Removes this workspace, its records and its history for everyone on the team."
+          footer="This can't be undone. Export first if you might need the data."
+          action={
             <ConfirmDeleteDialog
               trigger={
-                <Button variant="destructive">
+                <Button variant="destructive" size="sm">
                   <TrashIcon data-icon="inline-start" />
                   Delete workspace
                 </Button>
@@ -155,28 +166,47 @@ export function WorkspaceSettings() {
               expected={ws.name}
               actionLabel="Delete workspace"
               onConfirm={() => {
-                router.replace("/");
+                router.replace("/workspaces");
                 remove(ws.id);
-                toast(`${ws.name} deleted`);
+                toast.success(`${ws.name} deleted`);
                 return undefined;
               }}
             />
-          </div>
-        </SettingsSection>
+          }
+        />
       ) : (
         <SettingsSection
           title="Leave workspace"
-          description="This workspace belongs to someone else, so you can't delete it."
-        >
-          <p className="text-[13px] text-muted-foreground">
-            To stop seeing it, leave from the{" "}
-            <Link href={`${ws.basePath}/settings/team`} className="text-primary hover:underline">
-              Team page
-            </Link>
-            .
-          </p>
-        </SettingsSection>
+          tone="danger"
+          description="This workspace belongs to someone else, so you can't delete it. You can leave it instead."
+          action={
+            <Button
+              variant="destructive"
+              size="sm"
+              render={<Link href={`${ws.basePath}/settings/team`} />}
+              nativeButton={false}
+            >
+              <SignOutIcon data-icon="inline-start" />
+              Leave from Team
+            </Button>
+          }
+        />
       )}
     </SettingsPage>
+  );
+}
+
+function ExportRow({ title, detail, onDownload }: { title: string; detail: string; onDownload: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+      <div className="min-w-0">
+        <p className="text-[13.5px] font-medium">{title}</p>
+        <p className="text-[12.5px] text-muted-foreground">{detail}</p>
+      </div>
+      <Button variant="outline" size="sm" onClick={onDownload}>
+        <DownloadSimpleIcon data-icon="inline-start" />
+        Download JSON
+      </Button>
+    </div>
   );
 }

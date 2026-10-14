@@ -47,7 +47,7 @@ async function copy(text: string, message: string) {
     await navigator.clipboard.writeText(text);
     toast.success(message);
   } catch {
-    toast(message.replace("copied", "ready"), { description: text });
+    toast.info(message.replace("copied", "ready"), { description: text });
   }
 }
 
@@ -197,7 +197,7 @@ export function TeamPage() {
                             variant="destructive"
                             onClick={() => {
                               removeMember(ws.id, person.accountId);
-                              toast(`${person.name} removed`);
+                              toast.success(`${person.name} removed`);
                             }}
                           >
                             <UserMinusIcon />
@@ -250,7 +250,7 @@ export function TeamPage() {
                     size="sm"
                     onClick={() => {
                       revokeInvite(ws.id, inv.token);
-                      toast(`Invite for ${inv.email} revoked`);
+                      toast.success(`Invite for ${inv.email} revoked`);
                     }}
                   >
                     Revoke
@@ -284,7 +284,7 @@ export function TeamPage() {
               onConfirm={() => {
                 router.replace("/");
                 leaveWorkspace(ws.id);
-                toast(`You left ${ws.name}`);
+                toast.success(`You left ${ws.name}`);
                 return undefined;
               }}
             />

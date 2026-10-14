@@ -27,7 +27,7 @@ export function PublicBar({ view, children }: { view: FormView | LandingView; ch
       ops: [{ op: "update_view", viewId: view.id, patch: { public: !on } }],
     });
     if (entry)
-      toast(on ? `${view.name} is now private` : `${view.name} is public`, {
+      toast.success(on ? `${view.name} is now private` : `${view.name} is public`, {
         description: on ? undefined : url,
       });
   };
@@ -54,7 +54,7 @@ export function PublicBar({ view, children }: { view: FormView | LandingView; ch
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => void navigator.clipboard.writeText(url).then(() => toast("Link copied"))}
+            onClick={() => void navigator.clipboard.writeText(url).then(() => toast.success("Link copied"))}
           >
             <CopyIcon data-icon="inline-start" />
             Copy link

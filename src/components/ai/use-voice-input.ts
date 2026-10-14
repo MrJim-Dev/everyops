@@ -17,6 +17,8 @@ export function useVoiceInput(onText: (text: string) => void) {
   const [state, setState] = useState<VoiceState>("idle");
   const [seconds, setSeconds] = useState(0);
   const [supported, setSupported] = useState(false);
+  /** Live microphone signal while recording, for the level meter. */
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const cancelled = useRef(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -43,10 +45,10 @@ export function useVoiceInput(onText: (text: string) => void) {
         | { ok: false; message: string }
         | null;
       if (body?.ok && body.text) deliver.current(body.text);
-      else if (body?.ok) toast("I didn't catch any words. Try again a little closer to the mic.");
-      else toast("Couldn't turn that into text", { description: body?.message ?? "Try again." });
+      else if (body?.ok) toast.info("I didn't catch any words. Try again a little closer to the mic.");
+      else toast.error("Couldn't turn that into text", { description: body?.message ?? "Try again." });
     } catch {
-      toast("Couldn't turn that into text", { description: "Check your connection and try again." });
+      toast.error("Couldn't turn that into text", { description: "Check your connection and try again." });
     } finally {
       setState("idle");
     }
@@ -58,12 +60,21 @@ export function useVoiceInput(onText: (text: string) => void) {
 
   const start = useCallback(async () => {
     if (state !== "idle") return;
+    // The meter's audio context is made here, inside the click: one made after the permission prompt
+    // can start suspended and read silence.
+    let audio: AudioContext | null = null;
+    try {
+      audio = new AudioContext();
+    } catch {
+      audio = null;
+    }
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
+      void audio?.close().catch(() => {});
       const denied = error instanceof DOMException && error.name === "NotAllowedError";
-      toast(denied ? "Allow microphone access to talk to EveryOps" : "No microphone found", {
+      toast.warning(denied ? "Allow microphone access to talk to EveryOps" : "No microphone found", {
         description: denied ? "Your browser asks for it in the address bar." : undefined,
       });
       return;
@@ -72,11 +83,25 @@ export function useVoiceInput(onText: (text: string) => void) {
     const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
     const chunks: Blob[] = [];
     cancelled.current = false;
+    // Tap the microphone for the level meter, so people can see it's hearing them.
+    if (audio) {
+      try {
+        await audio.resume();
+        const meter = audio.createAnalyser();
+        meter.fftSize = 1024;
+        audio.createMediaStreamSource(stream).connect(meter);
+        setAnalyser(meter);
+      } catch {
+        setAnalyser(null);
+      }
+    }
     rec.ondataavailable = (e) => {
       if (e.data.size) chunks.push(e.data);
     };
     rec.onstop = () => {
       for (const track of stream.getTracks()) track.stop();
+      void audio?.close().catch(() => {});
+      setAnalyser(null);
       if (timer.current) clearInterval(timer.current);
       timer.current = null;
       recorder.current = null;
@@ -103,7 +128,7 @@ export function useVoiceInput(onText: (text: string) => void) {
     stop();
   }, [stop]);
 
-  return { state, seconds, supported, start, stop, cancel };
+  return { state, seconds, supported, analyser, start, stop, cancel };
 }
 
 export type VoiceInput = ReturnType<typeof useVoiceInput>;

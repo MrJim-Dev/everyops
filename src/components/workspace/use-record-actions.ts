@@ -23,13 +23,13 @@ export function useRecordActions() {
   const settle = useCallback(
     (result: MutationResult): MutationResult => {
       if (readOnly) {
-        toast("You have view-only access", { description: "Ask an admin to change your role." });
+        toast.warning("You have view-only access", { description: "Ask an admin to change your role." });
         return { ok: false, errors: [{ message: "You have view-only access to this workspace." }] };
       }
       if (result.ok) {
         commit(result.data);
         markFresh([result.record.id]);
-        for (const notice of result.notices) toast(notice);
+        for (const notice of result.notices) toast.info(notice);
       }
       return result;
     },
@@ -48,12 +48,12 @@ export function useRecordActions() {
     remove: useCallback(
       (id: string, label = "Record") => {
         if (readOnly) {
-          toast("You have view-only access");
+          toast.warning("You have view-only access");
           return;
         }
         const before = data;
         commit(deleteRecord(data, id));
-        toast(`${label} deleted`, {
+        toast.success(`${label} deleted`, {
           action: { label: "Undo", onClick: () => commit(before) },
           duration: 10_000,
         });

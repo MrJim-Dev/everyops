@@ -9,6 +9,8 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useHotkey } from "@/hooks/use-hotkey";
 import { useAssistant } from "@/lib/assistant/panel-store";
+import { useSidebar, useSidebarCollapsed } from "@/lib/store/sidebar";
+import { cn } from "@/lib/utils";
 import { CommandMenu, CommandMenuProvider } from "./command-menu";
 import { WorkspaceSidebar } from "./workspace-sidebar";
 
@@ -20,6 +22,21 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   const setAssistantOpen = useAssistant((s) => s.setOpen);
   const toggleAssistant = useAssistant((s) => s.toggle);
   const live = ws.mode === "live";
+  const rail = useSidebarCollapsed();
+  const instant = useSidebar((s) => s.instant);
+  const toggleSidebar = useSidebar((s) => s.toggle);
+  // ⌘B is a keyboard shortcut people use constantly, so it switches instantly. Typing fields keep ⌘B.
+  useHotkey(
+    "b",
+    useCallback(
+      (event: KeyboardEvent) => {
+        const el = event.target as HTMLElement | null;
+        if (el?.closest("input, textarea, [contenteditable=true]")) return;
+        toggleSidebar(rail, true);
+      },
+      [toggleSidebar, rail],
+    ),
+  );
   useHotkey(
     "j",
     useCallback(() => toggleAssistant(), [toggleAssistant]),
@@ -28,9 +45,19 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
 
   return (
     <CommandMenuProvider>
-      <div className="flex h-dvh bg-shell">
-        <aside className="hidden w-[232px] shrink-0 md:block">
-          <WorkspaceSidebar />
+      <div className="group/shell flex h-dvh bg-shell" data-instant={instant}>
+        {/*
+          The frame narrows; the sidebar inside keeps its width and is clipped, so nothing in it reflows.
+          The main panel takes the space back in step. Width is the one property here with no transform
+          equivalent, so it's kept short and on the drawer curve.
+        */}
+        <aside
+          className={cn(
+            "hidden shrink-0 overflow-clip transition-[width] duration-[260ms] ease-(--ease-drawer) group-data-[instant=true]/shell:duration-0 md:block",
+            rail ? "w-[52px]" : "w-[232px]",
+          )}
+        >
+          <WorkspaceSidebar rail={rail} />
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col md:py-2 md:pr-2">

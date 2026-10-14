@@ -37,7 +37,7 @@ export function GoogleButton({ next }: { next: string }) {
     // On success the browser is already on its way to Google.
     if (error) {
       setPending(false);
-      toast("Google sign-in is coming soon", { description: "Use your email and password for now." });
+      toast.info("Google sign-in is coming soon", { description: "Use your email and password for now." });
     }
   };
   return (

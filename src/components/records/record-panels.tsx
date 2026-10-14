@@ -1,28 +1,38 @@
 "use client";
 
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useScreen } from "@/lib/assistant/screen-store";
 import type { RecordData } from "@/lib/blueprint/types";
 import { RecordFormDialog } from "./record-form-dialog";
 import { RecordSheet } from "./record-sheet";
 
 type Panels = {
   openRecord: (id: string) => void;
-  openCreate: (entityId: string, prefill?: RecordData) => void;
+  /** returnTo: the record to show again once it's created (adding a line item keeps its parent open). */
+  openCreate: (entityId: string, prefill?: RecordData, options?: { returnTo?: string }) => void;
 };
 
 const PanelsContext = createContext<Panels | null>(null);
 
-/** One record panel and one create dialog per workspace, opened from any view. */
+/** One record panel and one create dialog per workspace, opened from any view (or by the assistant). */
 export function RecordPanelsProvider({ children }: { children: ReactNode }) {
-  const [recordId, setRecordId] = useState<string | null>(null);
+  const recordId = useScreen((s) => s.recordId);
+  const setRecordId = useScreen((s) => s.openRecord);
   const [create, setCreate] = useState<{ entityId: string; prefill: RecordData; key: number } | null>(null);
 
-  const openRecord = useCallback((id: string) => setRecordId(id), []);
+  const openRecord = useCallback((id: string) => setRecordId(id), [setRecordId]);
+  // The open record belongs to this workspace: close it when the workspace goes away.
+  useEffect(() => () => setRecordId(null), [setRecordId]);
   const openCreate = useCallback(
-    (entityId: string, prefill: RecordData = {}) => setCreate({ entityId, prefill, key: Date.now() }),
+    (entityId: string, prefill: RecordData = {}, options: { returnTo?: string } = {}) => {
+      setReturnTo(options.returnTo);
+      setCreate({ entityId, prefill, key: Date.now() });
+    },
     [],
   );
   const value = useMemo(() => ({ openRecord, openCreate }), [openRecord, openCreate]);
+  // Adding a line item from a record's panel brings that record back once the line is created.
+  const [returnTo, setReturnTo] = useState<string | undefined>();
 
   return (
     <PanelsContext.Provider value={value}>
@@ -36,7 +46,7 @@ export function RecordPanelsProvider({ children }: { children: ReactNode }) {
           onClose={() => setCreate(null)}
           onCreated={(id) => {
             setCreate(null);
-            setRecordId(id);
+            setRecordId(returnTo ?? id);
           }}
         />
       ) : null}

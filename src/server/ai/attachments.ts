@@ -3,10 +3,9 @@ import { randomUUID } from "node:crypto";
 import type { Part } from "@google/genai";
 import { Storage } from "@google-cloud/storage";
 import { ATTACHMENT_ID, type AttachmentKind, type AttachmentRef } from "@/lib/assistant/attachments";
+import { officeText } from "./office";
 
 const BUCKET = process.env.UPLOAD_BUCKET ?? "everyops-prod-uploads";
-/** Gemini takes inline files up to about 20 MB per request; stay under it with room for the prompt. */
-const MAX_INLINE_BYTES = 18_000_000;
 const MAX_TEXT_CHARS = 200_000;
 
 let client: Storage | null = null;
@@ -15,7 +14,8 @@ const bucket = () => {
   return client.bucket(BUCKET);
 };
 
-export type FileType = { kind: AttachmentKind; mime: string; ext: string };
+/** `convert` marks Office files: they're stored as the text Gemini reads (CSV for Excel, plain text for Word). */
+export type FileType = { kind: AttachmentKind; mime: string; ext: string; convert?: "xlsx" | "docx" };
 
 const TEXT_TYPES: Record<string, string> = {
   txt: "text/plain",
@@ -27,7 +27,8 @@ const TEXT_TYPES: Record<string, string> = {
 
 /**
  * What a file really is, from its first bytes. The name and the browser's claimed type only decide between
- * look-alikes (audio or video in an MP4/WebM box, which text format). SVG, Office files and programs are refused.
+ * look-alikes (audio or video in an MP4/WebM box, which text format, which Office file in a zip). SVG, older
+ * Office formats (.xls, .doc) and programs are refused.
  */
 export function detectFile(bytes: Uint8Array, name: string, claimed: string): FileType | null {
   const at = (offset: number, ...sig: number[]) => sig.every((b, i) => bytes[offset + i] === b);
@@ -55,6 +56,14 @@ export function detectFile(bytes: Uint8Array, name: string, claimed: string): Fi
     return { kind: "video", mime: "video/mp4", ext: "mp4" };
   }
   const ext = /\.([a-z]+)$/i.exec(name)?.[1]?.toLowerCase() ?? "";
+  // .xlsx and .docx are zip archives; whether one really is a workbook or document is settled by converting it.
+  if (at(0, 0x50, 0x4b, 0x03, 0x04)) {
+    if (ext === "xlsx" || claimed.includes("spreadsheetml"))
+      return { kind: "text", mime: "text/csv", ext: "csv", convert: "xlsx" };
+    if (ext === "docx" || claimed.includes("wordprocessingml"))
+      return { kind: "text", mime: "text/plain", ext: "txt", convert: "docx" };
+    return null;
+  }
   const textExt = ext in TEXT_TYPES ? ext : claimed.startsWith("text/") ? "txt" : null;
   if (textExt && readText(bytes) !== null) return { kind: "text", mime: TEXT_TYPES[textExt], ext: textExt };
   return null;
@@ -91,16 +100,22 @@ export async function saveAttachment(
 ): Promise<AttachmentRef | null> {
   const type = detectFile(bytes, name, claimed);
   if (!type) return null;
+  let stored = bytes;
+  if (type.convert) {
+    const text = await officeText(bytes, type.convert);
+    if (!text) return null;
+    stored = new TextEncoder().encode(text);
+  }
   const id = `${randomUUID()}.${type.ext}`;
   const original = safeName(name);
   await bucket()
     .file(`${ownerFolder(userId)}/${id}`)
-    .save(Buffer.from(bytes), {
+    .save(Buffer.from(stored), {
       contentType: type.mime,
       resumable: false,
       metadata: { cacheControl: "private", metadata: { name: original, kind: type.kind } },
     });
-  return { id, name: original, mime: type.mime, kind: type.kind, size: bytes.byteLength };
+  return { id, name: original, mime: type.mime, kind: type.kind, size: stored.byteLength };
 }
 
 /** Reads one of the account's own attachments. Another account's files can't be named: the folder is the account. */
@@ -119,16 +134,73 @@ export async function readAttachment(
   }
 }
 
+/** Picture types a record's image field can show (the same ones workspace uploads accept). */
+const RECORD_PICTURE = /^image\/(png|jpeg|gif|webp)$/;
+
 /**
- * Gemini parts for a conversation's files, each labelled with its name so the model can refer to it. Files that
- * are gone or would push the request over Gemini's inline limit are listed in a note instead.
+ * Copies one of the account's attached photos into a workspace's own uploads, so a record can show it like any
+ * picture uploaded there. Returns the app path for the image field, or null if the file is gone or isn't a photo
+ * a record can show. The caller must have checked that the person can edit the workspace.
+ */
+export async function copyPhotoToWorkspace(
+  userId: string,
+  id: string,
+  workspaceId: string,
+): Promise<string | null> {
+  if (!ATTACHMENT_ID.test(id) || !/^[a-z0-9][a-z0-9-]{1,79}$/.test(workspaceId)) return null;
+  try {
+    const source = bucket().file(`${ownerFolder(userId)}/${id}`);
+    const [meta] = await source.getMetadata();
+    if (!RECORD_PICTURE.test(meta.contentType ?? "")) return null;
+    const name = `${workspaceId}/${randomUUID()}.${id.split(".").pop()}`;
+    await source.copy(bucket().file(name), {
+      contentType: meta.contentType,
+      metadata: { cacheControl: "private" },
+    });
+    return `/api/files/${name}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where a stored attachment lives and what it is, without downloading it. Null when it's gone or isn't the
+ * account's own.
+ */
+async function attachmentInfo(
+  userId: string,
+  id: string,
+): Promise<{ uri: string; mime: string; kind: AttachmentKind } | null> {
+  if (!ATTACHMENT_ID.test(id)) return null;
+  const path = `${ownerFolder(userId)}/${id}`;
+  try {
+    const [meta] = await bucket().file(path).getMetadata();
+    const kind = (meta.metadata?.kind as AttachmentKind | undefined) ?? "image";
+    return { uri: `gs://${BUCKET}/${path}`, mime: meta.contentType ?? "application/octet-stream", kind };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Gemini parts for a conversation's files, each labelled with its name so the model can refer to it. Text files
+ * (including converted Office files) are sent as text; photos, PDFs, audio and video are passed as Cloud Storage
+ * links that Gemini reads directly, so they're never loaded into this server's memory and several large files
+ * fit in one request. Files that are gone are listed in a note instead.
  */
 export async function attachmentParts(userId: string, refs: AttachmentRef[]): Promise<Part[]> {
   if (!refs.length) return [];
-  const files = await Promise.all(refs.map((r) => readAttachment(userId, r.id)));
+  const files = await Promise.all(
+    refs.map(async (r) => {
+      const info = await attachmentInfo(userId, r.id);
+      if (!info) return null;
+      if (info.kind !== "text") return { ...info, text: null };
+      const file = await readAttachment(userId, r.id);
+      return file ? { ...info, text: file.bytes.toString("utf8") } : null;
+    }),
+  );
   const parts: Part[] = [];
   const skipped: string[] = [];
-  let budget = MAX_INLINE_BYTES;
   refs.forEach((ref, i) => {
     const file = files[i];
     const label = `Attached file "${ref.name}"`;
@@ -136,21 +208,13 @@ export async function attachmentParts(userId: string, refs: AttachmentRef[]): Pr
       skipped.push(`${ref.name} (no longer available)`);
       return;
     }
-    if (file.kind === "text") {
-      const text = file.bytes.toString("utf8");
+    if (file.text !== null) {
+      const text = file.text;
       const note = text.length > MAX_TEXT_CHARS ? " (only the start is shown)" : "";
       parts.push({ text: `${label}${note}:\n${text.slice(0, MAX_TEXT_CHARS)}` });
       return;
     }
-    if (file.bytes.byteLength > budget) {
-      skipped.push(`${ref.name} (too large to read with the other files)`);
-      return;
-    }
-    budget -= file.bytes.byteLength;
-    parts.push(
-      { text: `${label}:` },
-      { inlineData: { mimeType: file.mime, data: file.bytes.toString("base64") } },
-    );
+    parts.push({ text: `${label}:` }, { fileData: { fileUri: file.uri, mimeType: file.mime } });
   });
   if (skipped.length)
     parts.push({ text: `Files you can't see: ${skipped.join(", ")}. Say so if they matter.` });

@@ -1,19 +1,34 @@
 "use client";
 
 import { PlusIcon } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useRecordPanels } from "@/components/records/record-panels";
 import { StatusMenu } from "@/components/records/status-menu";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useRecordActions } from "@/components/workspace/use-record-actions";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { useReportView } from "@/lib/assistant/screen-store";
 import { getEntity, getField, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { CalendarView as CalendarConfig, DataRecord, FieldValue } from "@/lib/blueprint/types";
 import { applyFilter } from "@/lib/engine/query";
 import { formatDate, formatMonth, formatRange, formatTime, isTimeRange } from "@/lib/format";
 import { useFreshStore } from "@/lib/motion/fresh";
+import { useViewPref } from "@/lib/store/view-prefs";
+import { canEdit } from "@/lib/store/workspaces";
 import { addDays, at, dateKey, daysBetween, startOfMonthKey, todayKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { DateStepper } from "./date-stepper";
+import { ViewPrefToggle } from "./view-pref-toggle";
 import { ToolbarSummary, ViewToolbar } from "./view-toolbar";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -47,10 +62,25 @@ function daysOf(value: FieldValue | undefined, exclusiveEnd: boolean): string[] 
   return typeof value === "string" && value ? [dateKey(value)] : [];
 }
 
+/** Moves a date, date-time or range by whole days, keeping times and the range's length. */
+function shiftDays(value: FieldValue | undefined, days: number): FieldValue | undefined {
+  const move = (s: string) => addDays(s.slice(0, 10), days) + s.slice(10);
+  if (isTimeRange(value ?? null)) {
+    const range = value as { start: string; end: string };
+    return { ...range, start: move(range.start), end: move(range.end) } as FieldValue;
+  }
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? move(value) : undefined;
+}
+
 /** A calendar by month, week or day, filtered by status if the record type has one. */
 export function CalendarView({ view }: { view: CalendarConfig }) {
-  const { blueprint, records } = useWorkspace();
+  const ws = useWorkspace();
+  const { blueprint, records } = ws;
   const { openRecord, openCreate } = useRecordPanels();
+  const actions = useRecordActions();
+  // Undo runs later, so it must use the actions bound to the data as it is then.
+  const latest = useRef(actions);
+  latest.current = actions;
   const entity = getEntity(blueprint, view.entityId);
   const dateField = getField(entity, view.dateFieldId);
   const status = entity.fields.find((f) => f.type === "status");
@@ -60,6 +90,35 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
   const [cursor, setCursor] = useState(today);
   // By default cancelled records are hidden; picking a status shows only that one.
   const [statusFilter, setStatusFilter] = useState<string>("active");
+  const editable = canEdit(ws.role) && ["date", "datetime", "time_range"].includes(dateField.type);
+  const canDrag = useViewPref("calendarDrag") && editable && !dateField.formula;
+  const [drag, setDrag] = useState<{ id: string; from: string } | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+
+  const moveTo = (to: string) => {
+    const current = drag;
+    setDrag(null);
+    setOver(null);
+    if (!current || current.from === to) return;
+    const record = records.find((r) => r.id === current.id);
+    if (!record) return;
+    const before = record.data[dateField.id];
+    const next = shiftDays(before, daysBetween(current.from, to));
+    if (next === undefined) return;
+    const name = recordTitle(entity, record);
+    const result = actions.update(record.id, { [dateField.id]: next });
+    if (!result.ok) {
+      toast.error(`Couldn't move ${name}`, { description: result.errors[0]?.message });
+      return;
+    }
+    toast.success(`Moved to ${formatDate(to)}`, {
+      description: name,
+      action: {
+        label: "Undo",
+        onClick: () => latest.current.update(record.id, { [dateField.id]: before ?? null }),
+      },
+    });
+  };
 
   const byDay = useMemo(() => {
     const map = new Map<string, DataRecord[]>();
@@ -88,6 +147,10 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
         ? Array.from({ length: 7 }, (_, i) => addDays(week, i))
         : [cursor];
   const inRange = (d: string) => (mode === "month" ? d.slice(0, 7) === month.slice(0, 7) : true);
+  const rangeFrom = mode === "month" ? month : mode === "week" ? week : cursor;
+  const rangeTo =
+    mode === "month" ? addDays(monthShift(month, 1), -1) : mode === "week" ? addDays(week, 6) : cursor;
+  useReportView({ viewId: view.id, from: rangeFrom, to: rangeTo, status: statusFilter });
   const count = shown.filter(inRange).reduce((n, d) => n + (byDay.get(d)?.length ?? 0), 0);
 
   const step = (dir: 1 | -1) =>
@@ -128,16 +191,29 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
       ? formatTime((value as { start: string }).start)
       : null;
   };
-  const chip = (r: DataRecord) => {
+  const chip = (r: DataRecord, day: string) => {
     const option = status ? optionOf(status, r.data[status.id]) : undefined;
     const time = timeOf(r);
+    const dragged = drag?.id === r.id;
     return (
       <button
         key={r.id}
         type="button"
+        draggable={canDrag}
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", r.id);
+          setDrag({ id: r.id, from: day });
+        }}
+        onDragEnd={() => {
+          setDrag(null);
+          setOver(null);
+        }}
         onClick={() => openRecord(r.id)}
         className={cn(
-          "flex min-w-0 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-[12px] outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50",
+          "flex min-w-0 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-[12px] outline-none transition-[background-color,opacity] duration-150 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50",
+          canDrag && "cursor-grab active:cursor-grabbing",
+          dragged && "opacity-40",
           fresh[r.id] && "animate-flash",
         )}
       >
@@ -183,20 +259,40 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
           ))}
         </fieldset>
         {status?.options?.length ? (
-          <select
-            aria-label={`Filter by ${status.name.toLowerCase()}`}
+          <Select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="h-7 rounded-md border bg-transparent px-2 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            onValueChange={(v) => setStatusFilter(String(v))}
+            items={{
+              active: "All but cancelled",
+              all: "Everything",
+              ...Object.fromEntries(status.options.map((o) => [o.id, `${o.label} only`])),
+            }}
           >
-            <option value="active">All but cancelled</option>
-            <option value="all">Everything</option>
-            {status.options.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label} only
-              </option>
-            ))}
-          </select>
+            <SelectTrigger
+              size="sm"
+              aria-label={`Filter by ${status.name.toLowerCase()}`}
+              className="h-7 cursor-pointer text-[12px]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="min-w-44">
+              <SelectGroup>
+                <SelectItem value="active">All but cancelled</SelectItem>
+                <SelectItem value="all">Everything</SelectItem>
+              </SelectGroup>
+              <SelectSeparator />
+              <SelectGroup>
+                {status.options.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.label} only
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        ) : null}
+        {editable && mode !== "day" ? (
+          <ViewPrefToggle pref="calendarDrag" label="Drag to reschedule" />
         ) : null}
         <ToolbarSummary>
           {count} {count === 1 ? entity.name.toLowerCase() : entity.pluralName.toLowerCase()}
@@ -254,11 +350,29 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
               const items = byDay.get(d) ?? [];
               const limit = mode === "month" ? MAX_PER_DAY : items.length;
               return (
+                // biome-ignore lint/a11y/noStaticElementInteractions: a drop target for mouse drags; the record panel covers keyboard edits
                 <div
                   key={d}
+                  onDragOver={(e) => {
+                    if (!drag) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (over !== d) setOver(d);
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node | null) && over === d)
+                      setOver(null);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    moveTo(d);
+                  }}
                   className={cn(
-                    "group/day flex min-w-0 flex-col gap-0.5 border-b border-r p-1.5",
+                    "group/day flex min-w-0 flex-col gap-0.5 border-b border-r p-1.5 transition-colors duration-150",
                     !inRange(d) && "bg-muted/25",
+                    over === d &&
+                      drag?.from !== d &&
+                      "bg-primary/10 shadow-[inset_0_0_0_1px] shadow-primary/40",
                   )}
                 >
                   <button
@@ -283,7 +397,7 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
                       + Add
                     </span>
                   </button>
-                  {items.slice(0, limit).map(chip)}
+                  {items.slice(0, limit).map((r) => chip(r, d))}
                   {items.length > limit ? (
                     <button
                       type="button"

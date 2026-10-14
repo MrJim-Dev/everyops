@@ -1,11 +1,13 @@
 "use client";
 
-import { ArrowUpIcon } from "@phosphor-icons/react";
+import { ArrowUpIcon, FileTextIcon, XIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ComposerTools } from "@/components/ai/composer-tools";
 import { PENDING_KEY, StarterChips } from "@/components/hub/starters";
+import { ATTACHMENT_ACCEPT, MAX_ATTACHMENTS } from "@/lib/assistant/attachments";
 import { useCurrentUser } from "@/lib/auth/client";
+import { keepPendingFiles } from "@/lib/pending-files";
 
 const EXAMPLES = [
   "I run a pickleball venue in Cebu with 4 courts and need online bookings.",
@@ -45,30 +47,40 @@ function useTypedExample(paused: boolean) {
 }
 
 /**
- * The landing page's prompt. It can't build without an account, so it keeps the
- * description and hands it to the dashboard after sign-up.
+ * The landing page's prompt. It can't build without an account, so it keeps the description (and any files the
+ * visitor picked) and hands them to the dashboard after sign-up, which uploads the files and starts setup.
  */
 export function HeroPrompt() {
   const router = useRouter();
   const user = useCurrentUser();
   const ref = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [focused, setFocused] = useState(false);
   const placeholder = useTypedExample(focused || value.length > 0);
 
-  const submit = () => {
-    const text = value.trim();
+  const pick = (list: Iterable<File>) => {
+    // Copy now: a FileList empties when its input is reset, before the state update runs.
+    const added = [...list];
+    setFiles((current) => [...current, ...added].slice(0, MAX_ATTACHMENTS));
+  };
+
+  const submit = async () => {
+    const text = value.trim() || (files.length ? "Set up my workspace from the attached files." : "");
     if (!text) {
       ref.current?.focus();
       return;
     }
     sessionStorage.setItem(PENDING_KEY, text);
+    await keepPendingFiles(files);
     router.push(user ? "/" : "/sign-up?next=/");
   };
 
-  /** Files and voice need an account (they go to Gemini and storage), so keep what's typed and continue there. */
-  const continueWithAccount = () => {
+  /** Voice needs an account (it goes to Gemini), so keep what's typed and picked, and continue there. */
+  const continueWithAccount = async () => {
     if (value.trim()) sessionStorage.setItem(PENDING_KEY, value.trim());
+    await keepPendingFiles(files);
     router.push(user ? "/" : "/sign-up?next=/");
   };
 
@@ -78,10 +90,18 @@ export function HeroPrompt() {
         className="w-full max-w-[640px]"
         onSubmit={(e) => {
           e.preventDefault();
-          submit();
+          void submit();
+        }}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          if (!e.dataTransfer.files.length) return;
+          e.preventDefault();
+          pick(e.dataTransfer.files);
         }}
       >
-        <div className="flex items-end gap-2 rounded-2xl border border-foreground/10 bg-card/80 p-2 pl-4 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.9)] backdrop-blur-md transition-[border-color,box-shadow] duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklab,var(--primary)_12%,transparent),0_20px_60px_-24px_color-mix(in_oklab,var(--primary)_40%,transparent)]">
+        <div className="flex flex-wrap items-end gap-2 rounded-2xl border border-foreground/10 bg-card/80 p-2 pl-4 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.9)] backdrop-blur-md transition-[border-color,box-shadow] duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklab,var(--primary)_12%,transparent),0_20px_60px_-24px_color-mix(in_oklab,var(--primary)_40%,transparent)]">
           <textarea
             ref={ref}
             rows={2}
@@ -94,13 +114,29 @@ export function HeroPrompt() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                submit();
+                void submit();
               }
             }}
             className="min-h-[52px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/80"
           />
           <span className="flex h-10 shrink-0 items-center">
-            <ComposerTools onAttachClick={continueWithAccount} onVoiceClick={continueWithAccount} />
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              accept={ATTACHMENT_ACCEPT}
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden
+              onChange={(e) => {
+                if (e.target.files) pick(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <ComposerTools
+              onAttachClick={() => picker.current?.click()}
+              onVoiceClick={() => void continueWithAccount()}
+            />
           </span>
           <button
             type="submit"
@@ -110,6 +146,28 @@ export function HeroPrompt() {
             <span className="hidden sm:inline">Build it</span>
             <ArrowUpIcon weight="bold" className="size-4" />
           </button>
+          {files.length ? (
+            <ul className="order-first flex w-full flex-wrap gap-1.5 pt-1" aria-label="Attached files">
+              {files.map((f, i) => (
+                <li
+                  // biome-ignore lint/suspicious/noArrayIndexKey: files can share a name; the list only changes here
+                  key={i}
+                  className="flex h-8 max-w-[220px] animate-pop items-center gap-1.5 rounded-md border bg-background/60 pr-1 pl-2 text-[12px]"
+                >
+                  <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 truncate">{f.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${f.name}`}
+                    onClick={() => setFiles((current) => current.filter((_, j) => j !== i))}
+                    className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                  >
+                    <XIcon className="size-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </form>
       <StarterChips

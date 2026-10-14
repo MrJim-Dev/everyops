@@ -10,6 +10,7 @@ import { StatusMenu } from "@/components/records/status-menu";
 import { Button } from "@/components/ui/button";
 import { useRecordActions } from "@/components/workspace/use-record-actions";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { useReportView } from "@/lib/assistant/screen-store";
 import { statusField } from "@/lib/blueprint/field-kind";
 import { findRecord, getEntity } from "@/lib/blueprint/lookup";
 import type { DataRecord, Entity, NotesView as NotesViewConfig } from "@/lib/blueprint/types";
@@ -57,6 +58,7 @@ export function NotesView({ view }: { view: NotesViewConfig }) {
   }, [ws.records, entity.id, query, view.titleFieldId, view.bodyFieldId]);
 
   const current = (selected ? findRecord(ws.records, selected) : undefined) ?? notes[0];
+  useReportView({ viewId: view.id, search: query.trim() || undefined, selectedId: current?.id });
 
   const create = () => {
     const status = statusField(entity);
@@ -69,7 +71,7 @@ export function NotesView({ view }: { view: NotesViewConfig }) {
       setQuery("");
       setSelected(result.record.id);
       setMobileOpen(true);
-    } else toast(result.errors[0]?.message ?? `That ${entity.name.toLowerCase()} couldn't be created.`);
+    } else toast.error(result.errors[0]?.message ?? `That ${entity.name.toLowerCase()} couldn't be created.`);
   };
 
   return (

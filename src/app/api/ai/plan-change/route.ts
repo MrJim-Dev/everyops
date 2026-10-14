@@ -8,6 +8,8 @@ import { auth } from "@/server/auth";
 const body = z.object({
   request: z.string().trim().min(3).max(500),
   attachments: z.array(attachmentRef).max(5).default([]),
+  /** Option use per choice field ("entity.field" → option id → records), from the workspace's records. */
+  optionUsage: z.record(z.string(), z.record(z.string(), z.number())).default({}),
   // The workspace still lives in the browser, so the client sends its blueprint. It is size-limited here
   // and every operation Gemini returns is checked against it before the plan is sent back.
   blueprint: z
@@ -26,7 +28,7 @@ export async function POST(request: Request) {
   if (!parsed.success)
     return Response.json({ ok: false, message: "Describe the change in a few words." }, { status: 400 });
 
-  const limit = takeAiToken(session.user.id);
+  const limit = await takeAiToken(session.user.id);
   if (!limit.ok)
     return Response.json(
       { ok: false, message: "You've asked for a lot of changes. Wait a few minutes and try again." },
@@ -37,6 +39,7 @@ export async function POST(request: Request) {
     parsed.data.blueprint as unknown as Blueprint,
     parsed.data.request,
     { userId: session.user.id, attachments: parsed.data.attachments },
+    parsed.data.optionUsage,
   );
   if (result.ok) return Response.json(result);
   return Response.json(result, { status: result.kind === "error" ? 502 : 200 });
