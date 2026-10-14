@@ -134,13 +134,17 @@ export type ApprovalQueueView = ViewBase & {
   rejectLabel: string;
   detailFieldIds: string[];
 };
-/** One page of a multi-step form: a title and the fields it asks. A step with extras shows the add-ons picker. */
+/**
+ * One page of a multi-step form: a title and the fields it asks. A step with extras shows the add-ons picker, and
+ * blockIds shows some of the form's blocks in the step instead of below the form (payment methods on the payment step).
+ */
 export type FormStep = {
   id: string;
   title: string;
   description?: string;
   fieldIds: string[];
   extras?: boolean;
+  blockIds?: string[];
 };
 
 /** A page that is just the form for adding one record type, e.g. a booking form for the front desk. */

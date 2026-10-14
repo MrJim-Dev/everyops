@@ -48,7 +48,7 @@ const assistantView = z.union(
         fieldIds: z
           .array(z.string())
           .describe(
-            "The fields asked, in order. A multi-step form puts '# Step title' before each step's fields, e.g. ['# Court and time', 'court', 'slot', '# Your details', 'guest_name', 'phone']",
+            "The fields asked, in order. A multi-step form puts '# Step title' before each step's fields, e.g. ['# Court and time', 'court', 'slot', '# Your details', 'guest_name', 'phone']. '@block_id' in a step shows one of the form's blocks (payment methods, FAQs) in that step",
           ),
       });
     if (type === "landing") return (o as AnyObject).omit({ blocks: true });
@@ -190,7 +190,7 @@ export const designOp = z.union([
       .array(z.string())
       .optional()
       .describe(
-        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, or form questions. Forms: '# Step title' before each step's fields makes it a multi-step form",
+        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, or form questions. Forms: '# Step title' before each step's fields makes it a multi-step form, and '@block_id' in a step shows one of the form's blocks there instead of below the form (e.g. ['# Payment', '@how_to_pay', 'method', 'reference']). Start from the form's current fields listed with its tab and keep everything you weren't asked to change",
       ),
   }),
   z.object({
@@ -450,6 +450,10 @@ Public pages and their requests:
 - "a landing page" or "a website": add_system (icon house) and add_view landing with a hero (title, a short
   subheading and a button to the public booking form). EveryOps lays it out in its standard design: highlights,
   what's offered, how it works, payment methods, FAQs and contact are filled in from the data.
+- Moving a form's section into one of its steps ("put the payment methods on step 4", "show the FAQs on the last
+  step"): update_view that form with its complete fields (start from the list shown with its tab) and '@block_id'
+  in the step that should show it. The section then shows inside that step instead of below the form. Never remove
+  a section someone asked to move; if the form has no steps yet, give it steps in the same update.
 - Changing a website's words ("make the headline punchier", "add our phone number", "rewrite the steps"): a renames
   entry with kind section, the section's blockId, and newName holding only the lines that change. A section the person
   clicked is named under "What the person is looking at"; edit that one. To show something new on the page, add_block;

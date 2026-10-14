@@ -138,10 +138,16 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
         if (view.steps) {
           const seen = new Set<string>();
           for (const step of view.steps) {
-            // A step may ask nothing but the add-ons.
-            if (!step.fieldIds.length && !(step.extras && view.extras))
+            // A step may ask nothing but show the add-ons or some of the form's blocks (how to pay).
+            if (!step.fieldIds.length && !(step.extras && view.extras) && !step.blockIds?.length)
               errors.push({ path, message: `${view.name}: step "${step.title}" asks nothing` });
             missing(step.fieldIds);
+            for (const id of step.blockIds ?? [])
+              if (!view.blocks?.some((b) => b.id === id))
+                errors.push({
+                  path,
+                  message: `${view.name}: step "${step.title}" shows block "${id}", which isn't on the form (blocks: ${(view.blocks ?? []).map((b) => b.id).join(", ") || "none"})`,
+                });
             for (const id of step.fieldIds) {
               if (seen.has(id)) errors.push({ path, message: `${view.name}: "${id}" is asked in two steps` });
               seen.add(id);

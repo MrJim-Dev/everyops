@@ -76,7 +76,14 @@ export function PublicSiteView({
         {page.type === "form" && page.form ? (
           <section className="mx-auto w-full max-w-[640px]">
             <h1 className="mb-6 text-[32px] font-semibold tracking-[-0.03em]">{page.name}</h1>
-            <PublicFormView form={page.form} slug={site.slug} preview={preview} />
+            <PublicFormView
+              form={page.form}
+              slug={site.slug}
+              preview={preview}
+              renderBlocks={(blocks) => (
+                <PublicBlocks blocks={blocks} slug={site.slug} preview={preview} compact />
+              )}
+            />
           </section>
         ) : null}
         <PublicBlocks blocks={page.blocks} slug={site.slug} preview={preview} />

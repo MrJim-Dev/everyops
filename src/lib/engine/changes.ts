@@ -402,6 +402,13 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         const view = next.views.find((v) => v.id === op.viewId);
         if ((view?.type === "form" || view?.type === "landing") && view.blocks)
           view.blocks = view.blocks.filter((b) => b.id !== op.blockId);
+        // A step that showed it doesn't any more.
+        if (view?.type === "form" && view.steps)
+          for (const s of view.steps)
+            if (s.blockIds) {
+              s.blockIds = s.blockIds.filter((id) => id !== op.blockId);
+              if (!s.blockIds.length) delete s.blockIds;
+            }
         break;
       }
       case "move_system": {

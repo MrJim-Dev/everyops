@@ -75,8 +75,15 @@ export type PublicForm = {
   choices: Record<string, { id: string; title: string }[]>;
   /** Booking forms pick a resource, a day and a free slot instead of typing times. */
   booking?: { resourceFieldId: string; timeFieldId: string; resources: PublicResource[] };
-  /** Multi-step forms: the fields of each step, in order. */
-  steps?: { title: string; description?: string; fieldIds: string[]; extras?: boolean }[];
+  /** Multi-step forms: the fields of each step, in order, and the form's blocks shown in that step. */
+  steps?: {
+    title: string;
+    description?: string;
+    fieldIds: string[];
+    extras?: boolean;
+    blockIds?: string[];
+    blocks?: ResolvedBlock[];
+  }[];
   /** With steps: a summary to check before sending. */
   review?: boolean;
   /** Add-ons people pick with a quantity; only their name and price are shown. */
@@ -310,11 +317,12 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
         fields.map((f) => f.id),
       ),
       extras?.title,
-    ).map(({ title, description, fieldIds, extras: picker }) => ({
+    ).map(({ title, description, fieldIds, extras: picker, blockIds }) => ({
       title,
       description,
       fieldIds,
       ...(picker ? { extras: true } : {}),
+      ...(blockIds?.length ? { blockIds } : {}),
     }));
     // The slot is picked under the resource, so it always belongs to the resource's step.
     if (booking) {
@@ -322,7 +330,7 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
       steps = steps.map((s) => ({ ...s, fieldIds: s.fieldIds.filter((id) => id !== timeFieldId) }));
       const home = steps.find((s) => s.fieldIds.includes(resourceFieldId)) ?? steps[0];
       home.fieldIds.push(timeFieldId);
-      steps = steps.filter((s) => s.fieldIds.length || s.extras);
+      steps = steps.filter((s) => s.fieldIds.length || s.extras || s.blockIds?.length);
     }
   }
   return {
@@ -443,7 +451,11 @@ export function resolveBlocks(
         const target = bp.views.find((v) => v.id === block.viewId);
         if (target?.type !== "form" || !target.public) break;
         const form = publicForm(bp, records, target);
-        if (form) out.push({ id: block.id, type: "form", title: block.title, form });
+        // A form embedded on a page brings the blocks its steps show (its other blocks stay on its own page).
+        const own = form?.steps?.some((s) => s.blockIds?.length)
+          ? withStepBlocks(form, resolveBlocks(bp, records, docs, slug, target, now)).form
+          : form;
+        if (own) out.push({ id: block.id, type: "form", title: block.title, form: own });
         break;
       }
       case "highlights":
@@ -508,7 +520,26 @@ export function resolvePage(
   const blocks = resolveBlocks(bp, records, docs, slug, view, now);
   if (view.type === "landing") return { id: view.id, name: view.name, type: "landing", blocks };
   const form = publicForm(bp, records, view);
-  return form ? { id: view.id, name: view.name, type: "form", blocks, form } : null;
+  if (!form) return null;
+  const placed = withStepBlocks(form, blocks);
+  return { id: view.id, name: view.name, type: "form", blocks: placed.rest, form: placed.form };
+}
+
+/**
+ * Puts the blocks a form's steps list (payment methods on the payment step) inside those steps; the rest stay below
+ * the form.
+ */
+export function withStepBlocks(
+  form: PublicForm,
+  blocks: ResolvedBlock[],
+): { form: PublicForm; rest: ResolvedBlock[] } {
+  const placed = new Set(form.steps?.flatMap((s) => s.blockIds ?? []) ?? []);
+  if (!placed.size) return { form, rest: blocks };
+  const steps = form.steps?.map((s) => {
+    const own = (s.blockIds ?? []).flatMap((id) => blocks.filter((b) => b.id === id));
+    return own.length ? { ...s, blocks: own } : s;
+  });
+  return { form: { ...form, steps }, rest: blocks.filter((b) => !placed.has(b.id)) };
 }
 
 /** A custom HTML page with the public forms it may send to; the bridge refuses any other form. */

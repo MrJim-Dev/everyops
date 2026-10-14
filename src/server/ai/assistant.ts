@@ -8,7 +8,7 @@ import {
   resolveSources,
   type Screen,
 } from "@/lib/assistant/screen";
-import { stepsFromMarkers } from "@/lib/blueprint/form-steps";
+import { markersOf, stepsFromMarkers } from "@/lib/blueprint/form-steps";
 import type {
   Block,
   Blueprint,
@@ -363,6 +363,24 @@ function toDesignOps(
         const entity = view && bp.entities.find((e) => e.id === view.entityId);
         // A form's fields can carry "# Step title" markers that split it into steps.
         const split = view?.type === "form" && o.fieldIds ? stepsFromMarkers(o.fieldIds) : undefined;
+        // "@How to pay" or "@how_to_pay": blocks named by title or id, on the form or added to it in this plan.
+        if (split?.steps && view?.type === "form") {
+          const blocks = [
+            ...(view.blocks ?? []),
+            ...ops.flatMap((x) => (x.op === "add_block" && x.viewId === view.id ? [x.block] : [])),
+          ];
+          const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+          for (const s of split.steps)
+            if (s.blockIds)
+              s.blockIds = s.blockIds.map(
+                (id) =>
+                  blocks.find((b) => b.id === id)?.id ??
+                  blocks.find(
+                    (b) => key(b.id) === key(id) || ("title" in b && key(b.title ?? "") === key(id)),
+                  )?.id ??
+                  id,
+              );
+        }
         const fieldIds = split ? split.fieldIds : o.fieldIds;
         // Fields added earlier in the same plan count too ("add guest name and phone, then ask them on the form").
         const added = ops.flatMap((x) =>
@@ -390,7 +408,13 @@ function toDesignOps(
             ? { submitLabel: o.submitLabel.trim() }
             : {}),
           ...(fieldIds?.length ? { fieldIds } : {}),
-          ...(split?.steps ? { steps: split.steps, review: true } : {}),
+          // Steps keep the form's own review setting; a form getting steps for the first time ends with one.
+          ...(split?.steps
+            ? {
+                steps: split.steps,
+                review: view?.type === "form" && view.steps?.length ? !!view.review : true,
+              }
+            : {}),
         };
         if (Object.keys(patch).length) ops.push({ op: "update_view", viewId: o.viewId, patch });
         break;
@@ -919,6 +943,9 @@ ${bp.systems
                     v.blocks?.length
                       ? `, blocks: ${v.blocks.map((b) => `${b.type} ${b.id}`).join(" / ")}`
                       : ""
+                  }${
+                    // The form's fields as update_view writes them: steps and the blocks each step shows.
+                    v.type === "form" ? `, fields: ${JSON.stringify(markersOf(v))}` : ""
                   }`
                 : v.type === "html"
                   ? isPublic(v)

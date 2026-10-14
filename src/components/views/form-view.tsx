@@ -70,6 +70,10 @@ export function FormView({ view }: { view: FormViewConfig }) {
     () => (view.blocks?.length ? resolveBlocks(ws.blueprint, ws.records, ws.docs, ws.id, view) : []),
     [ws.blueprint, ws.records, ws.docs, ws.id, view],
   );
+  // Blocks a step shows (payment methods on the payment step) are drawn in that step, not below the form.
+  const inSteps = new Set(wizard ? steps.flatMap((s) => s.blockIds ?? []) : []);
+  const stepBlocks = wizard && !reviewing ? blocks.filter((b) => steps[step]?.blockIds?.includes(b.id)) : [];
+  const below = blocks.filter((b) => !inSteps.has(b.id));
 
   const reset = () => {
     setCreatedId(null);
@@ -166,6 +170,7 @@ export function FormView({ view }: { view: FormViewConfig }) {
                   ) : null}
                 </div>
               ) : null}
+              {stepBlocks.length ? <PublicBlocks blocks={stepBlocks} slug={ws.id} preview compact /> : null}
               {reviewing ? (
                 <dl className="flex flex-col divide-y rounded-md border text-[13px]">
                   {steps.flatMap((s, si) =>
@@ -268,9 +273,9 @@ export function FormView({ view }: { view: FormViewConfig }) {
               )}
             </form>
           )}
-          {blocks.length ? (
+          {below.length ? (
             <div className="mt-10">
-              <PublicBlocks blocks={blocks} slug={ws.id} preview />
+              <PublicBlocks blocks={below} slug={ws.id} preview />
             </div>
           ) : null}
         </div>

@@ -318,7 +318,7 @@ export function tidy(bp: Blueprint): Blueprint {
             fieldIds: s.fieldIds.filter((id) => real.has(id) && !seen.has(id) && seen.add(id)),
           }))
           .map(({ extras, ...s }): FormStep => (extras && v.extras ? { ...s, extras } : s))
-          .filter((s) => s.fieldIds.length || s.extras);
+          .filter((s) => s.fieldIds.length || s.extras || s.blockIds?.length);
         if (v.steps.length < 2) {
           delete v.steps;
           delete v.review;
@@ -730,6 +730,11 @@ function tidyPublicForm(bp: Blueprint, v: Extract<View, { type: "form" }>) {
       },
     ];
   }
+  // The ways to pay show on the form's payment step when it has one, where people need them.
+  const payBlock = pay && v.blocks?.find((b) => b.type === "records" && b.entityId === pay.id);
+  const payStep = v.steps?.find((s) => /pay/i.test(s.title));
+  if (payBlock && payStep && !v.steps?.some((s) => s.blockIds?.includes(payBlock.id)))
+    payStep.blockIds = [...(payStep.blockIds ?? []), payBlock.id];
 }
 
 /**
