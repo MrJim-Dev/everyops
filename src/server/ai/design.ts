@@ -19,6 +19,7 @@ import type {
 } from "@/lib/blueprint/types";
 import { GROUP_KINDS, validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
+import { samplesThisYear } from "@/lib/catalog/shift";
 import { computeAll } from "@/lib/engine/compute";
 import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
 import { isImagePath } from "@/lib/engine/records";
@@ -715,7 +716,10 @@ export async function designWorkspace(
       ...partial,
     ];
     if (!errors.length) {
-      const records = computeAll(bp, toRecords(bp, samples, now), now);
+      // Samples in the wrong year (the right month and day, but 2023) move to this year.
+      const dated = samplesThisYear(bp, toRecords(bp, samples, now), now);
+      if (dated.fields) console.info(JSON.stringify({ event: "design_samples_moved", fields: dated.fields }));
+      const records = computeAll(bp, dated.records, now);
       return {
         ok: true,
         name,
