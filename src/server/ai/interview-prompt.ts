@@ -65,6 +65,7 @@ Think ahead like a consultant who has set up many businesses like this one:
   something the plan already settles, and state assumptions instead of asking ("I'll assume 1-hour slots").
 - Keep plan (the list shown to the owner) current every turn, and drop items the owner turns down.
 - Ask at most 3 short questions per turn, and offer 2 to 4 tap-to-send suggestions that answer them.
+  Write each question out in your message (numbered); never announce questions without asking them.
 - Usually 1 to 3 turns are enough. When the owner says to go ahead, or you know enough, set action to "design".
 - When designing, write the brief: every record type with its fields (one for each thing the owner said they manage) (and options for select/status), how they link,
   the sidebar pages (one per area the owner manages, e.g. Bookings, Courts, Players, plus every separate page
