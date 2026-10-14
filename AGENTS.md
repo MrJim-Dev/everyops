@@ -59,7 +59,8 @@ Use pnpm only. `pnpm build` matters: `cacheComponents` errors (below) only show 
 - Browser code uses `src/lib/auth/client.ts` only (`useCurrentUser`, `useAuthReady`, `signIn`, …). Keep its `AuthResult` messages: one message for unknown email and wrong password, same confirmation whether or not a reset email exists.
 - Page protection has two layers, and both are required: `src/proxy.ts` (cookie presence only, private paths in `config.matcher`) and `<Suspense><RequireSession next=…>` in the page or layout (real session check). The client `RequireAuth` guard is for sign-out transitions, not security. Server functions and route handlers must check the session themselves.
 - Private: `/workspaces`, `/account`, `/w/*`. Public: `/` (signed-in home; with no session cookie `proxy.ts` rewrites it to the `/welcome` landing page), sign-in/up/reset, `/community`, `/preview/*`, `/invite/*`, legal pages. Post-auth redirects go through `safeNext()`.
-- Email isn't connected: reset links are logged by `sendResetPassword`. Google sign-in turns on when `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set.
+- Email goes out over SMTP when `SMTP_*` is set (production); otherwise reset links are logged by `sendResetPassword`. Google sign-in turns on when `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set.
+- Nothing verifies email addresses, so every password account is unverified. Google sign-in on the same address links to it (`src/server/auth-linking.ts`, `requireLocalEmailVerified: false`) and, because Google proved the address, removes that unverified password and its sessions. Keep `auth-linking.test.ts` passing when upgrading Better Auth: a changed linking default once sent every such sign-in back to /sign-in with `account_not_linked`.
 
 ## Next.js 16 specifics
 
