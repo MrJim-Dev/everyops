@@ -6,7 +6,7 @@ import { ViewEmpty } from "@/components/views/view-empty";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { formatDateTime } from "@/lib/format";
 import { markFresh } from "@/lib/motion/fresh";
-import { canManage, useWorkspaces } from "@/lib/store/workspaces";
+import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
 
 export function HistoryList() {
   const ws = useWorkspace();
@@ -25,8 +25,22 @@ export function HistoryList() {
 
   return (
     <ol className="divide-y">
-      {changes.map((entry) => {
-        const isCurrent = !entry.undoneAt && workspace.currentVersion === entry.toVersion;
+      {changes.map((entry, index) => {
+        // Changes are undone newest first, so only the latest one still applied can be undone.
+        const isCurrent =
+          !entry.undoneAt &&
+          workspace.currentVersion === entry.toVersion &&
+          changes.slice(0, index).every((c) => c.undoneAt);
+        // Staff can undo the data changes they're allowed to make; owners and admins anything.
+        const mayUndo =
+          canManage(ws.role) ||
+          (canEdit(ws.role) && entry.fromVersion === entry.toVersion && !entry.teamBefore);
+        const counts = [
+          entry.recordChanges.length && `${entry.recordChanges.length} values updated`,
+          entry.createdRecordIds?.length && `${entry.createdRecordIds.length} records added`,
+          entry.replacedRecords?.length && `${entry.replacedRecords.length} records edited`,
+          entry.removedRecords?.length && `${entry.removedRecords.length} records deleted`,
+        ].filter(Boolean);
         return (
           <li key={entry.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start">
             <span className="flex size-7 shrink-0 items-center justify-center rounded-full border text-muted-foreground">
@@ -48,23 +62,31 @@ export function HistoryList() {
               <ul className="mt-2 flex flex-col gap-1 text-[12.5px]">
                 {entry.steps.map((step) => (
                   <li key={step.label} className="flex gap-2">
-                    <span className="text-muted-foreground">{step.kind === "add" ? "Added" : "Changed"}</span>
+                    <span className={step.kind === "remove" ? "text-destructive" : "text-muted-foreground"}>
+                      {step.kind === "add" ? "Added" : step.kind === "remove" ? "Removed" : "Changed"}
+                    </span>
                     <span>{step.label}</span>
                     <span className="text-muted-foreground tabular">{step.detail}</span>
                   </li>
                 ))}
               </ul>
               <p className="mt-2 text-[12px] text-muted-foreground">
-                {formatDateTime(entry.appliedAt)} · {entry.recordChanges.length} values updated
+                {[formatDateTime(entry.appliedAt), ...counts].join(" · ")}
               </p>
             </div>
-            {isCurrent && canManage(ws.role) ? (
+            {isCurrent && mayUndo ? (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => {
                   undo(ws.id, entry.id);
-                  markFresh([...new Set(entry.recordChanges.map((c) => c.recordId))]);
+                  markFresh([
+                    ...new Set([
+                      ...entry.recordChanges.map((c) => c.recordId),
+                      ...(entry.removedRecords ?? []).map((r) => r.id),
+                      ...(entry.replacedRecords ?? []).map((r) => r.id),
+                    ]),
+                  ]);
                 }}
               >
                 <ArrowCounterClockwiseIcon data-icon="inline-start" />

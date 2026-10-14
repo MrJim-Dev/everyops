@@ -55,6 +55,12 @@ export type ChangeEntry = {
   createdRecordIds?: string[];
   /** Records as they were before the change edited them, restored on undo. */
   replacedRecords?: DataRecord[];
+  /** Records the change deleted (directly, or with their record type), put back on undo. */
+  removedRecords?: DataRecord[];
+  /** Page text the change replaced, by view id; null when the page had none. Restored on undo. */
+  replacedDocs?: Record<string, PageDoc | null>;
+  /** The team as it was before the change invited people or changed roles. Restored on undo. */
+  teamBefore?: { members: Member[]; invites: Invite[] };
 };
 
 export type Workspace = {
@@ -101,6 +107,29 @@ export function mergeRecords(stored: DataRecord[], incoming: DataRecord[], synce
 }
 
 export type PageDoc = { body: string; updatedAt: string };
+
+/**
+ * The history a staff save may write. Staff can't change the design or the team, so they only add entries for
+ * data and page-text changes at the current version (like an assistant plan that deletes a record), and mark
+ * such entries undone. Everything else stays as stored.
+ */
+export function mergeStaffChanges(
+  stored: ChangeEntry[],
+  incoming: ChangeEntry[],
+  currentVersion: number,
+): ChangeEntry[] {
+  const dataOnly = (c: ChangeEntry) =>
+    c.fromVersion === currentVersion && c.toVersion === currentVersion && !c.teamBefore;
+  const known = new Map(stored.map((c) => [c.id, c]));
+  const added = incoming.filter((c) => !known.has(c.id) && dataOnly(c));
+  const undone = new Map(incoming.filter((c) => c.undoneAt).map((c) => [c.id, c.undoneAt]));
+  return [
+    ...added,
+    ...stored.map((c) =>
+      dataOnly(c) && !c.undoneAt && undone.has(c.id) ? { ...c, undoneAt: undone.get(c.id) } : c,
+    ),
+  ];
+}
 
 export type NewWorkspace = {
   name: string;

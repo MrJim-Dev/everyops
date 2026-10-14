@@ -243,6 +243,7 @@ export function applyRecordOps(ws: WorkspaceData, ops: RecordOp[], now: Date = n
   let data = ws;
   const created: string[] = [];
   const replaced: DataRecord[] = [];
+  const removed: DataRecord[] = [];
   const errors: string[] = [];
   for (const op of ops) {
     if (op.op === "create_record") {
@@ -251,6 +252,34 @@ export function applyRecordOps(ws: WorkspaceData, ops: RecordOp[], now: Date = n
         data = result.data;
         created.push(result.record.id);
       } else errors.push(`New ${op.entityId}: ${result.errors.map((e) => e.message).join("; ")}`);
+    } else if (op.op === "delete_record") {
+      const target = findRecord(data.records, op.recordId);
+      if (!target) {
+        errors.push(`${op.recordId}: no such record`);
+        continue;
+      }
+      // Its line items go with it (they can't exist without it), nested ones included.
+      const gone = new Set([target.id]);
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const r of data.records) {
+          const parent = data.blueprint.entities.find((e) => e.id === r.entityId)?.parent;
+          if (parent && !gone.has(r.id) && gone.has(String(r.data[parent.fieldId] ?? ""))) {
+            gone.add(r.id);
+            grew = true;
+          }
+        }
+      }
+      for (const r of data.records)
+        if (gone.has(r.id) && !created.includes(r.id)) removed.push(replaced.find((x) => x.id === r.id) ?? r);
+      data = {
+        ...data,
+        records: computeAll(
+          data.blueprint,
+          data.records.filter((r) => !gone.has(r.id)),
+          now,
+        ),
+      };
     } else {
       const before = findRecord(data.records, op.recordId);
       const result = updateRecord(data, op.recordId, op.patch, now);
@@ -261,7 +290,9 @@ export function applyRecordOps(ws: WorkspaceData, ops: RecordOp[], now: Date = n
       } else errors.push(`${op.recordId}: ${result.errors.map((e) => e.message).join("; ")}`);
     }
   }
-  return { data, created, replaced, errors };
+  // A record changed and then deleted in the same plan comes back from undo as it was at the start.
+  const removedIds = new Set(removed.map((r) => r.id));
+  return { data, created, replaced: replaced.filter((r) => !removedIds.has(r.id)), removed, errors };
 }
 
 /** Images are only ever our own uploads (or, in a preview that isn't saved, a picture held in the browser). */
