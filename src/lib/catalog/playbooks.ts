@@ -28,8 +28,13 @@ export type Playbook = {
 export const COMMON_NEEDS = `- Payment methods (GCash, Maya, bank transfer, cash): name, type, account name, account number, QR code picture,
   instructions, active. Active ones show on public forms so customers know where to pay; customers type their
   payment reference number, and a status (pending payment → paid/confirmed) lets staff verify before confirming.
-- A public page customers use without an account when they book, order or inquire themselves, plus FAQs if they ask
-  the same questions often. Public forms with more than 5 questions, or with add-ons, are forms in steps.
+- When customers book, order, sign up or inquire on their own (a booking system, a rental, an event, a class, a
+  shop taking orders): a public booking (or order) form AND a website. EveryOps builds the website as a custom HTML
+  page in its own polished design (Emil Kowalski's design rules: clear, fast, purposeful motion) from the words in
+  site and the data, with buttons that open the form; write strong site words (headline, intro, button, three
+  highlights, three steps). The booking form's calendar suits the business: courts or rooms side by side for a few
+  resources, a month calendar for one, whole-day check-in/check-out for stays and rentals. Add FAQs if customers
+  ask the same questions often. Public forms with more than 5 questions, or with add-ons, are forms in steps.
 - An Overview dashboard: today's bookings or orders, revenue this week and month, unpaid or pending items, and a chart.
 - Anything sold or rented on top of the main service (rentals, extras, items for sale) is an add-on: a record type of
   items with a price, line items under the booking or order (item link, quantity, line total = price × quantity),

@@ -3,6 +3,7 @@ import type {
   Block,
   BlockItem,
   Blueprint,
+  BookingLayout,
   DataRecord,
   Entity,
   Field,
@@ -61,6 +62,7 @@ export type ChangeOp =
         steps?: FormStep[];
         review?: boolean;
         multipleSlots?: boolean;
+        bookingLayout?: BookingLayout;
       };
     }
   /** Adds a block (live data, text, a form) to a form or landing page, optionally before another block. */

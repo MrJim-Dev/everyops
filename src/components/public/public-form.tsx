@@ -4,16 +4,16 @@ import { ArrowLeftIcon, ArrowRightIcon, CheckCircleIcon, UploadSimpleIcon } from
 import { useEffect, useState } from "react";
 import { ExtrasPicker } from "@/components/forms/extras-picker";
 import { StepIndicator } from "@/components/forms/step-indicator";
+import { BookingPicker } from "@/components/public/booking-pickers";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { FieldValue } from "@/lib/blueprint/types";
-import { formatDate, formatRange, formatTime, isTimeRange } from "@/lib/format";
+import { formatDate, formatRange, isTimeRange } from "@/lib/format";
 import { isHeic, MAX_SOURCE_BYTES, prepareImage } from "@/lib/prepare-image";
 import type { PublicField, PublicForm, ResolvedBlock } from "@/lib/public/resolve";
-import { joinSlots, type Slot } from "@/lib/public/slots";
-import { addDays, at, dateKey, hoursBetween, todayKey } from "@/lib/time";
+import { at, dateKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 type Done = { reference: string; title: string; summary: { name: string; text: string }[] };
@@ -49,14 +49,17 @@ export function PublicFormView({
   };
   const booking = form.booking;
   // The booking's own date field follows the picked slot; it isn't asked.
-  const derived = new Set(booking?.dayFieldIds ?? []);
+  const derived = new Set([...(booking?.dayFieldIds ?? []), ...(booking?.endDayFieldIds ?? [])]);
   const pickSlot = (v: FieldValue) => {
     if (!booking) return;
-    const day = isTimeRange(v) ? dateKey(new Date((v as { start: string }).start)) : null;
+    const range = isTimeRange(v) ? (v as { start: string; end: string }) : null;
+    const first = range ? dateKey(range.start) : null;
+    const last = range ? dateKey(booking.dates ? range.end : new Date(Date.parse(range.end) - 1)) : null;
     setValues((s) => ({
       ...s,
       [booking.timeFieldId]: v,
-      ...Object.fromEntries(booking.dayFieldIds.map((id) => [id, day])),
+      ...Object.fromEntries(booking.dayFieldIds.map((id) => [id, first])),
+      ...Object.fromEntries(booking.endDayFieldIds.map((id) => [id, last])),
     }));
     setErrors((e) => ({ ...e, [booking.timeFieldId]: "" }));
   };
@@ -258,6 +261,27 @@ export function PublicFormView({
         if (booking && (f.id === booking.timeFieldId || derived.has(f.id))) return null;
         const error = errors[f.id];
         const id = `pf-${form.viewId}-${f.id}`;
+        const picker =
+          booking && f.id === booking.resourceFieldId ? (
+            <BookingPicker
+              slug={slug}
+              viewId={form.viewId}
+              booking={booking}
+              resourceId={typeof values[f.id] === "string" ? (values[f.id] as string) : ""}
+              value={values[booking.timeFieldId]}
+              error={errors[booking.timeFieldId] || (booking.layout === "grid" ? error : undefined)}
+              preview={preview}
+              onChange={pickSlot}
+              onResource={(r) => set(f.id, r)}
+            />
+          ) : null;
+        // The grid picks the court with the time: each court is a column, so there's no separate list to choose from.
+        if (picker && booking?.layout === "grid" && !booking.dates)
+          return (
+            <div key={f.id} className="flex flex-col gap-1.5">
+              {picker}
+            </div>
+          );
         return (
           <div key={f.id} className="flex flex-col gap-1.5">
             {f.type === "checkbox" ? null : (
@@ -277,18 +301,7 @@ export function PublicFormView({
             />
             {f.description ? <p className="text-[12px] text-muted-foreground">{f.description}</p> : null}
             {error ? <p className="text-[12.5px] text-destructive">{error}</p> : null}
-            {booking && f.id === booking.resourceFieldId ? (
-              <SlotPicker
-                slug={slug}
-                viewId={form.viewId}
-                resourceId={typeof values[f.id] === "string" ? (values[f.id] as string) : ""}
-                value={values[booking.timeFieldId]}
-                error={errors[booking.timeFieldId]}
-                preview={preview}
-                multiple={booking.multiple}
-                onChange={pickSlot}
-              />
-            ) : null}
+            {picker}
           </div>
         );
       })}
@@ -581,180 +594,6 @@ function RangeFields({
         value={b}
         onChange={(e) => emit(a, e.target.value, day)}
       />
-    </div>
-  );
-}
-
-/** "1 hour", "2 hours", "1.5 hours". */
-function hoursText(range: { start: string; end: string }) {
-  const h = Math.round(hoursBetween(range.start, range.end) * 100) / 100;
-  return h === 1 ? "1 hour" : `${h} hours`;
-}
-
-/**
- * Pick a day, then a free slot. With multiple, tapping the next (or previous) free slot makes the booking longer,
- * tapping an end slot shortens it, and tapping elsewhere starts over from that slot. The day strip and the date box
- * move together, and the day follows a slot that's already picked (e.g. after Back).
- */
-function SlotPicker({
-  slug,
-  viewId,
-  resourceId,
-  value,
-  error,
-  preview,
-  multiple,
-  onChange,
-}: {
-  slug: string;
-  viewId: string;
-  resourceId: string;
-  value: FieldValue | undefined;
-  error?: string;
-  preview?: boolean;
-  multiple: boolean;
-  onChange: (v: FieldValue) => void;
-}) {
-  const today = todayKey();
-  const picked = isTimeRange(value ?? null) ? (value as { start: string; end: string }) : null;
-  const pickedDay = picked ? dateKey(new Date(picked.start)) : null;
-  const [day, setDay] = useState(() => pickedDay ?? today);
-  const [from, setFrom] = useState(() => (pickedDay && pickedDay > addDays(today, 13) ? pickedDay : today));
-  const [slots, setSlots] = useState<Slot[] | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!resourceId || preview) return setSlots(null);
-    let live = true;
-    setLoading(true);
-    fetch(`/api/public/${slug}/${viewId}/slots?resource=${encodeURIComponent(resourceId)}&date=${day}`, {
-      cache: "no-store",
-    })
-      .then((r) => r.json())
-      .then((b: { ok: boolean; slots?: Slot[] }) => live && setSlots(b.ok ? (b.slots ?? []) : []))
-      .catch(() => live && setSlots([]))
-      .finally(() => live && setLoading(false));
-    return () => {
-      live = false;
-    };
-  }, [slug, viewId, resourceId, day, preview]);
-
-  const pickDay = (d: string) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d < today || d === day) return;
-    setDay(d);
-    if (d < from || d > addDays(from, 13)) setFrom(d);
-    onChange(null);
-  };
-  const inPicked = (s: Slot) =>
-    !!picked &&
-    Date.parse(s.start) >= Date.parse(picked.start) &&
-    Date.parse(s.end) <= Date.parse(picked.end);
-  const choose = (s: Slot) => {
-    const one = { start: s.start, end: s.end };
-    if (!multiple || !picked || pickedDay !== day) return onChange(one);
-    const [ps, pe, ss, se] = [picked.start, picked.end, s.start, s.end].map((t) => Date.parse(t));
-    if (ss >= ps && se <= pe) {
-      if (ss === ps && se === pe) return onChange(null);
-      if (ss === ps) return onChange({ start: s.end, end: picked.end });
-      if (se === pe) return onChange({ start: picked.start, end: s.start });
-      return onChange(one);
-    }
-    const list = slots ?? [];
-    const last = list.find((x) => Date.parse(x.end) === pe);
-    const joined =
-      ss < ps
-        ? joinSlots(list, s.start, last?.start ?? picked.start)
-        : joinSlots(list, picked.start, s.start);
-    onChange(joined ?? one);
-  };
-
-  const days = Array.from({ length: 14 }, (_, i) => addDays(from, i));
-  return (
-    <div className="mt-2 flex flex-col gap-3 rounded-lg border p-3">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-[13px] font-medium">Day and time *</span>
-        <Input
-          type="date"
-          aria-label="Date"
-          min={today}
-          value={day}
-          onChange={(e) => pickDay(e.target.value)}
-          className="h-8 w-auto text-[13px]"
-        />
-      </div>
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {days.map((d) => {
-          const date = new Date(`${d}T12:00:00+08:00`);
-          return (
-            <button
-              key={d}
-              type="button"
-              aria-pressed={d === day}
-              aria-label={date.toLocaleDateString("en-PH", { dateStyle: "full", timeZone: "Asia/Manila" })}
-              onClick={() => pickDay(d)}
-              className={cn(
-                "flex w-14 shrink-0 flex-col items-center rounded-md border py-1.5 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
-                d === day
-                  ? "border-primary bg-primary/15 text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <span>{date.toLocaleDateString("en-PH", { weekday: "short", timeZone: "Asia/Manila" })}</span>
-              <span className="font-mono text-[14px] tabular text-foreground">{Number(d.slice(8))}</span>
-            </button>
-          );
-        })}
-      </div>
-      {!resourceId ? (
-        <p className="text-[12.5px] text-muted-foreground">Choose a court first to see open times.</p>
-      ) : preview ? (
-        <p className="text-[12.5px] text-muted-foreground">Open times show on the public page.</p>
-      ) : loading && !slots ? (
-        <p className="text-[12.5px] text-muted-foreground">Checking open times…</p>
-      ) : slots?.some((s) => s.free) ? (
-        <>
-          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
-            {slots.map((s) => {
-              const on = inPicked(s);
-              return (
-                <button
-                  key={s.start}
-                  type="button"
-                  disabled={!s.free}
-                  aria-pressed={on}
-                  onClick={() => choose(s)}
-                  className={cn(
-                    "rounded-md border px-2 py-2 font-mono text-[12.5px] tabular outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-35 disabled:line-through",
-                    on ? "border-primary bg-primary text-primary-foreground" : "hover:border-foreground/30",
-                  )}
-                >
-                  {formatTime(s.start)}
-                </button>
-              );
-            })}
-          </div>
-          <p className="text-[12.5px] text-muted-foreground" aria-live="polite">
-            {picked && pickedDay === day ? (
-              <>
-                <span className="text-foreground">
-                  {formatDate(picked.start)} · {formatRange(picked)}
-                </span>{" "}
-                · {hoursText(picked)}
-                {multiple ? ". Tap the next time to add more." : ""}
-              </>
-            ) : multiple ? (
-              "Tap a start time. Tap the times after it to book longer."
-            ) : (
-              "Tap a time to book it."
-            )}
-          </p>
-        </>
-      ) : (
-        <p className="text-[12.5px] text-muted-foreground">
-          No open times on {day === today ? "today" : "this day"}. Try another day.
-        </p>
-      )}
-      {error ? <p className="text-[12.5px] text-destructive">{error}</p> : null}
     </div>
   );
 }

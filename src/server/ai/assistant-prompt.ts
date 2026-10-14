@@ -5,6 +5,7 @@ import {
   block,
   entity,
   field,
+  HTML_DESIGN_GUIDE,
   option,
   PUBLIC_PAGES_GUIDE,
   rule,
@@ -414,6 +415,9 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
     it save to that form. If no public form for that record type exists, add one in the same plan (add_view form
     with public true, its fields with '# Step title' markers for a multi-step form) before the html page. Style it
     with CSS on form, fieldset, legend, label, input, select, textarea and button.
+    For a booking page, a "Book now" link to the public form (href "/s/__everyops_site__/FORM_VIEW_ID",
+    target "_top") opens EveryOps's own form with its live calendar; prefer it to embedding a booking form.
+    ${HTML_DESIGN_GUIDE}
     In the reply, say they can open Edit HTML to change the design.
 - Reports and totals pages: add_system with no views and several add_widget on it; a page without views shows
   its widgets as a dashboard. Start with 2 to 4 stat widgets for the totals (metric count/sum/avg, optional

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { withSiteLinks } from "@/lib/public/custom-site";
 import { formValues, frameDocument, HTML_PAGE_SANDBOX, type RawFormValues } from "@/lib/public/html-page";
 import type { PublicForm } from "@/lib/public/resolve";
 import { cn } from "@/lib/utils";
@@ -37,7 +38,8 @@ export function HtmlPageFrame({
   className?: string;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
-  const doc = useMemo(() => frameDocument(html), [html]);
+  // Links the page was created with ("/s/<site>/book") point at this workspace's real pages.
+  const doc = useMemo(() => frameDocument(withSiteLinks(html, slug)), [html, slug]);
   const latest = useRef({ forms, preview, slug });
   latest.current = { forms, preview, slug };
 

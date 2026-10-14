@@ -17,7 +17,14 @@ import {
   siteOf,
   visitorContactIds,
 } from "@/lib/public/resolve";
-import { type Slot, slotRangeProblem, slotsFor } from "@/lib/public/slots";
+import {
+  type DayFree,
+  dateRangeProblem,
+  daysFor,
+  type Slot,
+  slotRangeProblem,
+  slotsFor,
+} from "@/lib/public/slots";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { dateKey } from "@/lib/time";
 import { db } from "./db";
@@ -66,6 +73,22 @@ export async function publicSlots(
   const view = bp.views.find((v) => v.id === viewId);
   if (view?.type !== "form" || !view.public) return null;
   return slotsFor(bp, doc.records, view, resourceId, day);
+}
+
+/** Free and taken days of one resource from a day on, for a public form that books whole days (stays, rentals). */
+export async function publicDays(
+  slug: string,
+  viewId: string,
+  resourceId: string,
+  from: string,
+  count: number,
+): Promise<DayFree[] | null> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return null;
+  const doc = await readDoc(slug);
+  if (!doc) return null;
+  const view = doc.blueprint.views.find((v) => v.id === viewId);
+  if (view?.type !== "form" || !view.public) return null;
+  return daysFor(doc.blueprint, doc.records, view, resourceId, from, count);
 }
 
 type Draft =
@@ -147,8 +170,11 @@ function draftFromVisitor(
   const booked = form?.booking;
   const range = booked ? input[booked.timeFieldId] : undefined;
   if (booked && isTimeRange(range ?? null)) {
-    const day = dateKey(new Date((range as { start: string }).start));
-    for (const id of booked.dayFieldIds) input[id] = day;
+    const { start, end } = range as { start: string; end: string };
+    for (const id of booked.dayFieldIds) input[id] = dateKey(start);
+    // A stay's check-out is its end day; a booking of hours ends the day it started (or just after midnight).
+    for (const id of booked.endDayFieldIds)
+      input[id] = dateKey(booked.dates ? end : new Date(Date.parse(end) - 1));
   }
   // The business sets statuses; a new submission starts at the first one (e.g. Pending or Unpaid).
   // Typed-in amounts are the business's to set too; a required one starts at zero for staff to fill in.
@@ -173,12 +199,14 @@ function draftFromVisitor(
   const time = booking ? input[booking.timeFieldId] : undefined;
   if (booking && isTimeRange(time ?? null) && Date.parse((time as { start: string }).start) <= now.getTime())
     return { ok: false, status: 422, message: "Pick a time that hasn't started yet." } as const;
-  // A picked range is whole slots inside opening hours, and one slot when the form allows only one. Stays and
-  // rentals book whole days (range "dates"), which have no slots to line up with.
+  // A picked range is whole slots inside opening hours, and one slot when the form allows only one. A stay is days:
+  // check-out after check-in, from today on.
   const resource = booked?.resources.find((r) => r.id === input[booked.resourceFieldId]);
-  const wholeDays = entity.fields.find((f) => f.id === booked?.timeFieldId)?.range === "dates";
-  if (booked && resource && !wholeDays && isTimeRange(time ?? null)) {
-    const problem = slotRangeProblem(time as { start: string; end: string }, resource, booked.multiple);
+  if (booked && resource && isTimeRange(time ?? null)) {
+    const range = time as { start: string; end: string };
+    const problem = booked.dates
+      ? dateRangeProblem(range, now)
+      : slotRangeProblem(range, resource, booked.multiple);
     if (problem)
       return {
         ok: false,
