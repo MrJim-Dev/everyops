@@ -79,7 +79,8 @@ export function WorkspaceSettings() {
           }
           action={
             manager ? (
-              <Button type="submit" size="sm" disabled={!changed}>
+              // Outlined until there's something to save, so an unchanged name doesn't look ready to submit.
+              <Button type="submit" size="sm" variant={changed ? "default" : "outline"} disabled={!changed}>
                 Save
               </Button>
             ) : null

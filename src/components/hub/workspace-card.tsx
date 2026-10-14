@@ -1,10 +1,24 @@
 "use client";
 
-import { SparkleIcon, StackIcon, UsersIcon } from "@phosphor-icons/react";
+import { SparkleIcon, StackIcon, TrashIcon, UsersIcon } from "@phosphor-icons/react";
 import Link from "next/link";
+import { useState } from "react";
+import { toast } from "sonner";
 import { WorkspaceTile } from "@/components/shell/workspace-tile";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { formatNumber } from "@/lib/format";
 import type { Role, Workspace } from "@/lib/store/workspace-model";
+import { useWorkspaces } from "@/lib/store/workspaces";
 import { workspaceStats } from "./workspace-stats";
 import { WorkspaceVisibility } from "./workspace-visibility";
 
@@ -57,7 +71,11 @@ export function WorkspaceCard({
           </p>
         </div>
         <div className="relative z-10 shrink-0">
-          <WorkspaceVisibility slug={ws.slug} compact />
+          {settingUp && role === "owner" ? (
+            <DiscardDraft slug={ws.slug} />
+          ) : (
+            <WorkspaceVisibility slug={ws.slug} compact />
+          )}
         </div>
       </div>
       <div className="flex items-center gap-4 text-[12px] text-muted-foreground">
@@ -77,6 +95,43 @@ export function WorkspaceCard({
         )}
       </div>
     </article>
+  );
+}
+
+/** A setup that never finished is just a conversation: the owner can throw it away from the list. */
+function DiscardDraft({ slug }: { slug: string }) {
+  const [open, setOpen] = useState(false);
+  const remove = useWorkspaces((s) => s.deleteWorkspace);
+  return (
+    <>
+      <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => setOpen(true)}>
+        <TrashIcon data-icon="inline-start" />
+        Discard
+      </Button>
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard this setup?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The conversation with Ask EveryOps is removed. Nothing was built yet, so no records are lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                remove(slug);
+                setOpen(false);
+                toast.success("Setup discarded");
+              }}
+            >
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

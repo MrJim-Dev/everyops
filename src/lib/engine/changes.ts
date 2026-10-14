@@ -188,14 +188,18 @@ function setViewFields(view: View, entity: Entity | undefined, fieldIds: string[
 
 /* ---------- Removals (on the copy applyOps works on) ---------- */
 
-const dropEmptySystems = (bp: Blueprint) => {
-  bp.systems = bp.systems.filter((s) => s.viewIds.length + s.widgetIds.length > 0);
+/**
+ * Pages left with nothing on them go, at the end of the plan: a plan that removes a page's only tab and then adds its
+ * replacement ("turn the Welcome tab into a custom HTML page") keeps the page. Pages the plan adds aren't dropped
+ * here; validation reports one that ends up empty.
+ */
+const dropEmptySystems = (bp: Blueprint, keep: Set<string> = new Set()) => {
+  bp.systems = bp.systems.filter((s) => s.viewIds.length + s.widgetIds.length > 0 || keep.has(s.id));
 };
 
 function removeWidget(bp: Blueprint, widgetId: string) {
   bp.widgets = bp.widgets.filter((w) => w.id !== widgetId);
   for (const s of bp.systems) s.widgetIds = s.widgetIds.filter((id) => id !== widgetId);
-  dropEmptySystems(bp);
 }
 
 function removeView(bp: Blueprint, viewId: string) {
@@ -208,7 +212,6 @@ function removeView(bp: Blueprint, viewId: string) {
       v.blocks = v.blocks
         .filter((b) => !(b.type === "form" && b.viewId === viewId))
         .map((b) => (b.type === "hero" && b.ctaViewId === viewId ? { ...b, ctaViewId: undefined } : b));
-  dropEmptySystems(bp);
 }
 
 /**
@@ -299,7 +302,6 @@ function removeEntity(bp: Blueprint, entityId: string) {
       v.blocks = v.blocks.filter((b) => !(b.type === "records" && b.entityId === entityId));
   // A form whose add-ons lived in it offers none now.
   for (const v of bp.views) if (v.type === "form" && v.extras?.lineEntityId === entityId) delete v.extras;
-  dropEmptySystems(bp);
 }
 
 export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
@@ -371,7 +373,6 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         if (!target || !next.views.some((v) => v.id === op.viewId)) break;
         for (const s of next.systems) s.viewIds = s.viewIds.filter((id) => id !== op.viewId);
         target.viewIds.push(op.viewId);
-        next.systems = next.systems.filter((s) => s.viewIds.length + s.widgetIds.length > 0);
         break;
       }
       case "remove_entity":
@@ -401,6 +402,13 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         const view = next.views.find((v) => v.id === op.viewId);
         if ((view?.type === "form" || view?.type === "landing") && view.blocks)
           view.blocks = view.blocks.filter((b) => b.id !== op.blockId);
+        // A step that showed it doesn't any more.
+        if (view?.type === "form" && view.steps)
+          for (const s of view.steps)
+            if (s.blockIds) {
+              s.blockIds = s.blockIds.filter((id) => id !== op.blockId);
+              if (!s.blockIds.length) delete s.blockIds;
+            }
         break;
       }
       case "move_system": {
@@ -463,6 +471,7 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       }
     }
   }
+  dropEmptySystems(next, new Set(ops.flatMap((op) => (op.op === "add_system" ? [op.system.id] : []))));
   return next;
 }
 

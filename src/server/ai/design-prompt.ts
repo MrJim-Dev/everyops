@@ -435,7 +435,7 @@ export const design = z.object({
       }),
     )
     .describe(
-      "3 to 5 realistic sample records for each main record type (up to 24 in total). Never give values for formula or rollup fields.",
+      "2 to 3 realistic sample records for every record type, including line items (2 to 3 lines under a parent sample, so its totals aren't zero) and day-to-day records like attendance, orders or payslips; up to 36 in total. Never give values for formula or rollup fields.",
     ),
 });
 export type Design = z.infer<typeof design>;
@@ -513,6 +513,8 @@ sample records (use every menu item or price they show, up to 40 records per rec
 
 Formula language (formula.expr, freezeWhen, filters, rule conditions and values):
 - Field references by id on the same record (rate, qty); through a relation field: player.member, product.price.
+  One link only: product.price works, product.category.name and crew_member.position.daily_rate don't. When a
+  formula needs a value two links away, give the record its own link (or a formula field) one step away.
 - Numbers, 'strings', true, false, null. Operators: + - * / % == != < <= > >= && || ! and cond ? a : b.
 - Functions: ${Object.keys(FUNCTIONS).join(", ")}. hour/weekday read Asia/Manila time (weekday 0 = Sunday);
   duration_hours(range) and days(range) measure time ranges; is_today, is_this_month, is_upcoming test dates.

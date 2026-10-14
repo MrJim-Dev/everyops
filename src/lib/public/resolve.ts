@@ -12,6 +12,7 @@ import type {
   BlockItem,
   Blueprint,
   DataRecord,
+  Entity,
   Field,
   FieldType,
   FieldValue,
@@ -22,6 +23,7 @@ import type {
   View,
 } from "@/lib/blueprint/types";
 import { applyFilter, sortRecords } from "@/lib/engine/query";
+import { autoReferenceFields } from "@/lib/engine/references";
 import {
   formatDate,
   formatDateTime,
@@ -75,8 +77,15 @@ export type PublicForm = {
   choices: Record<string, { id: string; title: string }[]>;
   /** Booking forms pick a resource, a day and a free slot instead of typing times. */
   booking?: { resourceFieldId: string; timeFieldId: string; resources: PublicResource[] };
-  /** Multi-step forms: the fields of each step, in order. */
-  steps?: { title: string; description?: string; fieldIds: string[]; extras?: boolean }[];
+  /** Multi-step forms: the fields of each step, in order, and the form's blocks shown in that step. */
+  steps?: {
+    title: string;
+    description?: string;
+    fieldIds: string[];
+    extras?: boolean;
+    blockIds?: string[];
+    blocks?: ResolvedBlock[];
+  }[];
   /** With steps: a summary to check before sending. */
   review?: boolean;
   /** Add-ons people pick with a quantity; only their name and price are shown. */
@@ -224,9 +233,67 @@ export function formatCell(
 function publishedEntities(bp: Blueprint): Set<string> {
   const ids = new Set(bp.entities.filter((e) => e.resource).map((e) => e.id));
   for (const view of publicViews(bp))
-    if (view.type !== "html")
+    if (view.type !== "html") {
       for (const block of view.blocks ?? []) if (block.type === "records") ids.add(block.entityId);
+      // The payment methods a public form links to are shown on its page (paymentBlock), so visitors can pick one.
+      if (view.type === "form") {
+        const pay = paymentLinkOf(bp, view);
+        if (pay) ids.add(pay.entity.id);
+      }
+    }
   return ids;
+}
+
+const PAYMENT = /payment.?method|pay.?method|pay.?channel|payment.?option|bank|wallet|gcash|qr/i;
+
+/**
+ * A form's link to the business's payment methods (GCash, Maya, bank accounts), when it has one: a relation to a
+ * record type named like payment methods, or one that keeps account numbers and QR codes.
+ */
+export function paymentLinkOf(bp: Blueprint, view: FormView): { field: Field; entity: Entity } | undefined {
+  const entity = bp.entities.find((e) => e.id === view.entityId);
+  for (const field of entity?.fields ?? []) {
+    if (field.type !== "relation") continue;
+    const target = bp.entities.find((e) => e.id === field.relation?.entityId);
+    if (!target) continue;
+    const named = PAYMENT.test(`${target.id} ${target.name} ${field.id} ${field.name}`);
+    const keepsAccounts =
+      target.fields.some((f) => f.type === "image" && /qr/i.test(`${f.id} ${f.name}`)) &&
+      target.fields.some((f) => /account|number/i.test(`${f.id} ${f.name}`));
+    if (named || keepsAccounts) return { field, entity: target };
+  }
+  return undefined;
+}
+
+/**
+ * The "How to pay" cards a public form shows when it links to payment methods but its page doesn't list them:
+ * the active ones with their account details, QR code and instructions. Null when the page already lists them.
+ */
+export function paymentBlock(bp: Blueprint, view: FormView): Extract<Block, { type: "records" }> | null {
+  const link = paymentLinkOf(bp, view);
+  if (!link) return null;
+  if ((view.blocks ?? []).some((b) => b.type === "records" && b.entityId === link.entity.id)) return null;
+  const active = link.entity.fields.find(
+    (f) => f.type === "checkbox" && /active|enabled|show|published/i.test(f.id),
+  );
+  const status = link.entity.fields.find(
+    (f) => f.type === "status" && f.options?.some((o) => o.id === "active"),
+  );
+  return {
+    id: "auto_how_to_pay",
+    type: "records",
+    title: "How to pay",
+    entityId: link.entity.id,
+    layout: "cards",
+    filter: active ? active.id : status ? `${status.id} == 'active'` : undefined,
+    // The method's name first (cards are titled by it), then its account details, QR code and instructions.
+    fieldIds: [
+      link.entity.primaryFieldId,
+      ...link.entity.fields
+        .filter((f) => f.id !== link.entity.primaryFieldId && f.type !== "checkbox" && f.type !== "status")
+        .map((f) => f.id),
+    ],
+  };
 }
 
 /** Longest label that still reads as a button. */
@@ -246,6 +313,20 @@ export function submitButton(label: string | undefined, fallback: string): { lab
 }
 
 /**
+ * A stranger's submission must say who they are and how to reach them: the form's first name field and its first
+ * phone or email field are required on public forms even when the record type leaves them optional.
+ */
+export function visitorContactIds(fields: Field[]): Set<string> {
+  const text = fields.filter((f) => f.type === "text");
+  const label = (f: Field) => `${f.id.replace(/_/g, " ")} ${f.name}`;
+  const name = text.find(
+    (f) => /\bname\b|guest|customer|client|player/i.test(label(f)) && !/ref|code/i.test(label(f)),
+  );
+  const reach = text.find((f) => /phone|mobile|cell|e-?mail|contact/i.test(label(f)));
+  return new Set([name?.id, reach?.id].filter((id): id is string => !!id));
+}
+
+/**
  * Fields a visitor fills in. Statuses and prices are the business's call, and computed or uploaded fields
  * aren't asked, so a visitor can't type their own fee.
  */
@@ -253,8 +334,11 @@ export function publicFieldsOf(bp: Blueprint, view: FormView): Field[] {
   const entity = bp.entities.find((e) => e.id === view.entityId);
   if (!entity) return [];
   const published = publishedEntities(bp);
+  // Reference numbers are issued on submit (submitPublicForm), never typed by a visitor.
+  const issued = new Set(autoReferenceFields(entity).map((f) => f.id));
   const editable = editableFields(entity).filter(
     (f) =>
+      !issued.has(f.id) &&
       f.type !== "status" &&
       f.type !== "money" &&
       f.type !== "image" &&
@@ -274,12 +358,15 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
   const entity = bp.entities.find((e) => e.id === view.entityId);
   if (!entity) return null;
   const fields = publicFieldsOf(bp, view);
+  const contact = visitorContactIds(fields);
   const choices: PublicForm["choices"] = {};
+  const pay = paymentBlock(bp, view);
   for (const f of fields) {
     if (f.type !== "relation" || !f.relation) continue;
     const target = bp.entities.find((e) => e.id === f.relation?.entityId);
     if (!target) continue;
-    choices[f.id] = records
+    // Payment methods turned off by the business aren't offered.
+    choices[f.id] = (pay?.entityId === target.id ? applyFilter(bp, target, records, pay.filter) : records)
       .filter((r) => r.entityId === target.id)
       .map((r) => ({ id: r.id, title: recordTitle(target, r) }));
   }
@@ -310,11 +397,12 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
         fields.map((f) => f.id),
       ),
       extras?.title,
-    ).map(({ title, description, fieldIds, extras: picker }) => ({
+    ).map(({ title, description, fieldIds, extras: picker, blockIds }) => ({
       title,
       description,
       fieldIds,
       ...(picker ? { extras: true } : {}),
+      ...(blockIds?.length ? { blockIds } : {}),
     }));
     // The slot is picked under the resource, so it always belongs to the resource's step.
     if (booking) {
@@ -322,7 +410,7 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
       steps = steps.map((s) => ({ ...s, fieldIds: s.fieldIds.filter((id) => id !== timeFieldId) }));
       const home = steps.find((s) => s.fieldIds.includes(resourceFieldId)) ?? steps[0];
       home.fieldIds.push(timeFieldId);
-      steps = steps.filter((s) => s.fieldIds.length || s.extras);
+      steps = steps.filter((s) => s.fieldIds.length || s.extras || s.blockIds?.length);
     }
   }
   return {
@@ -337,7 +425,7 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
       id: f.id,
       name: f.name,
       type: f.type,
-      required: !!f.required,
+      required: !!f.required || contact.has(f.id),
       description: f.description,
       range: f.range,
       options: f.options?.map((o) => ({ id: o.id, label: o.label })),
@@ -443,7 +531,11 @@ export function resolveBlocks(
         const target = bp.views.find((v) => v.id === block.viewId);
         if (target?.type !== "form" || !target.public) break;
         const form = publicForm(bp, records, target);
-        if (form) out.push({ id: block.id, type: "form", title: block.title, form });
+        // A form embedded on a page brings the blocks its steps show (its other blocks stay on its own page).
+        const own = form?.steps?.some((s) => s.blockIds?.length)
+          ? withStepBlocks(form, resolveBlocks(bp, records, docs, slug, target, now)).form
+          : form;
+        if (own) out.push({ id: block.id, type: "form", title: block.title, form: own });
         break;
       }
       case "highlights":
@@ -507,8 +599,45 @@ export function resolvePage(
   if (view.type !== "landing" && view.type !== "form") return null;
   const blocks = resolveBlocks(bp, records, docs, slug, view, now);
   if (view.type === "landing") return { id: view.id, name: view.name, type: "landing", blocks };
-  const form = publicForm(bp, records, view);
-  return form ? { id: view.id, name: view.name, type: "form", blocks, form } : null;
+  const found = publicForm(bp, records, view);
+  if (!found) return null;
+  let form = found;
+  // A form that takes payment shows how to pay, in its payment step when it has one.
+  const pay = paymentBlock(bp, view);
+  const payResolved = pay
+    ? resolveBlocks(bp, records, docs, slug, { ...view, blocks: [pay] }, now)[0]
+    : undefined;
+  if (pay && payResolved && payResolved.type === "records" && payResolved.items.length) {
+    blocks.unshift(payResolved);
+    const link = paymentLinkOf(bp, view);
+    const at = form.steps?.findIndex(
+      (s) => (link && s.fieldIds.includes(link.field.id)) || /pay/i.test(s.title),
+    );
+    if (form.steps && at !== undefined && at >= 0)
+      form = {
+        ...form,
+        steps: form.steps.map((s, i) => (i === at ? { ...s, blockIds: [...(s.blockIds ?? []), pay.id] } : s)),
+      };
+  }
+  const placed = withStepBlocks(form, blocks);
+  return { id: view.id, name: view.name, type: "form", blocks: placed.rest, form: placed.form };
+}
+
+/**
+ * Puts the blocks a form's steps list (payment methods on the payment step) inside those steps; the rest stay below
+ * the form.
+ */
+export function withStepBlocks(
+  form: PublicForm,
+  blocks: ResolvedBlock[],
+): { form: PublicForm; rest: ResolvedBlock[] } {
+  const placed = new Set(form.steps?.flatMap((s) => s.blockIds ?? []) ?? []);
+  if (!placed.size) return { form, rest: blocks };
+  const steps = form.steps?.map((s) => {
+    const own = (s.blockIds ?? []).flatMap((id) => blocks.filter((b) => b.id === id));
+    return own.length ? { ...s, blocks: own } : s;
+  });
+  return { form: { ...form, steps }, rest: blocks.filter((b) => !placed.has(b.id)) };
 }
 
 /** A custom HTML page with the public forms it may send to; the bridge refuses any other form. */

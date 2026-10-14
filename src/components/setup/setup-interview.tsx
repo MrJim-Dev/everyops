@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AttachmentTray, ComposerTools, DropOverlay, MessageFiles } from "@/components/ai/composer-tools";
 import { useAttachments } from "@/components/ai/use-attachments";
 import { useVoiceInput } from "@/components/ai/use-voice-input";
+import { Rich } from "@/components/assistant/chat-thread";
 import { Thinking } from "@/components/assistant/thinking";
 import { Button } from "@/components/ui/button";
 import {
@@ -203,7 +204,7 @@ export function SetupInterview({
               ) : (
                 // biome-ignore lint/suspicious/noArrayIndexKey: messages only grow
                 <AssistantMessage key={i}>
-                  <p className="whitespace-pre-line">{m.text}</p>
+                  <Rich text={m.text} />
                 </AssistantMessage>
               ),
             )}

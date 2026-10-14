@@ -11,6 +11,7 @@ import { useAuthReady, useCurrentUser } from "@/lib/auth/client";
 import type { WorkspaceData } from "@/lib/blueprint/types";
 import { takePendingFiles } from "@/lib/pending-files";
 import { useHydrated } from "@/lib/store/use-hydrated";
+import { idFromPrompt } from "@/lib/store/workspace-model";
 import { useWorkspaces } from "@/lib/store/workspaces";
 import { PENDING_KEY, StarterChips } from "./starters";
 
@@ -57,6 +58,7 @@ export function CreatePrompt() {
 
   const create = (text: string, attachments: AttachmentRef[] = []) => {
     const slug = createWorkspace({
+      slug: idFromPrompt(text),
       name: "New workspace",
       summary: "Setting up",
       data: EMPTY,
@@ -148,7 +150,7 @@ export function CreatePrompt() {
               {voice.state === "idle" ? (
                 <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
                   <SparkleIcon weight="fill" className="size-3.5 shrink-0 text-primary" />
-                  <span className="truncate">Ask EveryOps asks a few questions, then builds it</span>
+                  <span className="truncate">EveryOps asks a few questions, then builds it</span>
                 </span>
               ) : null}
             </span>

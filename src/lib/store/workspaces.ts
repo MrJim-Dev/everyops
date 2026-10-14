@@ -6,7 +6,7 @@ import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import type { ChangePlan } from "@/lib/engine/changes";
 import { computeAll } from "@/lib/engine/compute";
 import { markFresh } from "@/lib/motion/fresh";
-import { applyPlan, undoPlan } from "./apply-plan";
+import { applyPlan, type RevertResult, redoPlan, revertChanges, undoPlan } from "./apply-plan";
 import {
   blueprintOf,
   type ChangeEntry,
@@ -27,6 +27,7 @@ import {
   type PatchResult,
   pullInto,
   type RecordChanges,
+  type WorkspacePatch,
 } from "./workspace-sync";
 
 export * from "./workspace-model";
@@ -61,6 +62,10 @@ type State = {
   /** by: who made it, for invites the plan sends. */
   applyChange: (slug: string, plan: ChangePlan, by?: string) => ChangeEntry | null;
   undoChange: (slug: string, changeId: string) => void;
+  /** Puts back the latest undone design change. */
+  redoChange: (slug: string, changeId: string) => void;
+  /** Undoes several changes at once, newest first, in one save (a conversation's changes from a message on). */
+  revertChanges: (slug: string, changeIds: string[]) => RevertResult;
 };
 
 /* ---------- Server sync ---------- */
@@ -93,7 +98,12 @@ async function send(slug: string, attempt = 0): Promise<void> {
     });
     const body = (await res.json().catch(() => null)) as PatchResult | null;
     if (res.ok && body?.ok) {
-      baselines.set(slug, afterSave(base, patch, body.revs));
+      const updated = body.updated ?? [];
+      baselines.set(
+        slug,
+        afterSave(base, updated.length ? withServerCopies(patch, updated) : patch, body.revs),
+      );
+      if (updated.length) takeServerChanges(slug, patch, updated);
       warned = false;
       // Edits made while this save was in flight go out next.
       retry = () => void send(slug);
@@ -132,6 +142,50 @@ async function send(slug: string, attempt = 0): Promise<void> {
   } finally {
     inflight.delete(slug);
     if (retry) retry();
+  }
+}
+
+/** The patch as the server saved it: records it changed on the way in replace the ones this browser sent. */
+function withServerCopies(patch: WorkspacePatch, updated: DataRecord[]): WorkspacePatch {
+  const byId = new Map(updated.map((r) => [r.id, r]));
+  if (!patch.records) return patch;
+  return {
+    ...patch,
+    records: {
+      ...patch.records,
+      put: patch.records.put.map((p) => ({ ...p, record: byId.get(p.record.id) ?? p.record })),
+    },
+  };
+}
+
+/**
+ * The server renumbered new records (another device took the same order number a moment before). Their new values
+ * go into this browser's copies, keeping any edits made since, and the person is told the number that was saved.
+ */
+function takeServerChanges(slug: string, patch: WorkspacePatch, updated: DataRecord[]) {
+  const sent = new Map((patch.records?.put ?? []).map((p) => [p.record.id, p.record]));
+  const notes: string[] = [];
+  useWorkspaces.setState((s) => {
+    const ws = s.workspaces[slug];
+    if (!ws) return s;
+    const byId = new Map(updated.map((r) => [r.id, r]));
+    const records = ws.records.map((r) => {
+      const server = byId.get(r.id);
+      const mine = sent.get(r.id);
+      if (!server || !mine) return r;
+      const data = { ...r.data };
+      for (const [key, value] of Object.entries(server.data))
+        if (value !== mine.data[key]) {
+          data[key] = value;
+          notes.push(`${String(mine.data[key] ?? "")} → ${String(value)}`);
+        }
+      return { ...r, data };
+    });
+    return { workspaces: { ...s.workspaces, [slug]: { ...ws, records } } };
+  });
+  for (const n of notes) {
+    const [before, after] = n.split(" → ");
+    toast.info(`Saved as ${after}`, { description: `${before} was taken on another device a moment ago.` });
   }
 }
 
@@ -408,5 +462,15 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
 
     undoChange: (slug, changeId) =>
       update(slug, (ws) => (ws.loaded === false ? ws : (undoPlan(ws, changeId) ?? ws))),
+    redoChange: (slug, changeId) =>
+      update(slug, (ws) => (ws.loaded === false ? ws : (redoPlan(ws, changeId) ?? ws))),
+
+    revertChanges: (slug, changeIds) => {
+      const ws = get().workspaces[slug];
+      if (!ws || ws.loaded === false) return { ok: false };
+      const result = revertChanges(ws, changeIds);
+      if (result.ok && result.undone.length) update(slug, () => result.workspace);
+      return result;
+    },
   };
 });

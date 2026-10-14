@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { stepsFromMarkers } from "@/lib/blueprint/form-steps";
+import { markersOf, stepsFromMarkers } from "@/lib/blueprint/form-steps";
 import type { Blueprint, DataRecord, FormView } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { applyOps } from "@/lib/engine/changes";
 import { createRecord } from "@/lib/engine/records";
-import { publicForm } from "./resolve";
+import { publicForm, resolvePage } from "./resolve";
 
 const NOW = new Date("2026-10-13T09:30:00+08:00");
 const stamp = NOW.toISOString();
@@ -248,5 +248,60 @@ describe("steps the assistant writes as markers among a form's fields", () => {
     expect(validateBlueprint(next)).toEqual([]);
     const flat = applyOps(next, [{ op: "update_view", viewId: "book", patch: { steps: [] } }]);
     expect((flat.views.find((v) => v.id === "book") as FormView).steps).toBeUndefined();
+  });
+});
+
+describe("blocks shown in a step", () => {
+  it("moves a form's payment methods into the step that lists them", () => {
+    const split = stepsFromMarkers([
+      "# Court and time",
+      "court",
+      "slot",
+      "# Payment",
+      "@how_to_pay",
+      "guest_name",
+    ]);
+    expect(split.steps?.[1]).toEqual({
+      id: "payment",
+      title: "Payment",
+      fieldIds: ["guest_name"],
+      blockIds: ["how_to_pay"],
+    });
+    const { bp, records } = venue({
+      steps: split.steps,
+      fieldIds: split.fieldIds,
+      blocks: [
+        { id: "how_to_pay", type: "text", markdown: "Send GCash to 0917 123 4567" },
+        { id: "faqs", type: "text", markdown: "Bring your own paddle or rent one" },
+      ],
+    });
+    expect(validateBlueprint(bp)).toEqual([]);
+    const view = bp.views.find((v) => v.id === "book") as FormView;
+    expect(markersOf(view)).toEqual([
+      "# Court and time",
+      "court",
+      "slot",
+      "# Payment",
+      "@how_to_pay",
+      "guest_name",
+    ]);
+    const page = resolvePage(bp, records, {}, "court-house", "book");
+    expect(page?.blocks.map((b) => b.id)).toEqual(["faqs"]);
+    expect(page?.form?.steps?.map((s) => s.blocks?.map((b) => b.id) ?? [])).toEqual([[], ["how_to_pay"]]);
+
+    // A step can't show a block the form doesn't have, and removing the block takes it off the step.
+    const typo = venue({
+      steps: [
+        { id: "a", title: "A", fieldIds: ["court", "slot"] },
+        { id: "b", title: "B", fieldIds: ["guest_name"], blockIds: ["nope"] },
+      ],
+    });
+    expect(
+      validateBlueprint(typo.bp)
+        .map((e) => e.message)
+        .join(" "),
+    ).toContain('shows block "nope"');
+    const removed = applyOps(bp, [{ op: "remove_block", viewId: "book", blockId: "how_to_pay" }]);
+    expect((removed.views.find((v) => v.id === "book") as FormView).steps?.[1].blockIds).toBeUndefined();
   });
 });

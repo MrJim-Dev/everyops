@@ -95,4 +95,21 @@ describe("custom HTML in the workspace", () => {
       expect(html).toContain(`name="${name}"`);
     expect(html).toContain('<option value="court_1">Court 1</option>');
   });
+  +it("writes a stepped form as one fieldset per step, with Next and Back", () => {
+    const html = formSnippet({
+      ...booking,
+      steps: [
+        { title: "Court and time", fieldIds: ["court", "time"] },
+        { title: "Your details", fieldIds: ["guest_name"] },
+      ],
+    });
+    expect(html.match(/<fieldset data-step=/g)).toHaveLength(2);
+    expect(html).toContain("<legend>Court and time</legend>");
+    // Fields no step lists go on the last step.
+    const last = html.slice(html.indexOf('data-step="2"'));
+    for (const name of ["guest_name", "players", "level", "paddles"])
+      expect(last).toContain(`name="${name}"`);
+    expect(html).toContain("data-next");
+    expect(html).toContain("<script>");
+  });
 });

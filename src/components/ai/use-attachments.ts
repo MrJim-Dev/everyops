@@ -31,7 +31,14 @@ async function upload(
       | { ok: false; message: string }
       | null;
     if (body?.ok) return { ok: true, ref: body.attachment };
-    return { ok: false, message: body?.message ?? "Try again." };
+    return {
+      ok: false,
+      message:
+        body?.message ??
+        (res.status === 413
+          ? "That file is too large."
+          : `The upload didn't go through (error ${res.status}). Try again.`),
+    };
   } catch {
     return { ok: false, message: "Check your connection and try again." };
   }

@@ -6,7 +6,7 @@ import { takeAiToken } from "@/server/ai/rate-limit";
 import { apiUser, sameOrigin } from "@/server/session-api";
 
 const body = z.object({
-  brief: z.string().min(20).max(8000),
+  brief: z.string().min(20).max(12_000),
   workspaceName: z.string().max(80).default(""),
   /** The files from the setup conversation, so real items and prices end up in the workspace. */
   attachments: z.array(attachmentRef).max(12).default([]),

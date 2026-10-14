@@ -2,7 +2,9 @@
 
 import {
   CaretDownIcon,
+  CheckIcon,
   ClockIcon,
+  CopyIcon,
   EnvelopeSimpleIcon,
   HeartIcon,
   LightningIcon,
@@ -60,16 +62,19 @@ export function PublicBlocks({
   slug,
   preview,
   selection,
+  compact,
 }: {
   blocks: ResolvedBlock[];
   slug: string;
   preview?: boolean;
   selection?: BlockSelection;
+  /** Inside a form step: tighter spacing and no scroll-in animation. */
+  compact?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-20 md:gap-24">
+    <div className={compact ? "flex flex-col gap-6" : "flex flex-col gap-20 md:gap-24"}>
       {blocks.map((b, i) => {
-        const node = <BlockView key={b.id} block={b} slug={slug} preview={preview} />;
+        const node = <BlockView key={b.id} block={b} slug={slug} preview={preview} compact={compact} />;
         if (selection)
           return (
             <Selectable
@@ -83,13 +88,27 @@ export function PublicBlocks({
             </Selectable>
           );
         // Visitors see each section rise in once as they scroll; the first is there straight away.
-        return preview || i === 0 ? <div key={b.id}>{node}</div> : <Reveal key={b.id}>{node}</Reveal>;
+        return preview || compact || i === 0 ? (
+          <div key={b.id}>{node}</div>
+        ) : (
+          <Reveal key={b.id}>{node}</Reveal>
+        );
       })}
     </div>
   );
 }
 
-function BlockView({ block: b, slug, preview }: { block: ResolvedBlock; slug: string; preview?: boolean }) {
+function BlockView({
+  block: b,
+  slug,
+  preview,
+  compact,
+}: {
+  block: ResolvedBlock;
+  slug: string;
+  preview?: boolean;
+  compact?: boolean;
+}) {
   switch (b.type) {
     case "hero":
       return <Hero block={b} preview={preview} />;
@@ -108,12 +127,17 @@ function BlockView({ block: b, slug, preview }: { block: ResolvedBlock; slug: st
     case "html":
       return <HtmlBlock html={b.html} />;
     case "records":
-      return <RecordsBlock block={b} />;
+      return <RecordsBlock block={b} compact={compact} />;
     case "form":
       return (
         <section className="mx-auto w-full max-w-[640px]">
           {b.title ? <SectionHeading title={b.title} /> : null}
-          <PublicFormView form={b.form} slug={slug} preview={preview} />
+          <PublicFormView
+            form={b.form}
+            slug={slug}
+            preview={preview}
+            renderBlocks={(blocks) => <PublicBlocks blocks={blocks} slug={slug} preview={preview} compact />}
+          />
         </section>
       );
   }
@@ -352,6 +376,83 @@ function CellView({ cell, large }: { cell: Cell; large?: boolean }) {
   }
 }
 
+/**
+ * A card inside a form, laid out by its own width: one card on its own fills the form, with its QR code beside the
+ * details; side by side or on a phone, the QR code goes on top. Details are label-over-value, two to a row when there's
+ * room, and account numbers can be copied with one tap.
+ */
+function DetailCard({ cells }: { cells: Cell[] }) {
+  const [title, ...rest] = cells;
+  const image = rest.find((c) => c.kind === "image" && c.text);
+  const notes = rest.filter((c) => c.kind === "markdown" && c.text);
+  const details = rest.filter((c) => c !== image && !notes.includes(c) && c.text && c.kind !== "image");
+  return (
+    <article className="@container rounded-xl border bg-background/40">
+      <div className="flex flex-col gap-4 p-4 @md:flex-row @md:items-start">
+        {image ? (
+          <a
+            href={image.text}
+            target="_blank"
+            rel="noreferrer"
+            className="mx-auto shrink-0 rounded-lg bg-white p-2 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 @md:mx-0"
+            aria-label={`Open ${image.name} full size`}
+          >
+            {/* biome-ignore lint/performance/noImgElement: uploaded images served by our own route */}
+            <img
+              src={image.text}
+              alt={image.name}
+              loading="lazy"
+              className="size-40 object-contain @md:size-36"
+            />
+          </a>
+        ) : null}
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          <h4 className="text-[15px] font-semibold">{title?.text}</h4>
+          {details.length ? (
+            <dl className="grid gap-x-6 gap-y-3 @sm:grid-cols-2">
+              {details.map((c) => (
+                <div key={c.fieldId} className="min-w-0">
+                  <dt className="text-[12px] text-muted-foreground">{c.name}</dt>
+                  <dd className="mt-0.5 flex items-center gap-1.5 text-[14px] font-medium [overflow-wrap:anywhere]">
+                    <CellView cell={c} />
+                    {/\d{4,}/.test(c.text.replace(/\s/g, "")) ? (
+                      <CopyValue text={c.text} label={c.name} />
+                    ) : null}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          {notes.map((c) => (
+            <div key={c.fieldId} className="rounded-lg bg-muted/40 px-3 py-2">
+              <CellView cell={c} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function CopyValue({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={copied ? `${label} copied` : `Copy ${label}`}
+      onClick={() => {
+        void navigator.clipboard?.writeText(text.replace(/\s/g, "")).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+    >
+      {copied ? <CheckIcon className="size-3.5 text-primary" /> : <CopyIcon className="size-3.5" />}
+    </button>
+  );
+}
+
 /** A card: picture on top, the name, a price that stands out, then the rest. */
 function Card({ cells }: { cells: Cell[] }) {
   const [title, ...rest] = cells;
@@ -399,7 +500,25 @@ function Card({ cells }: { cells: Cell[] }) {
   );
 }
 
-function RecordsBlock({ block }: { block: Extract<ResolvedBlock, { type: "records" }> }) {
+function RecordsBlock({
+  block,
+  compact,
+}: {
+  block: Extract<ResolvedBlock, { type: "records" }>;
+  compact?: boolean;
+}) {
+  // Inside a form step (payment methods on the Payment step): a small heading and cards that share the form's width.
+  if (compact && block.layout === "cards" && block.items.length)
+    return (
+      <section className="flex flex-col gap-3">
+        {block.title ? <h3 className="text-[15px] font-semibold tracking-[-0.01em]">{block.title}</h3> : null}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] gap-3 [&>*:last-child:nth-child(odd)]:col-span-full">
+          {block.items.map((item) => (
+            <DetailCard key={item.id} cells={item.cells} />
+          ))}
+        </div>
+      </section>
+    );
   const heading = block.title ? <SectionHeading title={block.title} /> : null;
   if (!block.items.length) return null;
   if (block.layout === "faq")

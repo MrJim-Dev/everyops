@@ -14,11 +14,11 @@ export function blueprintPreview(data: WorkspaceData): { label: string; detail: 
   return [
     ...bp.entities.map((e) => {
       const count = data.records.filter((r) => r.entityId === e.id).length;
-      const fields = e.fields
+      // Say when fields are left out, so a revision doesn't look like it dropped them.
+      const names = e.fields
         .filter((f) => f.type !== "rollup" && f.type !== "formula" && f.id !== e.primaryFieldId)
-        .map((f) => f.name)
-        .slice(0, 5)
-        .join(", ");
+        .map((f) => f.name);
+      const fields = `${names.slice(0, 8).join(", ")}${names.length > 8 ? `, +${names.length - 8} more` : ""}`;
       return {
         label: e.pluralName,
         detail: e.resource

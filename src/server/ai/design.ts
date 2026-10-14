@@ -1,6 +1,7 @@
 import "server-only";
 import type { Part } from "@google/genai";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
+import { displayKind } from "@/lib/blueprint/field-kind";
 import type {
   Block,
   Blueprint,
@@ -16,10 +17,13 @@ import type {
   Widget,
   WorkspaceData,
 } from "@/lib/blueprint/types";
-import { validateBlueprint } from "@/lib/blueprint/validate";
+import { GROUP_KINDS, validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
+import { samplesThisYear } from "@/lib/catalog/shift";
 import { computeAll } from "@/lib/engine/compute";
+import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
 import { isImagePath } from "@/lib/engine/records";
+import { repairRules } from "@/lib/engine/rule-repair";
 import { MAX_HTML_BYTES } from "@/lib/public/html-page";
 import { copyFromBlocks, type SiteCopy, standardBlocks } from "@/lib/public/site-template";
 import { hhmm, todayKey } from "@/lib/time";
@@ -27,6 +31,7 @@ import { attachmentParts } from "./attachments";
 import { DESIGN_SYSTEM, type Design, designRequest } from "./design-prompt";
 import { generateJsonHedged } from "./gemini";
 import { referencesText, setupReferences } from "./references";
+import { fillEmptySamples } from "./samples";
 
 const SLOT_MINUTES = [15, 30, 60, 90, 120] as const;
 const pick = <T extends object>(source: T, keys: (keyof T)[]) =>
@@ -318,7 +323,7 @@ export function tidy(bp: Blueprint): Blueprint {
             fieldIds: s.fieldIds.filter((id) => real.has(id) && !seen.has(id) && seen.add(id)),
           }))
           .map(({ extras, ...s }): FormStep => (extras && v.extras ? { ...s, extras } : s))
-          .filter((s) => s.fieldIds.length || s.extras);
+          .filter((s) => s.fieldIds.length || s.extras || s.blockIds?.length);
         if (v.steps.length < 2) {
           delete v.steps;
           delete v.review;
@@ -425,10 +430,226 @@ export function tidy(bp: Blueprint): Blueprint {
     }))
     .filter((sys) => sys.viewIds.length + sys.widgetIds.length > 0);
   bp.rules = bp.rules.filter((r) => entityIds.has(r.trigger.entityId));
+  bp.rules = repairRules(bp);
+  // A dashboard of only numbers gets the charts and lists an owner looks at first.
+  const board = dashboardSystem(bp);
+  if (board) {
+    const extra = suggestWidgets(bp, board);
+    bp.widgets.push(...extra);
+    board.widgetIds.push(...extra.map((w) => w.id));
+  }
+  pendingOnly(bp);
   return bp;
 }
 
+/**
+ * A card titled "Pending approvals" should hold only what's waiting, but the designer often leaves out its filter, so
+ * it listed approved and declined requests too. A list or count with such a title and no filter of its own, on a
+ * record type with an approval queue, gets the queue's filter: status is the pending stage.
+ */
+export function pendingOnly(bp: Blueprint): void {
+  const waiting = /\b(pending|waiting|awaiting|for approval|to approve|needs? approval)\b/i;
+  for (const w of bp.widgets) {
+    if ((w.type !== "list" && w.type !== "stat") || w.calc || w.filter?.trim() || !waiting.test(w.title))
+      continue;
+    const queue = bp.views.find(
+      (v): v is Extract<View, { type: "approval_queue" }> =>
+        v.type === "approval_queue" && v.entityId === w.entityId && !!v.pending,
+    );
+    const status = bp.entities
+      .find((e) => e.id === queue?.entityId)
+      ?.fields.find((f) => f.id === queue?.statusFieldId);
+    if (queue && status?.options?.some((o) => o.id === queue.pending))
+      w.filter = `${queue.statusFieldId} == '${queue.pending}'`;
+  }
+}
+
+type ShapeField = {
+  id: string;
+  name: string;
+  type: string;
+  relation?: { entityId: string };
+  options?: unknown[];
+  formula?: unknown;
+  rollup?: unknown;
+};
+type Shape = {
+  entities: { id: string; name: string; fields: ShapeField[] }[];
+  samples: { entityId: string }[];
+};
+
+/** The setting a field of each type can't work without. */
+const SETTING: Partial<Record<string, "relation" | "options" | "formula" | "rollup">> = {
+  relation: "relation",
+  select: "options",
+  multi_select: "options",
+  status: "options",
+  formula: "formula",
+  rollup: "rollup",
+};
+
+/**
+ * The record types and fields of a rejected design that its problems point at: by path ("entities.3.fields.2") or by
+ * id in the message. A repair may drop these on purpose, so they aren't put back.
+ */
+export function flaggedBy(bp: Pick<Blueprint, "entities">, errors: string[]): Set<string> {
+  const flagged = new Set<string>();
+  const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9_]+/g) ?? []);
+  for (const error of errors) {
+    const at = /^entities\.(\d+)(?:\.fields\.(\d+))?/.exec(error);
+    const entity = at ? bp.entities[Number(at[1])] : undefined;
+    if (entity) {
+      const field = at?.[2] === undefined ? undefined : entity.fields[Number(at[2])];
+      flagged.add(field ? `${entity.id}.${field.id}` : entity.id);
+    }
+    const said = words(error);
+    for (const e of bp.entities) {
+      if (said.has(e.id)) flagged.add(e.id);
+      for (const f of e.fields) if (f.id.includes("_") && said.has(f.id)) flagged.add(`${e.id}.${f.id}`);
+    }
+  }
+  return flagged;
+}
+
+/**
+ * A repair is asked to change only what its problems need, but Gemini sometimes returns the design with a record
+ * type or a few fields missing that nothing asked it to touch, and the workspace quietly loses them. Those come back
+ * from the previous design (with their samples), in their old place. Left out: anything the problems pointed at, and
+ * a field whose name the repair still has under a new id (it was renamed, not dropped).
+ */
+export function restoreDropped<D extends Shape>(
+  previous: D,
+  next: D,
+  flagged: Set<string>,
+): { design: D; entities: string[]; fields: string[]; settings: string[] } {
+  const entities: string[] = [];
+  const fields: string[] = [];
+  const settings: string[] = [];
+  const nextIds = new Set(next.entities.map((e) => e.id));
+  const out = structuredClone(next);
+  for (const old of previous.entities) {
+    if (!nextIds.has(old.id)) {
+      if (flagged.has(old.id)) continue;
+      out.entities.push(structuredClone(old));
+      out.samples.push(...structuredClone(previous.samples.filter((s) => s.entityId === old.id)));
+      entities.push(old.id);
+      continue;
+    }
+    const now = out.entities.find((e) => e.id === old.id) as D["entities"][number];
+    const ids = new Set(now.fields.map((f) => f.id));
+    const names = new Set(now.fields.map((f) => f.name.trim().toLowerCase()));
+    old.fields.forEach((f, i) => {
+      const key = `${old.id}.${f.id}`;
+      if (flagged.has(key)) return;
+      const kept = now.fields.find((x) => x.id === f.id);
+      if (kept) {
+        // Same field, but the repair lost what makes it work (a link without its record type, a status without its
+        // stages) or swapped it for a setting of another type: the old setting comes back.
+        const setting = SETTING[f.type];
+        if (kept.type !== f.type || !setting || !f[setting]) return;
+        const lost =
+          setting === "relation"
+            ? !kept.relation?.entityId
+            : setting === "options"
+              ? !kept.options?.length
+              : !kept[setting];
+        if (!lost) return;
+        for (const other of ["relation", "options", "formula", "rollup"] as const)
+          if (other !== setting && !f[other]) delete kept[other];
+        Object.assign(kept, { [setting]: structuredClone(f[setting]) });
+        settings.push(key);
+        return;
+      }
+      if (names.has(f.name.trim().toLowerCase())) return;
+      // After the nearest earlier field that's still there, or first.
+      const before = old.fields
+        .slice(0, i)
+        .reverse()
+        .find((x) => ids.has(x.id));
+      const at = before ? now.fields.findIndex((x) => x.id === before.id) + 1 : 0;
+      now.fields.splice(at, 0, structuredClone(f));
+      ids.add(f.id);
+      fields.push(key);
+    });
+  }
+  return { design: out, entities, fields, settings };
+}
+
 /** Problems the generic validator doesn't catch but would break a screen. */
+const RESULT_TYPE: Partial<Record<Field["type"], NonNullable<Field["formula"]>["resultType"]>> = {
+  money: "money",
+  number: "number",
+  percent: "number",
+  rollup: "number",
+  checkbox: "checkbox",
+  date: "date",
+};
+
+/**
+ * Formulas reach one link away (deal.price), but Gemini keeps writing two (deal.property.price), which fails
+ * validation and costs a repair that rewrites the whole design. Each two-link reference becomes a one-link formula
+ * field on the record in between (deal.property_price = property.price) that the original formula reads instead.
+ * Text in quotes is left alone. Formulas compute, then roll-ups, then formulas again, so the copy is current.
+ */
+export function flattenLinks(bp: Blueprint): Blueprint {
+  const linkOf = (entity: Entity, id: string) => {
+    const f = entity.fields.find((x) => x.id === id && x.relation);
+    return f ? bp.entities.find((e) => e.id === f.relation?.entityId) : undefined;
+  };
+  for (const entity of bp.entities)
+    for (const field of entity.fields) {
+      if (!field.formula?.expr.includes(".")) continue;
+      field.formula.expr = field.formula.expr
+        .split(/('[^']*')/)
+        .map((part, i) =>
+          i % 2
+            ? part
+            : part.replace(
+                /\b([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\b/g,
+                (whole, a, b, c) => {
+                  const middle = linkOf(entity, a);
+                  const far = middle && linkOf(middle, b);
+                  const target = far?.fields.find((x) => x.id === c);
+                  if (!middle || !far || !target) return whole;
+                  const id = `${b}_${c}`;
+                  if (!middle.fields.some((x) => x.id === id))
+                    middle.fields.push({
+                      id,
+                      name: `${middle.fields.find((x) => x.id === b)?.name ?? b} ${target.name.toLowerCase()}`,
+                      type: "formula",
+                      formula: {
+                        expr: `${b}.${c}`,
+                        resultType:
+                          target.type === "formula"
+                            ? (target.formula?.resultType ?? "text")
+                            : (RESULT_TYPE[target.type] ?? "text"),
+                      },
+                    });
+                  return `${a}.${id}`;
+                },
+              ),
+        )
+        .join("");
+    }
+  return bp;
+}
+
+/**
+ * A repair must return the whole design. Gemini sometimes returns only the parts it fixed (two record types of nine),
+ * which validates but loses the workspace, so a repair that drops more than a quarter of the record types or
+ * views is sent back.
+ */
+export function shrunk(
+  previous: { entities: number; views: number } | null,
+  bp: Pick<Blueprint, "entities" | "views">,
+): string[] {
+  if (!previous) return [];
+  if (bp.entities.length >= previous.entities * 0.75 && bp.views.length >= previous.views * 0.75) return [];
+  return [
+    `design: you returned only part of the design (${bp.entities.length} of ${previous.entities} record types, ${bp.views.length} of ${previous.views} views). Return the whole design again with every record type, view, widget, rule and sample, with the problems fixed.`,
+  ];
+}
+
 function extraChecks(bp: Blueprint, brief: string): string[] {
   const errors: string[] = [];
   const entityIds = new Set(bp.entities.map((e) => e.id));
@@ -440,6 +661,14 @@ function extraChecks(bp: Blueprint, brief: string): string[] {
     !bp.views.some((v) => v.type === "form" && v.public)
   )
     errors.push("The brief asks for a public page customers use, but no form view has public true.");
+  // Same for a register: a POS without one is just tables of orders.
+  if (
+    /\bpos\b|point[- ]of[- ]sale|(cash|pos) register|checkout register|cashier/i.test(brief) &&
+    !bp.views.some((v) => v.type === "checkout")
+  )
+    errors.push(
+      "The brief asks for a point of sale, but there is no checkout view (products, orders with line items and a payment field).",
+    );
   for (const e of bp.entities) {
     const primary = e.fields.find((f) => f.id === e.primaryFieldId);
     if (primary && (primary.type === "formula" || primary.type === "rollup"))
@@ -530,11 +759,17 @@ export function toFieldValue(
 }
 
 /** Converts sample values (strings) into typed record data, dropping anything that doesn't fit. */
-function toRecords(bp: Blueprint, samples: Design["samples"], now: Date): DataRecord[] {
+export function toRecords(bp: Blueprint, samples: Design["samples"], now: Date): DataRecord[] {
   const stamp = now.toISOString();
   const ids = new Map<string, string>();
   for (const [i, s] of samples.entries()) ids.set(s.ref, `${s.entityId}_${i + 1}`);
-  return samples.flatMap((s, i) => {
+  const primaryOf = (entityId: string) => bp.entities.find((e) => e.id === entityId)?.primaryFieldId;
+  const titles = new Map(
+    samples.map((s) => [s.ref, s.values.find((v) => v.fieldId === primaryOf(s.entityId))?.value]),
+  );
+  const counts = new Map<string, number>();
+  const dropped: Record<string, number> = {};
+  const records = samples.flatMap((s, i) => {
     const entity = bp.entities.find((e) => e.id === s.entityId);
     if (!entity) return [];
     const data: Record<string, FieldValue> = {};
@@ -544,9 +779,27 @@ function toRecords(bp: Blueprint, samples: Design["samples"], now: Date): DataRe
       const converted = toFieldValue(field, value, (v) => ids.get(v));
       if (converted !== undefined) data[field.id] = converted;
     }
-    if (!data[entity.primaryFieldId]) return [];
+    const n = (counts.get(entity.id) ?? 0) + 1;
+    counts.set(entity.id, n);
+    // A line item's own name is often a Title field Gemini leaves empty (it fills the order, the product and the
+    // quantity). It takes the name of what it links to, e.g. the product, else "Order line 2", instead of being dropped.
+    const primary = entity.fields.find((f) => f.id === entity.primaryFieldId);
+    if (!data[entity.primaryFieldId] && primary?.type === "text" && Object.keys(data).length) {
+      const linked = entity.fields
+        .filter((f) => f.type === "relation" && f.id !== entity.parent?.fieldId)
+        .map((f) => s.values.find((v) => v.fieldId === f.id)?.value)
+        .map((ref) => (ref ? titles.get(ref) : undefined))
+        .find((t) => !!t);
+      data[primary.id] = linked ?? `${entity.name} ${n}`;
+    }
+    if (!data[entity.primaryFieldId]) {
+      dropped[entity.id] = (dropped[entity.id] ?? 0) + 1;
+      return [];
+    }
     return [{ id: `${s.entityId}_${i + 1}`, entityId: entity.id, data, createdAt: stamp, updatedAt: stamp }];
   });
+  if (Object.keys(dropped).length) console.warn(JSON.stringify({ event: "design_samples_dropped", dropped }));
+  return records;
 }
 
 const EXAMPLES = (() => {
@@ -584,50 +837,89 @@ export async function designWorkspace(
       ]
     : context;
   let repairs = 0;
+  /** The last whole design that was rejected: repairs start from it, and one that returns only part of it is caught. */
+  let previous: { entities: number; views: number; data: Design; flagged: Set<string> } | null = null;
   for (let attempt = 0; attempt < 4; attempt++) {
-    // Designs take 8–30 s; a stalled call gets a parallel twin after 35 s instead of a minute's wait, and a call
-    // that runs away (see runawayWatcher) is stopped within seconds and replaced. Real designs are 2–7k tokens.
+    // Designs take 8–40 s, longer when Vertex is busy. A call is judged by whether its answer keeps streaming, not by
+    // the clock: one that has said nothing for 45 s gets a parallel twin, one silent for 30 s mid-answer (60 s before
+    // its first part, while it thinks) is stopped and retried, and a slow one that keeps streaming may run to 170 s
+    // (Cloud Run allows 300). A call that runs away (see runawayWatcher) is stopped within seconds and replaced. Real
+    // designs are 2–8k tokens: with the playbooks' category and status record types, a rental business is about 7.5k.
     const result = await generateJsonHedged(
       designRequest,
       {
         system: DESIGN_SYSTEM,
         prompt,
         task: "design",
-        timeoutMs: 75_000,
+        timeoutMs: 170_000,
+        idleMs: 30_000,
+        firstPartMs: 60_000,
         thinking: "LOW",
         maxOutputTokens: 16_000,
         enumLiterals: true,
       },
-      { hedgeMs: 35_000, attempts: 4 },
+      { hedgeMs: 45_000, attempts: 4, afterSilence: true },
     );
     if (!result.ok) return { ok: false, message: result.error };
-    const raw = toBlueprint(result.data);
-    const samples = mergeDateAndSlot(raw, result.data.samples);
-    const name = result.data.workspaceName || workspaceName;
-    const bp = ensurePages(
-      withStandardSite(
-        repairStructure(tidy(raw)),
-        name,
-        result.data.site,
-        fileParts.length ? undefined : brief,
-      ),
-    );
-    const errors = [
-      ...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`),
-      ...extraChecks(bp, brief),
-    ];
+    const build = (data: Design) => {
+      const raw = toBlueprint(data);
+      const samples = mergeDateAndSlot(raw, data.samples);
+      const name = data.workspaceName || workspaceName;
+      const bp = ensurePages(
+        withStandardSite(repairStructure(tidy(raw)), name, data.site, fileParts.length ? undefined : brief),
+      );
+      const partial = shrunk(previous, bp);
+      const errors = [
+        ...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`),
+        ...extraChecks(bp, brief),
+        ...partial,
+      ];
+      return { data, samples, name, bp, partial, errors };
+    };
+    let built = build(result.data);
+    if (previous) {
+      // Record types and fields the repair dropped without being asked come back, then the design is checked again.
+      // They stay out if they bring problems the repair alone didn't have.
+      const back = restoreDropped(previous.data, result.data, previous.flagged);
+      if (back.entities.length || back.fields.length || back.settings.length) {
+        const restored = build(back.design);
+        const kept = restored.errors.length <= built.errors.length;
+        console.info(
+          JSON.stringify({
+            event: kept ? "design_repair_restored" : "design_repair_restore_skipped",
+            entities: back.entities,
+            fields: back.fields,
+            settings: back.settings,
+          }),
+        );
+        if (kept) built = restored;
+      }
+    }
+    const { data, samples, name, bp, partial, errors } = built;
     if (!errors.length) {
-      const records = computeAll(bp, toRecords(bp, samples, now), now);
+      // Record types the design left without samples (line items, most often) get theirs from one small call.
+      const filled = await fillEmptySamples(bp, samples, now);
+      // Samples in the wrong year (the right month and day, but 2023) move to this year.
+      const dated = samplesThisYear(bp, toRecords(bp, filled, now), now);
+      if (dated.fields) console.info(JSON.stringify({ event: "design_samples_moved", fields: dated.fields }));
+      const records = computeAll(bp, dated.records, now);
       return {
         ok: true,
         name,
-        summary: result.data.summary,
+        summary: data.summary,
         data: { blueprint: bp, records },
       };
     }
     console.warn(JSON.stringify({ event: "design_rejected", attempt, errors: errors.slice(0, 15) }));
+    if (!partial.length)
+      previous = {
+        entities: bp.entities.length,
+        views: bp.views.length,
+        data,
+        flagged: flaggedBy(bp, errors),
+      };
     if (++repairs > 2) break;
-    prompt = `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour previous design:\n${JSON.stringify(result.data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\nReturn the full corrected design.`;
+    prompt = `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour previous design:\n${JSON.stringify(previous?.data ?? data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\nReturn the full corrected design. Change only what these problems need: keep every other record type, field id, view, widget, rule and sample exactly as it was.`;
   }
   return {
     ok: false,
@@ -730,6 +1022,11 @@ function tidyPublicForm(bp: Blueprint, v: Extract<View, { type: "form" }>) {
       },
     ];
   }
+  // The ways to pay show on the form's payment step when it has one, where people need them.
+  const payBlock = pay && v.blocks?.find((b) => b.type === "records" && b.entityId === pay.id);
+  const payStep = v.steps?.find((s) => /pay/i.test(s.title));
+  if (payBlock && payStep && !v.steps?.some((s) => s.blockIds?.includes(payBlock.id)))
+    payStep.blockIds = [...(payStep.blockIds ?? []), payBlock.id];
 }
 
 /**
@@ -1014,15 +1311,28 @@ export function tidyBlocks(
 }
 
 const RESERVED_PAGES: Record<string, string> = { settings: "Setup", history: "Log", search: "Lookup" };
+/** URL segments under /w/[workspace] the app uses itself; a page with one of these ids could never be opened. */
+const RESERVED_IDS = new Set(["settings", "history", "ask"]);
 
 /**
  * Structural slips that would quietly break features: a page named like one of the app's own, bookings without
  * booking settings (no schedule, no double-booking check, no public slots), and line items without a parent.
  */
 export function repairStructure(bp: Blueprint): Blueprint {
+  flattenLinks(bp);
   for (const s of bp.systems) {
     const fix = RESERVED_PAGES[s.name.trim().toLowerCase()];
     if (fix) s.name = fix;
+    if (RESERVED_IDS.has(s.id)) {
+      const base =
+        s.name
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_") || "page";
+      let id = RESERVED_IDS.has(base) ? `${base}_page` : base;
+      while (bp.systems.some((x) => x !== s && x.id === id)) id = `${id}_2`;
+      s.id = id;
+    }
   }
   for (const e of bp.entities) {
     if (!e.booking) {
@@ -1053,6 +1363,7 @@ export function repairStructure(bp: Blueprint): Blueprint {
       }
     }
   }
+  bookableSchedules(bp);
   // A booking's court fee comes from the court's rates and the hours booked, not from a number someone types.
   for (const e of bp.entities) {
     const b = e.booking;
@@ -1089,6 +1400,21 @@ export function repairStructure(bp: Blueprint): Blueprint {
   }
   // Pages that only list line items go: those show inside their parent record.
   const children = new Set(bp.entities.filter((e) => e.parent).map((e) => e.id));
+  // Two slips that used to cost a whole repair round (and a repair rewrites the whole design, sometimes losing
+  // fields): a table grouped by a date or number, which can't be grouped, and a board on a select instead of the
+  // record type's status.
+  for (const v of bp.views) {
+    const entity = bp.entities.find((e) => e.id === v.entityId);
+    if (!entity) continue;
+    if (v.type === "table" && v.groupByFieldId) {
+      const field = entity.fields.find((f) => f.id === v.groupByFieldId);
+      if (!field || !GROUP_KINDS.has(displayKind(bp, field))) delete v.groupByFieldId;
+    }
+    if (v.type === "kanban" && entity.fields.find((f) => f.id === v.statusFieldId)?.type !== "status") {
+      const status = entity.fields.find((f) => f.type === "status");
+      if (status) v.statusFieldId = status.id;
+    }
+  }
   bp.systems = bp.systems.filter(
     (s) =>
       s.widgetIds.length > 0 ||
@@ -1116,6 +1442,81 @@ function slotTimes(label: string, id: string): { start: number; end?: number } |
   return { start, ...(end !== null && end > start ? { end } : {}) };
 }
 
+/** The thing a record type books: a record type with hours, else one named like a court or room, never people. */
+function bookableField(bp: Blueprint, e: Entity): Field | undefined {
+  const relations = e.fields.filter((f) => f.type === "relation" && f.relation?.entityId !== e.id);
+  const target = (f: Field) => bp.entities.find((x) => x.id === f.relation?.entityId);
+  const named = (f: Field, re: RegExp) => re.test(`${target(f)?.id} ${target(f)?.name}`.toLowerCase());
+  return (
+    relations.find((f) => target(f)?.resource) ??
+    relations.find((f) =>
+      named(
+        f,
+        /court|room|table|space|venue|lane|field|studio|desk|resource|amenit|facilit|pool|hall|clubhouse/,
+      ),
+    ) ??
+    relations.find((f) => !named(f, /player|client|customer|member|guest|person|staff|user|people|resident/))
+  );
+}
+
+/** Hours a bookable thing gets when the design doesn't say: the owner can change them in Settings. */
+const DEFAULT_HOURS = { opensAt: "08:00", closesAt: "22:00", slotMinutes: 60 as const };
+
+/**
+ * A schedule (slot grid) only works on bookings of something with opening hours. Gemini often adds one to bookings of
+ * an amenity or room without saying the hours or which fields hold the time and status, and the validator sent the
+ * whole design back for a repair (the repair HOA setups needed about half the time). Those settings are filled in
+ * from the record type itself: the time range, the status, and the thing booked, which gets default hours. Without a
+ * time range to book, the schedule becomes a calendar, or goes when there's no date either.
+ */
+export function bookableSchedules(bp: Blueprint): Blueprint {
+  const dropped = new Set<string>();
+  bp.views = bp.views.map((v): View => {
+    if (v.type !== "slot_grid") return v;
+    const e = bp.entities.find((x) => x.id === v.entityId);
+    if (!e) return v;
+    const time =
+      e.fields.find(
+        (f) => f.id === e.booking?.timeFieldId && f.type === "time_range" && f.range !== "dates",
+      ) ?? e.fields.find((f) => f.type === "time_range" && f.range !== "dates");
+    const status =
+      e.fields.find((f) => f.id === e.booking?.statusFieldId) ?? e.fields.find((f) => f.type === "status");
+    const resourceField =
+      e.fields.find((f) => f.id === e.booking?.resourceFieldId && f.type === "relation") ??
+      bookableField(bp, e);
+    const resource = bp.entities.find((x) => x.id === resourceField?.relation?.entityId);
+    if (time && status && resourceField && resource) {
+      resource.resource ??= { ...DEFAULT_HOURS };
+      e.booking = {
+        resourceFieldId: resourceField.id,
+        timeFieldId: time.id,
+        statusFieldId: status.id,
+        blockingStatuses:
+          e.booking?.blockingStatuses.filter((id) => status.options?.some((o) => o.id === id)) ??
+          (status.options ?? []).map((o) => o.id).filter((id) => !/cancel/.test(id)),
+      };
+      return v;
+    }
+    const date = e.fields.find((f) => f.type === "time_range" || f.type === "datetime" || f.type === "date");
+    if (date)
+      return {
+        id: v.id,
+        entityId: v.entityId,
+        name: v.name,
+        type: "calendar",
+        dateFieldId: date.id,
+        titleFieldId: e.primaryFieldId,
+      };
+    dropped.add(v.id);
+    return v;
+  });
+  if (dropped.size) {
+    bp.views = bp.views.filter((v) => !dropped.has(v.id));
+    for (const s of bp.systems) s.viewIds = s.viewIds.filter((id) => !dropped.has(id));
+  }
+  return bp;
+}
+
 /**
  * Gemini sometimes models a court booking as a date plus a dropdown of time slots. Bookings need one time_range
  * for the schedule, double-booking checks and public slots, so the pair becomes a "Time" range: screens, charts and
@@ -1133,14 +1534,7 @@ export function mergeDateAndSlot(bp: Blueprint, samples: Design["samples"]): Des
         (f.options?.length ?? 0) >= 2 &&
         f.options?.every((o) => slotTimes(o.label, o.id)),
     );
-    // The thing being booked: a record type with hours, else one named like a court or room, never people.
-    const relations = e.fields.filter((f) => f.type === "relation" && f.relation?.entityId !== e.id);
-    const target = (f: Field) => bp.entities.find((x) => x.id === f.relation?.entityId);
-    const named = (f: Field, re: RegExp) => re.test(`${target(f)?.id} ${target(f)?.name}`.toLowerCase());
-    const resourceField =
-      relations.find((f) => target(f)?.resource) ??
-      relations.find((f) => named(f, /court|room|table|space|venue|lane|field|studio|desk|resource/)) ??
-      relations.find((f) => !named(f, /player|client|customer|member|guest|person|staff|user|people/));
+    const resourceField = bookableField(bp, e);
     const resource = bp.entities.find((x) => x.id === resourceField?.relation?.entityId);
     if (!date || !slot?.options || !resourceField || !resource) continue;
 

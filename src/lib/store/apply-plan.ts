@@ -86,6 +86,50 @@ export function applyPlan(
 }
 
 /**
+ * Redoes the most recently undone design change by moving back to the version it made, the way it was first
+ * applied. Only design changes can be redone: their versions are kept, while record, page and team edits aren't.
+ */
+export function canRedo(ws: Workspace, changeId: string): boolean {
+  const at = ws.changes.findIndex((c) => c.id === changeId);
+  const entry = ws.changes[at];
+  return (
+    !!entry?.undoneAt &&
+    entry.fromVersion !== entry.toVersion &&
+    ws.currentVersion === entry.fromVersion &&
+    !!ws.versions[entry.toVersion - 1] &&
+    !entry.createdRecordIds?.length &&
+    !entry.replacedRecords?.length &&
+    !entry.replacedDocs &&
+    !entry.teamBefore &&
+    // Everything newer is undone too, so the workspace is back on the version this change started from.
+    ws.changes.slice(0, at).every((c) => c.undoneAt)
+  );
+}
+
+export function redoPlan(ws: Workspace, changeId: string, now = new Date()): Workspace | null {
+  if (!canRedo(ws, changeId)) return null;
+  const entry = ws.changes.find((c) => c.id === changeId);
+  if (!entry) return null;
+  const current = blueprintOf(ws);
+  const next = ws.versions[entry.toVersion - 1];
+  const known = new Set(next.entities.map((e) => e.id));
+  const orphaned = ws.records.filter((r) => !known.has(r.entityId));
+  const kept = orphaned.length ? ws.records.filter((r) => known.has(r.entityId)) : ws.records;
+  const { data, changes } = commitChange({ blueprint: current, records: kept }, next, now);
+  return {
+    ...ws,
+    name: next.workspaceName,
+    currentVersion: entry.toVersion,
+    records: data.records,
+    changes: ws.changes.map((c) => {
+      if (c.id !== changeId) return c;
+      const { undoneAt: _undone, removedRecords: _removed, ...rest } = c;
+      return { ...rest, recordChanges: changes, ...(orphaned.length ? { removedRecords: orphaned } : {}) };
+    }),
+  };
+}
+
+/**
  * Undoes one change, newest first: anything applied after it must be undone before it. Returns null when it
  * can't be undone (already undone, or newer changes came after it).
  */
@@ -132,4 +176,33 @@ export function undoPlan(ws: Workspace, changeId: string, now = new Date()): Wor
       : {}),
     changes: ws.changes.map((c) => (c.id === changeId ? { ...c, undoneAt: now.toISOString() } : c)),
   };
+}
+
+export type RevertResult =
+  | { ok: true; workspace: Workspace; undone: ChangeEntry[] }
+  /** Changes still in effect that came after the oldest one asked for, and aren't part of the request. */
+  | { ok: false; blocking: ChangeEntry[] }
+  | { ok: false; blocking?: undefined };
+
+/**
+ * Undoes a set of changes in one go, newest first (a conversation's changes from one message on). Every change
+ * still in effect since the oldest of them must be in the set: a newer change made elsewhere would be lost or
+ * broken by the undo, so it is returned as blocking instead. Nothing changes unless every undo succeeds.
+ */
+export function revertChanges(ws: Workspace, ids: string[], now = new Date()): RevertResult {
+  const wanted = new Set(ids);
+  // History is newest first, so the span to undo runs from the top down to the oldest change asked for.
+  const live = ws.changes.flatMap((c, i) => (c.undoneAt ? [] : [{ c, i }]));
+  const oldest = Math.max(-1, ...live.filter((x) => wanted.has(x.c.id)).map((x) => x.i));
+  if (oldest < 0) return { ok: true, workspace: ws, undone: [] };
+  const span = live.filter((x) => x.i <= oldest).map((x) => x.c);
+  const blocking = span.filter((c) => !wanted.has(c.id));
+  if (blocking.length) return { ok: false, blocking };
+  let next = ws;
+  for (const c of span) {
+    const undone = undoPlan(next, c.id, now);
+    if (!undone) return { ok: false };
+    next = undone;
+  }
+  return { ok: true, workspace: next, undone: span };
 }

@@ -50,6 +50,15 @@ type Input = {
   /** Leave unset: Gemini 3 models are tuned for the default temperature and can loop when it is lowered. */
   temperature?: number;
   timeoutMs?: number;
+  /**
+   * Cancels the call when no part of the answer has arrived for this long: Vertex now and then stalls a call midway,
+   * and a stalled call should be replaced in seconds while a slow one that keeps streaming is left to finish.
+   */
+  idleMs?: number;
+  /** The same, before the first part, which comes only after the model has thought (defaults to idleMs). */
+  firstPartMs?: number;
+  /** Called with each part that streams in (generateJsonHedged uses it to tell a stalled call from a slow one). */
+  onProgress?: () => void;
   /** Fixes known harmless slips in Gemini's JSON before it's checked against the schema. */
   repair?: (json: unknown) => unknown;
   /** Overrides the model's default reasoning depth. Leave unset for Gemini 3 models. */
@@ -63,6 +72,12 @@ type Input = {
   /** Longest text value the answer may hold before it counts as a runaway (default 3,000 characters). */
   maxStringChars?: number;
   /**
+   * Longest text, in characters, for values under these property names (e.g. { submitLabel: 40 }). Sent to Gemini
+   * as maxLength, and a value that runs well past it is stopped as a runaway within a second or two. Gemini's loops
+   * start in short text it fails to close: a two-word button label that turns into "Request Delivery Request…".
+   */
+  textLimits?: Record<string, number>;
+  /**
    * Sends literals as one-value enums, which Vertex enforces (it ignores const). It makes the schema count for more
    * against Gemini's structural limit, so it's on only where it was needed and fits: the designer.
    */
@@ -75,12 +90,36 @@ type Input = {
  * enums: Vertex enforces enum but not const, and without it Gemini wrote view types that don't exist
  * ("approval" for approval_queue) and lost the shape of the answer from there.
  */
-function responseSchema(schema: z.ZodType, enumLiterals = false) {
+function responseSchema(schema: z.ZodType, enumLiterals = false, textLimits?: Record<string, number>) {
   const { $schema: _drop, ...rest } = z.toJSONSchema(schema, {
     target: "draft-2020-12",
     io: "output",
   }) as Record<string, unknown>;
-  return enumLiterals ? (constToEnum(rest) as Record<string, unknown>) : rest;
+  const out = enumLiterals ? (constToEnum(rest) as Record<string, unknown>) : rest;
+  return textLimits ? (withTextLimits(out, textLimits) as Record<string, unknown>) : out;
+}
+
+/** Adds maxLength to the string properties (and lists of strings) named in `limits`. */
+export function withTextLimits(node: unknown, limits: Record<string, number>): unknown {
+  if (Array.isArray(node)) return node.map((n) => withTextLimits(n, limits));
+  if (!node || typeof node !== "object") return node;
+  const out = Object.fromEntries(
+    Object.entries(node as Record<string, unknown>).map(([key, value]) => [
+      key,
+      withTextLimits(value, limits),
+    ]),
+  ) as Record<string, unknown>;
+  const props = out.properties as Record<string, Record<string, unknown>> | undefined;
+  if (props && typeof props === "object")
+    for (const [name, prop] of Object.entries(props)) {
+      const max = limits[name];
+      if (!max || !prop || typeof prop !== "object") continue;
+      const items = prop.items as Record<string, unknown> | undefined;
+      if (prop.type === "string" && !prop.enum) props[name] = { ...prop, maxLength: max };
+      else if (prop.type === "array" && items?.type === "string" && !items.enum)
+        props[name] = { ...prop, items: { ...items, maxLength: max } };
+    }
+  return out;
 }
 
 function constToEnum(node: unknown): unknown {
@@ -98,31 +137,86 @@ function constToEnum(node: unknown): unknown {
  * "…_done_now_perfectly_setup…") or writes a number that never ends, until it hits the token limit a minute later.
  * Spotted within seconds, the call is stopped and a fresh one starts. Returns why, or null while all is well.
  */
-export function runawayWatcher(maxStringChars = 3000) {
+const BREAKS = new Set([" ", "\n", ";", ",", "{", "}", "<", ">"]);
+
+/** A text value whose last 400 characters are one short phrase over and over ("complete matches complete matches…"). */
+function repeating(tail: string): boolean {
+  if (tail.length < 400) return false;
+  for (let unit = 1; unit <= 40; unit++) {
+    let i = tail.length - unit - 1;
+    while (i >= 0 && tail[i] === tail[i + unit]) i--;
+    if (tail.length - 1 - i >= 400 - unit) return true;
+  }
+  return false;
+}
+
+/**
+ * Text that goes round in circles without repeating exactly: a few words shuffled over and over ("cool done very
+ * soon easily ready go now…"). Real text, HTML included, uses far more different words in the same stretch.
+ */
+function circling(window: string): boolean {
+  // Markup repeats by design (a grid of cards, a CSS file); only prose is judged by its words.
+  if ((window.match(/[<{]/g)?.length ?? 0) > 10) return false;
+  const words = window.toLowerCase().match(/[a-z]{2,}/g) ?? [];
+  return words.length >= 200 && new Set(words).size / words.length < 0.08;
+}
+
+export function runawayWatcher(maxStringChars = 3000, textLimits: Record<string, number> = {}) {
   let inString = false;
   let escaped = false;
   let length = 0;
   let unbroken = 0;
   let digits = 0;
+  let tail = "";
+  let window = "";
+  // The property a value belongs to: the last string closed before a colon. A short field gets 3× its limit.
+  let current = "";
+  let lastString = "";
+  let key = "";
+  let limit = maxStringChars;
   return (chunk: string): string | null => {
     for (const ch of chunk) {
       if (inString) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") {
+        if (escaped) {
+          escaped = false;
+          // An escaped line break or tab ("\n") is a break in the text, like a space.
+          if (ch === "n" || ch === "t" || ch === "r") {
+            length++;
+            unbroken = 0;
+            continue;
+          }
+        } else if (ch === "\\") {
           escaped = true;
           continue;
         } else if (ch === '"') {
           inString = false;
+          lastString = current;
           continue;
         }
         length++;
-        unbroken = ch === " " || ch === "\n" ? 0 : unbroken + 1;
+        tail = (tail + ch).slice(-400);
+        window = (window + ch).slice(-2000);
+        if (length <= 64) current += ch;
+        // Checked every 20 characters: a short phrase repeating for 400 characters is a loop, however long it is.
+        if (length % 20 === 0 && repeating(tail)) return "text that repeats itself";
+        if (length % 200 === 0 && circling(window)) return "text that goes round in circles";
+        // HTML and CSS run long without spaces (body{margin:0;font-family:…}); their punctuation breaks a run too.
+        // Filler that never ends ("…_done_now_perfectly_setup_…") has none of it.
+        unbroken = BREAKS.has(ch) ? 0 : unbroken + 1;
         if (length > maxStringChars) return "a text value that never ends";
+        if (length > limit) return `a ${key} that never ends`;
         if (unbroken > 160) return "text with no spaces that never ends";
       } else if (ch === '"') {
         inString = true;
         length = 0;
         unbroken = 0;
+        digits = 0;
+        tail = "";
+        window = "";
+        current = "";
+        limit = textLimits[key] ? textLimits[key] * 3 + 30 : maxStringChars;
+      } else if (ch === ":") {
+        key = lastString;
         digits = 0;
       } else if (/[0-9.eE+-]/.test(ch)) {
         if (++digits > 40) return "a number that never ends";
@@ -137,8 +231,21 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
   const started = Date.now();
   // Our own controller stops a runaway; the caller's signal (a hedged twin answered) and the timeout stop it too.
   const stop = new AbortController();
-  const signals = [AbortSignal.timeout(input.timeoutMs ?? 20_000), stop.signal];
+  // A call with no new part for idleMs is stalled: this controller stops it.
+  const idle = new AbortController();
+  const signals = [AbortSignal.timeout(input.timeoutMs ?? 20_000), stop.signal, idle.signal];
   if (input.signal) signals.push(input.signal);
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let stalled = false;
+  const quietFor = (ms: number | undefined) => {
+    clearTimeout(idleTimer);
+    if (ms)
+      idleTimer = setTimeout(() => {
+        stalled = true;
+        idle.abort();
+      }, ms);
+  };
+  let firstMs: number | undefined;
   let runaway: string | null = null;
   let text = "";
   const contents: Content[] = [
@@ -150,6 +257,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
     const rounds = input.tools ? (input.tools.maxRounds ?? 3) + 1 : 1;
     for (let round = 0; round < rounds; round++) {
       const last = round === rounds - 1;
+      quietFor(input.firstPartMs ?? input.idleMs);
       const stream = await gemini().models.generateContentStream({
         model: GEMINI_MODEL,
         contents,
@@ -157,7 +265,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           systemInstruction: input.system,
           ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
           responseMimeType: "application/json",
-          responseJsonSchema: responseSchema(schema, input.enumLiterals),
+          responseJsonSchema: responseSchema(schema, input.enumLiterals, input.textLimits),
           ...(input.maxOutputTokens ? { maxOutputTokens: input.maxOutputTokens } : {}),
           ...(input.thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel[input.thinking] } } : {}),
           ...(input.tools
@@ -171,7 +279,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           abortSignal: AbortSignal.any(signals),
         },
       });
-      const watch = runawayWatcher(input.maxStringChars);
+      const watch = runawayWatcher(input.maxStringChars, input.textLimits);
       // Parts are kept as Gemini sent them: calls carry thought signatures it needs back on the next round.
       const parts: Part[] = [];
       let roundUsage:
@@ -179,6 +287,9 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
         | undefined;
       text = "";
       for await (const chunk of stream) {
+        firstMs ??= Date.now() - started;
+        quietFor(input.idleMs);
+        input.onProgress?.();
         parts.push(...(chunk.candidates?.[0]?.content?.parts ?? []));
         const part = (chunk.candidates?.[0]?.content?.parts ?? [])
           .filter((p) => typeof p.text === "string" && !p.thought)
@@ -192,6 +303,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           break;
         }
       }
+      quietFor(undefined);
       usage.input += roundUsage?.promptTokenCount ?? 0;
       usage.output += roundUsage?.candidatesTokenCount ?? 0;
       usage.thinking += roundUsage?.thoughtsTokenCount ?? 0;
@@ -224,6 +336,8 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           ms,
           why: runaway,
           chars: text.length,
+          // The end of what came back, to tell a real runaway from an answer that's just long.
+          tail: text.slice(-160),
         }),
       );
       return { ok: false, error: "Gemini got stuck repeating itself.", retryable: true };
@@ -235,6 +349,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
         task: input.task,
         model: GEMINI_MODEL,
         ms,
+        ...(firstMs === undefined ? {} : { firstMs }),
         ...tokens,
         ...(input.tools ? { calls } : {}),
       }),
@@ -260,7 +375,8 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       );
       return {
         ok: false,
-        error: `Gemini's answer didn't match the schema: ${parsed.error.message}`,
+        // The details are in the log above; people only need to know it didn't come together.
+        error: "Gemini's answer came back incomplete. Try again.",
         retryable: true,
       };
     }
@@ -269,6 +385,19 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
     const message = error instanceof Error ? error.message : String(error);
     if (input.signal?.aborted) return { ok: false, error: "Cancelled.", retryable: false };
     if (runaway) return { ok: false, error: "Gemini got stuck repeating itself.", retryable: true };
+    if (stalled) {
+      console.warn(
+        JSON.stringify({
+          event: "gemini_stalled",
+          task: input.task,
+          model: GEMINI_MODEL,
+          ms: Date.now() - started,
+          firstMs,
+          chars: text.length,
+        }),
+      );
+      return { ok: false, error: "Gemini took too long to answer.", retryable: true };
+    }
     console.error(JSON.stringify({ event: "gemini_error", task: input.task, model: GEMINI_MODEL, message }));
     const timedOut = /abort|timeout/i.test(message);
     return {
@@ -276,6 +405,8 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       error: timedOut ? "Gemini took too long to answer." : "Gemini is unavailable right now.",
       retryable: timedOut,
     };
+  } finally {
+    clearTimeout(idleTimer);
   }
 }
 
@@ -295,28 +426,51 @@ function withoutNulls(value: unknown): unknown {
  * generateJson with hedging: Vertex now and then stalls a call outright, so if the first call hasn't answered after
  * `hedgeMs` an identical second one starts, and the first good answer wins (the other is cancelled). A call that
  * fails fast and can be retried starts the next attempt straight away. A stall then costs seconds, not a timeout.
+ * With afterSilence, hedgeMs counts from the last part that streamed in, so a long answer that keeps coming gets no twin.
  */
 export function generateJsonHedged<T>(
   schema: z.ZodType<T>,
   input: Input,
-  options: { hedgeMs: number; attempts?: number },
+  options: {
+    hedgeMs: number;
+    attempts?: number;
+    afterSilence?: boolean;
+    /** Added to the prompt from the second attempt on, so a retry isn't the same call that just looped. */
+    retryNote?: string;
+  },
 ): Promise<GenerateResult<T>> {
-  return hedged((signal) => generateJson(schema, { ...input, signal }), {
-    ...options,
-    onHedge: (attempt) => console.info(JSON.stringify({ event: "gemini_hedge", task: input.task, attempt })),
-  });
+  const { retryNote, ...rest } = options;
+  const promptFor = (attempt: number): Input["prompt"] =>
+    attempt === 0 || !retryNote
+      ? input.prompt
+      : typeof input.prompt === "string"
+        ? `${input.prompt}\n\n${retryNote}`
+        : [...input.prompt, { text: retryNote }];
+  return hedged(
+    (signal, progress, attempt) =>
+      generateJson(schema, { ...input, prompt: promptFor(attempt), signal, onProgress: progress }),
+    {
+      ...rest,
+      onHedge: (attempt) =>
+        console.info(JSON.stringify({ event: "gemini_hedge", task: input.task, attempt })),
+    },
+  );
 }
 
 type Outcome = { ok: true } | { ok: false; retryable: boolean };
 
-/** Runs `run` and, while no good answer is in, a fresh copy every `hedgeMs` (or at once after a retryable failure). */
+/**
+ * Runs `run` and, while no good answer is in, a fresh copy every `hedgeMs` (or at once after a retryable failure).
+ * With afterSilence, a call's hedgeMs starts over each time it reports progress, and each call starts at most one twin.
+ */
 export function hedged<R extends Outcome>(
-  run: (signal: AbortSignal) => Promise<R>,
+  run: (signal: AbortSignal, progress: () => void, attempt: number) => Promise<R>,
   {
     hedgeMs,
     attempts = 3,
+    afterSilence = false,
     onHedge,
-  }: { hedgeMs: number; attempts?: number; onHedge?: (attempt: number) => void },
+  }: { hedgeMs: number; attempts?: number; afterSilence?: boolean; onHedge?: (attempt: number) => void },
 ): Promise<R> {
   return new Promise((resolve) => {
     let started = 0;
@@ -331,16 +485,27 @@ export function hedged<R extends Outcome>(
     };
     const launch = () => {
       if (done || started >= attempts) return;
+      const attempt = started;
       started++;
       running++;
       const controller = new AbortController();
       controllers.push(controller);
-      const hedge = setTimeout(() => {
-        if (done || started >= attempts) return;
-        onHedge?.(started + 1);
-        launch();
-      }, hedgeMs);
-      void run(controller.signal).then((result) => {
+      let fired = false;
+      let hedge: ReturnType<typeof setTimeout> | undefined;
+      const wait = () => {
+        clearTimeout(hedge);
+        hedge = setTimeout(() => {
+          fired = true;
+          if (done || started >= attempts) return;
+          onHedge?.(started + 1);
+          launch();
+        }, hedgeMs);
+      };
+      wait();
+      const progress = () => {
+        if (afterSilence && !fired && !done) wait();
+      };
+      void run(controller.signal, progress, attempt).then((result) => {
         running--;
         clearTimeout(hedge);
         if (done) return;

@@ -5,6 +5,7 @@ import { promptWithFiles } from "./attachments";
 import { generateJson } from "./gemini";
 import { INTERVIEW_SYSTEM, type Turn, turn } from "./interview-prompt";
 import { referencesText, setupReferences } from "./references";
+import { questionsMissing, withSystemNames } from "./setup-text";
 
 export type InterviewResult = { ok: true; turn: Turn } | { ok: false; message: string };
 
@@ -24,7 +25,9 @@ export async function interviewTurn(
     .filter((m) => m.role === "user")
     .map((m) => m.text)
     .join("\n");
-  const references = referencesText(await setupReferences(said));
+  const refs = await setupReferences(said);
+  const references = referencesText(refs);
+  const named = (s: string) => withSystemNames(s, refs.systems);
   const prompt = await promptWithFiles(
     userId,
     `${references}\n\nConversation so far:\n\n${transcript}`,
@@ -36,10 +39,11 @@ export async function interviewTurn(
       system: INTERVIEW_SYSTEM,
       prompt,
       task: "interview",
-      // A full brief for a business with public pages, add-ons and payments runs 3–6k characters and takes 10–20 s;
-      // a real runaway is still caught early (filler without spaces, endless numbers) or past 9k characters.
+      // A full brief for a business with public pages, add-ons and payments runs 3–8k characters (every status and
+      // list type spelled out) and takes 10–20 s; a real runaway is still caught early (filler without spaces,
+      // endless numbers) or past 12k characters.
       timeoutMs: 40_000,
-      maxStringChars: 9000,
+      maxStringChars: 12_000,
     });
     if (result.ok) {
       const t = result.data;
@@ -47,13 +51,16 @@ export async function interviewTurn(
         // A design without a brief can't be built; ask the model to try again.
         continue;
       }
+      // Announcing questions and then not asking them leaves the owner guessing what the chips answer.
+      if (t.action === "ask" && questionsMissing(t.message) && attempt < 2) continue;
       return {
         ok: true,
         turn: {
           ...t,
+          message: named(t.message),
           suggestions: t.action === "ask" ? t.suggestions.slice(0, 4) : [],
-          profile: t.profile.slice(0, 12),
-          plan: t.plan.slice(0, 8),
+          profile: t.profile.slice(0, 12).map((p) => ({ ...p, value: named(p.value) })),
+          plan: t.plan.slice(0, 8).map(named),
         },
       };
     }

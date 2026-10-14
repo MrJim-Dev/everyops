@@ -19,6 +19,16 @@ import {
  * are added with add_block, and formula cards live in one plan-level list.
  */
 type AnyObject = z.ZodObject<z.ZodRawShape>;
+// A new hero gets its line from the standard site template; changing it is a section edit (renames, "Text: …").
+// Writing it here, deep inside the ops list, is where Gemini looped: every attempt for "a booking form with a
+// landing page" ran on in the subheading until it was stopped.
+const assistantBlock = z.union(
+  block.options.map((o) =>
+    ((o as AnyObject).shape.type as z.ZodLiteral<string>).value === "hero"
+      ? (o as AnyObject).omit({ subheading: true })
+      : o,
+  ) as unknown as [AnyObject, AnyObject, ...AnyObject[]],
+);
 // Free pages (a markdown document, a canvas, a custom HTML page) share one shape: one union branch instead of three.
 const freePage = z.object({
   id: z.string(),
@@ -43,14 +53,17 @@ const assistantView = z.union(
     // this schema under Gemini's budget.
     if (type === "form")
       // Steps and add-ons don't fit Gemini's schema budget as their own fields: steps are "# Step title" entries
-      // among the fields (the app splits them), and add-ons are set up by the designer.
-      return (o as AnyObject).omit({ blocks: true, extras: true, review: true, steps: true }).extend({
-        fieldIds: z
-          .array(z.string())
-          .describe(
-            "The fields asked, in order. A multi-step form puts '# Step title' before each step's fields, e.g. ['# Court and time', 'court', 'slot', '# Your details', 'guest_name', 'phone']",
-          ),
-      });
+      // among the fields (the app splits them), and add-ons are set up by the designer. The button's words are a
+      // renames entry (kind button): written inside ops, Gemini looped on them ("Request Delivery Request…").
+      return (o as AnyObject)
+        .omit({ blocks: true, extras: true, review: true, steps: true, submitLabel: true })
+        .extend({
+          fieldIds: z
+            .array(z.string())
+            .describe(
+              "The fields asked, in order. A multi-step form puts '# Step title' before each step's fields, e.g. ['# Court and time', 'court', 'slot', '# Your details', 'guest_name', 'phone']. '@block_id' in a step shows one of the form's blocks (payment methods, FAQs) in that step",
+            ),
+        });
     if (type === "landing") return (o as AnyObject).omit({ blocks: true });
     if (type === "table") return (o as AnyObject).omit({ groupByFieldId: true, totals: true });
     return o;
@@ -134,7 +147,7 @@ const assistantWidget = z.union([
 
 // One small shape per operation. A single object with every part optional made Gemini fill all of them for every
 // operation (thousands of wasted tokens, and stray widgets on renames).
-const designOp = z.union([
+export const designOp = z.union([
   z.object({ op: z.literal("add_field"), entityId: z.string(), field }),
   z.object({
     op: z.literal("update_field"),
@@ -185,18 +198,17 @@ const designOp = z.union([
     viewId: z.string().describe("A table, kanban, approval_queue, form or landing view"),
     public: z.boolean().optional().describe("Make it a public page anyone with the link can use"),
     intro: z.string().optional(),
-    submitLabel: z.string().optional(),
     fieldIds: z
       .array(z.string())
       .optional()
       .describe(
-        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, or form questions. Forms: '# Step title' before each step's fields makes it a multi-step form",
+        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, or form questions. Forms: '# Step title' before each step's fields makes it a multi-step form, and '@block_id' in a step shows one of the form's blocks there instead of below the form (e.g. ['# Payment', '@how_to_pay', 'method', 'reference']). Start from the form's current fields listed with its tab and keep everything you weren't asked to change",
       ),
   }),
   z.object({
     op: z.literal("add_block"),
     viewId: z.string().describe("A form or landing view, existing or added in this plan"),
-    block,
+    block: assistantBlock,
     beforeBlockId: z.string().optional(),
   }),
   z.object({
@@ -266,10 +278,12 @@ export const assistantAnswer = z.object({
     renames: z
       .array(
         z.object({
-          kind: z.enum(["page", "tab", "section"]),
+          kind: z.enum(["page", "tab", "section", "button"]),
           id: z
             .string()
-            .describe("The page's (system) or tab's (view) id; for a section of a website, its blockId"),
+            .describe(
+              "The page's (system) or tab's (view) id; for a section of a website, its blockId; for a button, the form view's id",
+            ),
           newName: z
             .string()
             .describe(
@@ -277,7 +291,7 @@ export const assistantAnswer = z.object({
             ),
         }),
       )
-      .describe("Pages and tabs to rename, and new words for website sections"),
+      .describe("Pages and tabs to rename, new words for website sections, and a form's button words"),
     recordOps: z.array(recordOp).describe("Data changes, applied after the design changes"),
     formulas: z
       .array(
@@ -301,6 +315,27 @@ export const assistantAnswer = z.object({
   }),
 });
 export type AssistantAnswer = z.infer<typeof assistantAnswer>;
+
+/**
+ * Character limits for the short words in an answer, by property name. Gemini gets them as maxLength, and a value
+ * far past its limit is stopped as a loop: they start in short text (a button label, a hero line), never in a reply.
+ */
+export const ASSISTANT_TEXT_LIMITS: Record<string, number> = {
+  ctaLabel: 40,
+  heading: 90,
+  subheading: 240,
+  intro: 400,
+  title: 90,
+  name: 80,
+  label: 90,
+  detail: 300,
+  description: 300,
+  suggestions: 120,
+};
+
+/** Added to a retry, so it isn't the same call that just looped. */
+export const ASSISTANT_RETRY_NOTE =
+  "Your last answer got stuck repeating words inside one text value. This time keep every text value short and plain, close it as soon as it says what it needs to, and never repeat a phrase. Website words: a headline of a few words, one or two sentences under it, buttons of 2 to 4 words.";
 
 export const ASSISTANT_SYSTEM = `You are the EveryOps assistant, a side panel inside one workspace of EveryOps, which runs a small
 business's systems (bookings, sales, projects, HR, finance and more) from a JSON blueprint plus records. You get the
@@ -353,8 +388,9 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   datetime or time_range field), slot_grid (booking schedule; only for a booking record type that already has
   booking settings), approval_queue (statusFieldId), checkout (only for selling), and:
   - form: a page that is just the form for adding one record type ("a page for the booking form"): fieldIds in
-    the order asked, intro (one line, or instructions such as payment details), submitLabel (the button, 2 to 4
-    words: "Book court"; never instructions).
+    the order asked and intro (one line, or instructions such as payment details). The button's words (2 to 4
+    words: "Book court"; never instructions) are a renames entry: kind button, the form view's id, newName the
+    words. Leave it out to keep the standard "Send …" button.
   - notes: a notebook with a list of notes and a markdown editor ("a note taking page"). It needs a record type
     with a text title and a long_text body: add_entity (e.g. Note: title, body long_text, plus tags or a date if
     useful) unless one exists; set titleFieldId, bodyFieldId and optional metaFieldIds.
@@ -364,12 +400,17 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
     entityId is "" (no record type); put a helpful outline in starter (markdown).
   - html: a page the owner designs entirely in their own HTML and CSS ("a custom HTML page", "I have my own landing
     page design", "a fully custom booking page"). Its entityId is "". The owner pastes or uploads the HTML in the
-    page's editor, which starts with a styled template. When they ask you to write or draft the page, put the
-    complete HTML document (short, with inline CSS) in the view's starter; otherwise leave starter empty. When they
-    want it live now, add a second op after the add_view: update_view with that view's id and public true. Only
-    say it's drafted or live when the plan does it. In the reply, say they can open Edit HTML, and that "Connect a
-    form" adds a form that saves to one of
-    their public forms (so a custom booking page still saves real bookings).
+    page's editor, which starts with a styled template. When they ask you to write, draft or design the page (a
+    landing page, a promo), put the complete HTML document with inline CSS in the view's starter; otherwise leave
+    starter empty. When they want it live now, add a second op after the add_view: update_view with that view's id
+    and public true. Only say it's drafted or live when the plan does it.
+    A form on the page that saves real records (a booking form connected to bookings, a sign-up or inquiry form):
+    never write its inputs yourself. Put <div data-everyops-embed="FORM_VIEW_ID"></div> where the form goes, with
+    the id of a public form view; EveryOps fills in the real fields (in steps when that form has steps) and makes
+    it save to that form. If no public form for that record type exists, add one in the same plan (add_view form
+    with public true, its fields with '# Step title' markers for a multi-step form) before the html page. Style it
+    with CSS on form, fieldset, legend, label, input, select, textarea and button.
+    In the reply, say they can open Edit HTML to change the design.
 - Reports and totals pages: add_system with no views and several add_widget on it; a page without views shows
   its widgets as a dashboard. Start with 2 to 4 stat widgets for the totals (metric count/sum/avg, optional
   filter, e.g. revenue from paid bookings, bookings this month), then chart for graphs: over
@@ -415,6 +456,7 @@ can be undone from History or the Undo button, so deleting is fine when asked:
   tabs with renames.
 - Document pages: pageTexts with the page's view id and its complete new markdown (keep what the person didn't ask to
   change). "What the person is looking at" shows the current text.
+- An existing custom HTML page: pageTexts with its view id and its complete new HTML (same embed placeholders).
 - Team (owners and admins): team invite (email and role), set_role for a member or invite by email, revoke_invite.
   Removing a member, deleting the workspace, account, password and email changes can't be undone, so they aren't
   yours to do: say where they are and set goTo (team or settings).
@@ -441,9 +483,14 @@ Public pages and their requests:
   add_field when bookings don't have them. Add a records block of active payment methods if they exist.
 - "payment methods… if active show them in the booking form": add_entity for payment methods, its page, and
   add_block on the booking form (records, cards, filter status == 'active').
-- "a landing page" or "a website": add_system (icon house) and add_view landing with a hero (title, a short
-  subheading and a button to the public booking form). EveryOps lays it out in its standard design: highlights,
-  what's offered, how it works, payment methods, FAQs and contact are filled in from the data.
+- "a landing page" or "a website": add_system (icon house) and add_view landing with a hero (a headline of 3 to 8
+  words and a 2 to 4 word button to the public booking form). EveryOps lays it out in its standard design and
+  writes the rest from the data: the line under the headline, highlights, what's offered, how it works, payment
+  methods, FAQs and contact. Keep a form's intro to one or two sentences.
+- Moving a form's section into one of its steps ("put the payment methods on step 4", "show the FAQs on the last
+  step"): update_view that form with its complete fields (start from the list shown with its tab) and '@block_id'
+  in the step that should show it. The section then shows inside that step instead of below the form. Never remove
+  a section someone asked to move; if the form has no steps yet, give it steps in the same update.
 - Changing a website's words ("make the headline punchier", "add our phone number", "rewrite the steps"): a renames
   entry with kind section, the section's blockId, and newName holding only the lines that change. A section the person
   clicked is named under "What the person is looking at"; edit that one. To show something new on the page, add_block;

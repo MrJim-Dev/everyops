@@ -216,9 +216,43 @@ export function formSnippet(form: PublicForm): string {
       }
     }
   });
-  return `<form data-everyops-form="${form.viewId}" data-success="Thank you! We'll be in touch.">
+  // A readable starting look the page's own CSS overrides (the selectors have no weight); --everyops-accent colours
+  // the buttons.
+  const open = `<style>${FORM_CSS}</style>
+<form data-everyops-form="${form.viewId}" data-success="Thank you! We'll be in touch.">`;
+  const steps = form.steps?.filter((s) => s.fieldIds.length) ?? [];
+  if (steps.length < 2)
+    return `${open}
 ${rows.join("\n")}
   <button type="submit">${esc(form.submitLabel)}</button>
   <p data-everyops-message></p>
 </form>`;
+  // In steps: one fieldset per step, shown one at a time by a few lines of script (pages may run scripts in their
+  // sandbox). Each step's fields are checked before Next; fields no step lists go on the last one.
+  const rowOf = new Map(form.fields.map((f, i) => [f.id, rows[i]]));
+  const placed = new Set(steps.flatMap((s) => s.fieldIds));
+  const left = form.fields.filter((f) => !placed.has(f.id)).map((f) => f.id);
+  const sets = steps.map((s, i) => {
+    const ids = i === steps.length - 1 ? [...s.fieldIds, ...left] : s.fieldIds;
+    const body = ids.flatMap((id) => (rowOf.has(id) ? [`  ${rowOf.get(id)}`] : [])).join("\n");
+    return `  <fieldset data-step="${i + 1}">\n    <legend>${esc(s.title)}</legend>\n${body}\n  </fieldset>`;
+  });
+  return `${open}
+${sets.join("\n")}
+  <div class="everyops-steps-nav">
+    <button type="button" data-back>Back</button>
+    <button type="button" data-next>Next</button>
+    <button type="submit">${esc(form.submitLabel)}</button>
+  </div>
+  <p data-everyops-message></p>
+</form>
+<script>${STEP_SCRIPT}</script>`;
 }
+
+/** A connected form's starting look: stacked labels, roomy inputs, rounded buttons. */
+const FORM_CSS =
+  ":where(form[data-everyops-form]){display:grid;gap:18px;max-width:560px;font:inherit;color:inherit}:where(form[data-everyops-form] fieldset){border:0;margin:0;padding:0;display:grid;gap:14px}:where(form[data-everyops-form] legend){padding:0;margin-bottom:4px;font-weight:600;font-size:1.05em}:where(form[data-everyops-form] label){display:grid;gap:6px;font-size:14px;font-weight:500}:where(form[data-everyops-form] label:has(> input[type=checkbox])){display:flex;align-items:center;gap:8px}:where(form[data-everyops-form] input,form[data-everyops-form] select,form[data-everyops-form] textarea){width:100%;box-sizing:border-box;font:inherit;padding:10px 12px;border:1px solid #d6d3d1;border-radius:10px;background:#fff;color:#1c1917}:where(form[data-everyops-form] input[type=checkbox]){width:auto}:where(form[data-everyops-form] button){font:inherit;font-weight:600;padding:11px 20px;border:1px solid transparent;border-radius:10px;background:var(--everyops-accent,#0f766e);color:#fff;cursor:pointer}:where(form[data-everyops-form] button[data-back]){background:transparent;color:inherit;border-color:currentColor}:where(form[data-everyops-form] .everyops-steps-nav){display:flex;gap:8px;justify-content:flex-end}:where(form[data-everyops-form] [data-everyops-message]:empty){display:none}:where(form[data-everyops-form]) [hidden]{display:none!important}";
+
+/** Shows a stepped form's fieldsets one at a time, checking each step's fields before Next. */
+const STEP_SCRIPT =
+  '(function(){var f=document.currentScript.previousElementSibling,s=f.querySelectorAll("[data-step]"),i=0,b=f.querySelector("[data-back]"),n=f.querySelector("[data-next]"),go=f.querySelector("[type=submit]");function vis(el,on){el.hidden=!on;el.style.display=on?"":"none";}function show(){s.forEach(function(x,k){vis(x,k===i);});vis(b,i>0);vis(n,i<s.length-1);vis(go,i===s.length-1);}n.addEventListener("click",function(){var ok=true;s[i].querySelectorAll("input,select,textarea").forEach(function(el){if(ok&&!el.reportValidity())ok=false;});if(ok){i++;show();}});b.addEventListener("click",function(){i--;show();});f.addEventListener("everyops:result",function(e){if(e.detail&&e.detail.ok){i=0;show();}});show();})();';

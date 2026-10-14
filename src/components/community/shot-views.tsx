@@ -71,14 +71,23 @@ export function ShotContent({ view, data, date }: { view?: View; data: Workspace
       const cart = products.slice(0, 3);
       const total = cart.reduce((sum, p) => sum + Number(p.data.price ?? 0), 0);
       return (
+        // The same list the real Register shows: name and price, a count in the order, and a plus button.
         <div className="grid h-full grid-cols-[1fr_260px] gap-5">
-          <div className="grid grid-cols-3 content-start gap-3">
-            {products.map((p) => (
-              <div key={p.id} className="rounded-lg border bg-card px-3 py-3">
-                <p className="truncate font-medium">{productEntity ? recordTitle(productEntity, p) : ""}</p>
-                <p className="mt-1 text-[12px] text-muted-foreground tabular">
-                  {formatMoney(Number(p.data.price ?? 0))}
-                </p>
+          <div className="flex flex-col divide-y rounded-lg border bg-card">
+            {products.map((p, i) => (
+              <div key={p.id} className="flex items-center gap-3 px-3 py-2">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">
+                    {productEntity ? recordTitle(productEntity, p) : ""}
+                  </span>
+                  <span className="block text-[12px] text-muted-foreground tabular">
+                    {formatMoney(Number(p.data.price ?? 0))}
+                  </span>
+                </span>
+                {i < 3 ? <span className="text-[12px] text-primary tabular">×1</span> : null}
+                <span className="flex size-6 items-center justify-center rounded-md border text-muted-foreground">
+                  +
+                </span>
               </div>
             ))}
           </div>
@@ -99,7 +108,7 @@ export function ShotContent({ view, data, date }: { view?: View; data: Workspace
               <span className="text-[20px] font-semibold tabular">{formatMoney(total)}</span>
             </div>
             <span className="mt-3 rounded-md bg-primary py-2 text-center font-medium text-primary-foreground">
-              Charge
+              Complete sale · {formatMoney(total)}
             </span>
           </div>
         </div>

@@ -43,4 +43,46 @@ describe("hedged Gemini calls", () => {
     const run = async () => ({ ok: false, retryable: false, who: ++n }) as R;
     expect(await hedged(run, { hedgeMs: 20_000 })).toMatchObject({ who: 1 });
   });
+  it("with afterSilence, gives a slow call that keeps streaming no twin", async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    const run = (_signal: AbortSignal, progress: () => void) => {
+      const who = ++n;
+      // A part every 15 s for 90 s, then the answer.
+      const ticks = setInterval(progress, 15_000);
+      return new Promise<R>((res) =>
+        setTimeout(() => {
+          clearInterval(ticks);
+          res({ ok: true, who });
+        }, 90_000),
+      );
+    };
+    const result = hedged(run, { hedgeMs: 45_000, afterSilence: true });
+    await vi.advanceTimersByTimeAsync(95_000);
+    expect(await result).toEqual({ ok: true, who: 1 });
+    expect(n).toBe(1);
+  });
+
+  it("with afterSilence, starts a twin once a call has been quiet for hedgeMs", async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    const started: number[] = [];
+    const run = (_signal: AbortSignal, progress: () => void) => {
+      const who = ++n;
+      started.push(Date.now());
+      if (who === 1) {
+        // Streams for 30 s, then stalls for good.
+        const ticks = setInterval(progress, 10_000);
+        setTimeout(() => clearInterval(ticks), 35_000);
+        return new Promise<R>(() => {});
+      }
+      return new Promise<R>((res) => setTimeout(() => res({ ok: true, who }), 10_000));
+    };
+    const t0 = Date.now();
+    const result = hedged(run, { hedgeMs: 45_000, afterSilence: true });
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(await result).toEqual({ ok: true, who: 2 });
+    // The last part came at 30 s, so the twin started at 75 s.
+    expect(started.map((t) => t - t0)).toEqual([0, 75_000]);
+  });
 });

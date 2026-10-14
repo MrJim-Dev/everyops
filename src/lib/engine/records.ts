@@ -31,12 +31,14 @@ export function validateRecord(
   data: RecordData,
   records: DataRecord[],
   ignoreId?: string,
+  /** Required fields that may stay empty for now (a public form doesn't ask them; staff fill them in later). */
+  notYet?: ReadonlySet<string>,
 ): FieldError[] {
   const errors: FieldError[] = [];
   for (const field of entity.fields) {
     if (field.type === "formula" || field.type === "rollup") continue;
     const value = data[field.id];
-    if (field.required && isEmpty(value)) {
+    if (field.required && isEmpty(value) && !notYet?.has(field.id)) {
       errors.push({ fieldId: field.id, message: `${field.name} is required` });
       continue;
     }
@@ -149,10 +151,11 @@ export function createRecord(
   now: Date = new Date(),
   /** Lets a plan reserve ids up front so its records can link to each other. */
   id?: string,
+  options: { notYet?: ReadonlySet<string> } = {},
 ): MutationResult {
   const bp = ws.blueprint;
   const entity = getEntity(bp, entityId);
-  const errors = validateRecord(bp, entity, input, ws.records);
+  const errors = validateRecord(bp, entity, input, ws.records, undefined, options.notYet);
   if (errors.length) return { ok: false, errors };
 
   const stamp = now.toISOString();

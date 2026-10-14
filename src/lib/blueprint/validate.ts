@@ -6,7 +6,8 @@ import type { Block, Blueprint, Entity, Field, FormExtras } from "./types";
 export type ValidationError = { path: string; message: string };
 
 const DATE_TYPES = new Set(["date", "datetime", "time_range"]);
-const GROUP_KINDS = new Set(["choice", "status", "relation", "person", "checkbox"]);
+/** What a table can group its rows by. */
+export const GROUP_KINDS = new Set(["choice", "status", "relation", "person", "checkbox"]);
 /** A moment in time with an hour, which heatmaps need. */
 const hasHour = (f: Field | undefined) =>
   !!f && (f.type === "datetime" || (f.type === "time_range" && f.range !== "dates"));
@@ -138,10 +139,16 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
         if (view.steps) {
           const seen = new Set<string>();
           for (const step of view.steps) {
-            // A step may ask nothing but the add-ons.
-            if (!step.fieldIds.length && !(step.extras && view.extras))
+            // A step may ask nothing but show the add-ons or some of the form's blocks (how to pay).
+            if (!step.fieldIds.length && !(step.extras && view.extras) && !step.blockIds?.length)
               errors.push({ path, message: `${view.name}: step "${step.title}" asks nothing` });
             missing(step.fieldIds);
+            for (const id of step.blockIds ?? [])
+              if (!view.blocks?.some((b) => b.id === id))
+                errors.push({
+                  path,
+                  message: `${view.name}: step "${step.title}" shows block "${id}", which isn't on the form (blocks: ${(view.blocks ?? []).map((b) => b.id).join(", ") || "none"})`,
+                });
             for (const id of step.fieldIds) {
               if (seen.has(id)) errors.push({ path, message: `${view.name}: "${id}" is asked in two steps` });
               seen.add(id);
