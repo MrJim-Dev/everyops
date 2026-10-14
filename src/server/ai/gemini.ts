@@ -11,10 +11,11 @@ import { z } from "zod";
 /**
  * Gemini on Vertex AI. On Cloud Run the client signs in as the service account (everyops-run);
  * locally it uses Application Default Credentials from `gcloud auth login --update-adc`. No API keys.
+ * gemini-3.7-flash is only served from the global endpoint (asia-southeast1 returns 404 for it).
  */
 const PROJECT = process.env.GOOGLE_CLOUD_PROJECT ?? "everyops-prod";
-const LOCATION = process.env.GEMINI_LOCATION ?? "asia-southeast1";
-export const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.5-flash";
+const LOCATION = process.env.GEMINI_LOCATION ?? "global";
+export const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.7-flash";
 
 let client: GoogleGenAI | undefined;
 function gemini() {
