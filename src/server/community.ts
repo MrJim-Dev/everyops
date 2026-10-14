@@ -106,9 +106,13 @@ export async function unpublishSystem(id: string, authorId: string) {
   return Number(numAffectedRows ?? 0) > 0;
 }
 
-/** Seeds or refreshes an official template (scripts/db-seed.ts). */
+/**
+ * Seeds or refreshes an official template (scripts/db-seed.ts). An official system built in the demo account
+ * (source_workspace_id set) is kept as it is: its blueprint and samples come from that workspace, not the catalog.
+ */
 export async function upsertOfficial(id: string, doc: CommunityDoc) {
   await sql`insert into published_system (id, author_id, is_official, doc)
     values (${id}, null, true, ${JSON.stringify(doc)}::jsonb)
-    on conflict (id) do update set doc = excluded.doc, is_official = true, updated_at = now()`.execute(db);
+    on conflict (id) do update set doc = excluded.doc, is_official = true, updated_at = now()
+    where published_system.source_workspace_id is null`.execute(db);
 }
