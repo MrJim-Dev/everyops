@@ -52,6 +52,27 @@ export function costFieldOf(entity: Entity): Field | undefined {
   return entity.fields.find((f) => f.type === "money" && /cost|capital|puhunan/i.test(`${f.id} ${f.name}`));
 }
 
+/** A product's own low-stock level, when the blueprint keeps one. */
+export function lowStockFieldOf(product: Entity): Field | undefined {
+  return product.fields.find(
+    (f) => f.type === "number" && /low|threshold|reorder|min/i.test(`${f.id} ${f.name}`),
+  );
+}
+
+/** The order's link to who bought (a customer, client or suki), when it has one. */
+export function customerFieldOf(order: Entity, productEntityId: string): Field | undefined {
+  const links = order.fields.filter(
+    (f) => f.type === "relation" && !computed(f) && f.relation?.entityId !== productEntityId,
+  );
+  return links.find((f) => /customer|client|buyer|suki|member|patron/i.test(`${f.id} ${f.name}`)) ?? links[0];
+}
+
+/** Credit sales (utang, charge to account) must say who owes the money. */
+export function isCreditMethod(payment: Field, methodId: string): boolean {
+  const option = payment.options?.find((o) => o.id === methodId);
+  return /utang|credit|charge|account|lista|on.?tab/i.test(`${methodId} ${option?.label ?? ""}`);
+}
+
 /** The option a completed (or held) sale gets in a generated status field. */
 export function saleStatus(field: Field | undefined, wanted: "completed" | "held"): string | undefined {
   const options = field?.options ?? [];
@@ -78,6 +99,8 @@ export type SaleInput = {
   status: "completed" | "held";
   /** The signed-in person ringing up the sale. */
   cashier?: string;
+  /** The customer record, for credit sales or when the cashier picked one. */
+  customer?: string;
   now?: Date;
 };
 
@@ -131,6 +154,7 @@ export function saleRecords(input: SaleInput): { order: RecordData; lines: Recor
   if (input.cashier)
     for (const f of order.fields)
       if (f.type === "person" && !used.has(f.id)) set(orderData, f, input.cashier);
+  if (input.customer) set(orderData, customerFieldOf(order, product.id), input.customer);
 
   const lineProduct = line.fields.find((f) => f.type === "relation" && f.relation?.entityId === product.id);
   const lines = items.map(({ product: p, qty }) => {

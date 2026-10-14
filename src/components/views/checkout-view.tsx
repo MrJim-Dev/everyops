@@ -5,6 +5,7 @@ import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AnimatedValue } from "@/components/motion/animated-value";
 import { SegmentedControl } from "@/components/motion/segmented-control";
+import { RelationInput } from "@/components/records/relation-input";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
@@ -14,7 +15,14 @@ import { useReportView } from "@/lib/assistant/screen-store";
 import { useCurrentUser } from "@/lib/auth/client";
 import { getEntity, getField, recordsOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { CheckoutView as CheckoutConfig, DataRecord, Entity, Field } from "@/lib/blueprint/types";
-import { priceFieldOf, saleRecords, stockFieldOf } from "@/lib/engine/register";
+import {
+  customerFieldOf,
+  isCreditMethod,
+  lowStockFieldOf,
+  priceFieldOf,
+  saleRecords,
+  stockFieldOf,
+} from "@/lib/engine/register";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SearchInput } from "./search-input";
@@ -47,6 +55,8 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
   const lineProduct = line.fields.find((f) => f.type === "relation" && f.relation?.entityId === product.id);
   const payment = getField(order, view.paymentFieldId);
   const orderStatus = order.fields.find((f) => f.type === "status");
+  const lowStockField = lowStockFieldOf(product);
+  const customerField = customerFieldOf(order, product.id);
 
   const [query, setQuery] = useState("");
   useReportView({ viewId: view.id, search: query.trim() || undefined });
@@ -56,6 +66,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
   const [cash, setCash] = useState("");
   const orderRef = useRef<HTMLElement>(null);
   const [justSold, setJustSold] = useState<string | null>(null);
+  const [customer, setCustomer] = useState<string | null>(null);
 
   const products = useMemo(
     () =>
@@ -73,6 +84,10 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
   const cashValue = Number(cash) || 0;
   const isCash = method === "cash";
   const shortBy = isCash && cash !== "" ? total - cashValue : 0;
+  const credit = isCreditMethod(payment, method);
+  const needsCustomer = credit && !!customerField && !customer;
+  const lowAt = (p: DataRecord) => Number(p.data[lowStockField?.id ?? ""]) || LOW_STOCK;
+  const methodLabel = payment.options?.find((o) => o.id === method)?.label ?? "credit";
 
   const add = (productId: string) =>
     setCart((c) => {
@@ -117,6 +132,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
       cash: status === "held" || !isCash ? undefined : cash === "" ? total : cashValue,
       status,
       cashier: user?.name || user?.email,
+      customer: customer ?? undefined,
     });
     const result = actions.createWithLines(order.id, sale.order, line.id, sale.lines);
     if (!result.ok) {
@@ -133,6 +149,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
     );
     setCart([]);
     setCash("");
+    setCustomer(null);
     if (status !== "held") {
       setJustSold(code);
       setTimeout(() => setJustSold(null), 1400);
@@ -179,7 +196,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
                   </span>
                   {left === 0 ? (
                     <span className="text-[12px] text-muted-foreground">Sold out</span>
-                  ) : left <= LOW_STOCK ? (
+                  ) : left <= lowAt(p) ? (
                     <span className="text-[12px] text-warning">{left} left</span>
                   ) : stockField ? (
                     <span className="font-mono text-[12px] text-muted-foreground tabular">
@@ -288,6 +305,21 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
               options={(payment.options ?? []).map((o) => ({ value: o.id, label: o.label }))}
             />
           </div>
+          {customerField ? (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="sale-customer" className="text-[12px] text-muted-foreground">
+                {customerField.name}
+                {credit ? <span className="text-warning">· needed for {methodLabel}</span> : null}
+              </Label>
+              <RelationInput
+                id="sale-customer"
+                field={customerField}
+                value={customer}
+                onChange={setCustomer}
+                invalid={needsCustomer}
+              />
+            </div>
+          ) : null}
           {isCash ? (
             <div className="grid grid-cols-2 items-end gap-3">
               <div className="flex flex-col gap-2">
@@ -322,7 +354,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
           ) : null}
           <Button
             size="lg"
-            disabled={cart.length === 0 || shortBy > 0 || !!justSold}
+            disabled={cart.length === 0 || shortBy > 0 || needsCustomer || !!justSold}
             onClick={() => complete("completed")}
             className={cn("h-11 text-[14px]", justSold && "disabled:opacity-100")}
           >

@@ -3,7 +3,7 @@ import type { DataRecord, Entity } from "@/lib/blueprint/types";
 import { posSample } from "@/lib/catalog/canteen-pos";
 import { f } from "@/lib/catalog/define";
 import { createWithLines } from "./records";
-import { saleRecords, stockFieldOf } from "./register";
+import { customerFieldOf, isCreditMethod, lowStockFieldOf, saleRecords, stockFieldOf } from "./register";
 
 const NOW = new Date("2026-10-14T06:00:00Z");
 
@@ -115,6 +115,32 @@ describe("register sale", () => {
 
   it("treats a threshold as no stock count", () => {
     expect(stockFieldOf(product)).toBeUndefined();
+    expect(lowStockFieldOf(product)?.id).toBe("low_stock_threshold");
+  });
+
+  it("links a credit sale to the customer who owes it", () => {
+    const withCustomer: Entity = {
+      ...order,
+      fields: [...order.fields, f.relation("customer", "Customer", "customers")],
+    };
+    const payment = withCustomer.fields.find((x) => x.id === "payment_method");
+    expect(payment && isCreditMethod(payment, "utang")).toBe(true);
+    expect(payment && isCreditMethod(payment, "cash")).toBe(false);
+    expect(customerFieldOf(withCustomer, "products")?.id).toBe("customer");
+    const sale = saleRecords({
+      product,
+      order: withCustomer,
+      line,
+      paymentFieldId: "payment_method",
+      items: [{ product: noodles, qty: 1 }],
+      code: "#1004",
+      method: "utang",
+      status: "completed",
+      customer: "c1",
+      now: NOW,
+    });
+    expect(sale.order.customer).toBe("c1");
+    expect(sale.order.amount_tendered).toBeUndefined();
   });
 
   it("still writes the canteen template's fields", () => {
