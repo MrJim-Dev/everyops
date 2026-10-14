@@ -3,6 +3,7 @@ import { sql } from "kysely";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { DataRecord, FieldValue, RecordData } from "@/lib/blueprint/types";
 import { createRecord } from "@/lib/engine/records";
+import { autoReferenceFields, nextReference } from "@/lib/engine/references";
 import { isTimeRange } from "@/lib/format";
 import {
   formatCell,
@@ -148,6 +149,8 @@ export async function submitPublicForm(
       if (f.type === "status" && f.options?.[0] && input[f.id] === undefined) input[f.id] = f.options[0].id;
       if (f.type === "money" && f.required && input[f.id] === undefined) input[f.id] = 0;
     }
+    for (const f of autoReferenceFields(entity))
+      if (input[f.id] === undefined) input[f.id] = nextReference(entity, f, doc.records);
     const booking = entity.booking;
     const time = booking ? input[booking.timeFieldId] : undefined;
     if (
@@ -220,7 +223,10 @@ export async function submitPublicForm(
     );
     return {
       ok: true,
-      reference: record.id.slice(-6).toUpperCase(),
+      reference:
+        autoReferenceFields(entity)
+          .map((f) => record.data[f.id])
+          .find((v): v is string => typeof v === "string" && !!v) ?? record.id.slice(-6).toUpperCase(),
       title: recordTitle(entity, record),
       summary: [
         ...shown

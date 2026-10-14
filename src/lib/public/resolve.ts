@@ -22,6 +22,7 @@ import type {
   View,
 } from "@/lib/blueprint/types";
 import { applyFilter, sortRecords } from "@/lib/engine/query";
+import { autoReferenceFields } from "@/lib/engine/references";
 import {
   formatDate,
   formatDateTime,
@@ -260,8 +261,11 @@ export function publicFieldsOf(bp: Blueprint, view: FormView): Field[] {
   const entity = bp.entities.find((e) => e.id === view.entityId);
   if (!entity) return [];
   const published = publishedEntities(bp);
+  // Reference numbers are issued on submit (submitPublicForm), never typed by a visitor.
+  const issued = new Set(autoReferenceFields(entity).map((f) => f.id));
   const editable = editableFields(entity).filter(
     (f) =>
+      !issued.has(f.id) &&
       f.type !== "status" &&
       f.type !== "money" &&
       f.type !== "image" &&
