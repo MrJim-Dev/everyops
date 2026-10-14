@@ -254,3 +254,29 @@ export function resolveGoTo(
     }
   }
 }
+/**
+ * What a reply is based on, as links: record ids open the record, page and tab ids open the page. Unknown ids
+ * are dropped, so a made-up id never becomes a broken link.
+ */
+export function resolveSources(
+  bp: Blueprint,
+  records: DataRecord[],
+  ids: string[],
+  ctx: { screen: Screen; canManage: boolean },
+): Navigation[] {
+  const out: Navigation[] = [];
+  for (const id of ids) {
+    const nav = records.some((r) => r.id === id)
+      ? resolveGoTo(bp, records, { to: "record", recordId: id, open: false }, ctx)
+      : bp.systems.some((s) => s.id === id)
+        ? resolveGoTo(bp, records, { to: "page", pageId: id, open: false }, ctx)
+        : bp.views.some((v) => v.id === id)
+          ? resolveGoTo(bp, records, { to: "page", tabId: id, open: false }, ctx)
+          : undefined;
+    if (nav && !out.some((n) => n.path === nav.path && n.recordId === nav.recordId)) out.push(nav);
+    if (out.length === 8) break;
+  }
+  return out;
+}
+
+/** The workspace-relative path of the screen, so a record can be opened without leaving the page. */

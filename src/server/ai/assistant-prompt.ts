@@ -21,11 +21,11 @@ import {
 type AnyObject = z.ZodObject<z.ZodRawShape>;
 const assistantView = z.union(
   view.options.map((o) =>
-    ((o as AnyObject).shape.type as z.ZodLiteral<string>).value === "form"
+    ["form", "landing"].includes(((o as AnyObject).shape.type as z.ZodLiteral<string>).value)
       ? (o as AnyObject).omit({ blocks: true })
       : o,
   ) as unknown as [AnyObject, AnyObject, ...AnyObject[]],
-) as unknown as typeof view; // a form without blocks is still a valid view
+) as unknown as typeof view; // blocks are added with add_block; toView gives a landing page an empty list
 
 const patch = z.object({
   name: z.string().optional(),
@@ -145,13 +145,27 @@ const designOp = z.union([
     block,
     beforeBlockId: z.string().optional(),
   }),
+  z.object({
+    op: z.literal("remove"),
+    what: z.enum(["record_type", "field", "page", "tab", "card", "rule", "block"]),
+    id: z.string().describe("Its id. A field's or block's id within parentId"),
+    parentId: z
+      .string()
+      .optional()
+      .describe("field: its record type (entity) id; block: its form or landing view id"),
+  }),
+  z.object({
+    op: z.literal("move_page"),
+    pageId: z.string(),
+    position: z.number().describe("0 is the top of the sidebar"),
+  }),
 ]);
 
 const recordOp = z.object({
-  op: z.enum(["create_record", "update_record"]),
+  op: z.enum(["create_record", "update_record", "delete_record"]),
   ref: z.string().optional().describe("create_record: a short id other operations in this plan can link to"),
   entityId: z.string().optional().describe("create_record"),
-  recordId: z.string().optional().describe("update_record: the record's id from the data"),
+  recordId: z.string().optional().describe("update_record and delete_record: the record's id from the data"),
   values: z.array(
     z.object({
       fieldId: z.string(),
@@ -172,6 +186,9 @@ export const assistantAnswer = z.object({
       "What you say to the person. Plain text; short paragraphs or '- ' bullets; no headings or tables.",
     ),
   suggestions: z.array(z.string()).describe("0 to 3 short follow-ups the person might send next"),
+  sources: z
+    .array(z.string())
+    .describe("Ids of the records, pages or tabs the reply is based on or names (up to 8); shown as links"),
   goTo: z
     .object({
       to: z
@@ -188,7 +205,9 @@ export const assistantAnswer = z.object({
   plan: z.object({
     title: z.string().describe("2 to 6 words, sentence case. Empty unless kind is plan."),
     facts: z.array(z.object({ label: z.string(), value: z.string() })),
-    steps: z.array(z.object({ kind: z.enum(["add", "change"]), label: z.string(), detail: z.string() })),
+    steps: z.array(
+      z.object({ kind: z.enum(["add", "change", "remove"]), label: z.string(), detail: z.string() }),
+    ),
     ops: z.array(designOp).describe("Design changes, applied first"),
     renames: z
       .array(
@@ -207,6 +226,18 @@ export const assistantAnswer = z.object({
         }),
       )
       .describe("Cards whose value is a formula over named totals"),
+    pageTexts: z
+      .array(z.object({ viewId: z.string().describe("A document page (view)"), markdown: z.string() }))
+      .describe("New full text for document pages"),
+    team: z
+      .array(
+        z.object({
+          action: z.enum(["invite", "set_role", "revoke_invite"]),
+          email: z.string(),
+          role: z.enum(["admin", "staff", "viewer"]).optional().describe("invite and set_role"),
+        }),
+      )
+      .describe("Team invites and roles"),
   }),
 });
 export type AssistantAnswer = z.infer<typeof assistantAnswer>;
@@ -290,13 +321,37 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
 - Line items (a record type with a parent, e.g. booking rentals under a booking) are added by opening the parent
   record and pressing "Add …" in its side panel, or by you with create_record (set the parent link and the other
   links by name). When a list or total of line items is empty, say which records have none and offer to add them.
-- Data changes: create_record or update_record with recordIds from the data. You can't delete records or fields: say
-  where to do it by hand instead.
+- Data changes: create_record, update_record, or delete_record with recordIds from the data (deleting a record also
+  deletes its line items).
 - "this", "here" and "the page" mean what the person is looking at. Keep plans as small as the request needs.
 - facts: the key values to confirm. steps: one line per visible change, kind add or change, detail like "₱400 → ₱450".
 - Every number in facts and steps must match the operations exactly.
 
 Ask (kind "clarify") when the request is ambiguous in a way that changes the result; ask one short question.
+
+You can do everything in the workspace someone with the person's role can do, as a plan they approve. Every plan
+can be undone from History or the Undo button, so deleting is fine when asked:
+- Remove things with ops remove: what record_type (deletes its records, tabs, cards, rules, links to it and line
+  items), field (parentId is its record type; its values stay hidden in the records and come back on undo), page
+  (with its tabs and cards), tab, card, rule or block (parentId is its form or landing view). Remove exactly what was
+  asked. When something depends on what goes (a board grouped by a status field, a formula reading a field), remove or
+  change that too and say so. Never remove the field a record type is named by.
+- "Delete all cancelled bookings", "remove the test records": delete_record for each matching record id. For many
+  records, list how many in facts.
+- Reorder the sidebar with move_page (position 0 is the top). Rename the workspace with rename_workspace, pages and
+  tabs with renames.
+- Document pages: pageTexts with the page's view id and its complete new markdown (keep what the person didn't ask to
+  change). "What the person is looking at" shows the current text.
+- Team (owners and admins): team invite (email and role), set_role for a member or invite by email, revoke_invite.
+  Removing a member, deleting the workspace, account, password and email changes can't be undone, so they aren't
+  yours to do: say where they are and set goTo (team or settings).
+- Steps: kind remove for anything deleted, with a detail that says how much ("12 cancelled bookings", "Rates tab and
+  its 2 cards"). Never say a removal is permanent; say it can be undone in History.
+
+Sources: put the id of every record you name or describe in the reply into sources (the bookings you list, the
+player you talk about, the record a total comes from when there are only a few), then the page or tab that holds
+them. Up to 8, records first. Write each record's name in the reply exactly as its title (primary field) appears in
+the data, so the name becomes a link that opens it.
 
 Attached files: the person may attach photos (receipts, menus, handwritten lists, screenshots), PDFs, CSV or text
 files, or audio; they follow the conversation, labelled with their names. Read them as the person's own material:
@@ -315,6 +370,7 @@ Public pages and their requests:
   add_block on the booking form (records, cards, filter status == 'active').
 - "a landing page": add_system (icon house) and add_view landing with a hero (button to the public booking form),
   a text block about the business, and records blocks for what customers should see (courts, rates, FAQs).
+  New landing and form views start empty: add each block with add_block (viewId the new view), in page order.
 - "FAQs shown on the landing page or booking form": add_entity, its page, and add_block (layout faq) on each.
 - update_view also changes a form's intro, button or questions (fieldIds). Blocks go on form and landing views only.
 

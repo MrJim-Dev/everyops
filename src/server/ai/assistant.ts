@@ -1,7 +1,13 @@
 import "server-only";
 import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
-import { describeScreen, type Navigation, resolveGoTo, type Screen } from "@/lib/assistant/screen";
+import {
+  describeScreen,
+  type Navigation,
+  resolveGoTo,
+  resolveSources,
+  type Screen,
+} from "@/lib/assistant/screen";
 import type {
   Block,
   Blueprint,
@@ -14,12 +20,20 @@ import type {
 } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { widgetValue } from "@/lib/engine/aggregate";
-import { applyOps, type ChangeOp, type ChangePlan, commitChange, type RecordOp } from "@/lib/engine/changes";
+import {
+  applyOps,
+  type ChangeOp,
+  type ChangePlan,
+  commitChange,
+  type DocOp,
+  type RecordOp,
+  type TeamOp,
+} from "@/lib/engine/changes";
 import { metricFormatter } from "@/lib/engine/metric-format";
 import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
 import { isPublic } from "@/lib/public/resolve";
-import { randomToken } from "@/lib/store/workspace-model";
+import { type Invite, type Member, randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
 import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer } from "./assistant-prompt";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
@@ -36,6 +50,8 @@ export type AssistantResult =
       plan?: ChangePlan;
       /** A checked page or record to open, now (open) or as a link. */
       navigate?: Navigation;
+      /** What the reply is based on, as links that open the record or page. */
+      sources?: Navigation[];
     }
   | { ok: false; message: string };
 
@@ -126,6 +142,55 @@ function fillWidget(widget: Widget, entity: Entity) {
   }
   if (chart.kind === "donut" && !chart.groupByFieldId) chart.kind = "bar";
   if (!chart.bucket) chart.bucket = "day";
+}
+
+type RawRemoval = Extract<RawPlan["ops"][number], { op: "remove" }>;
+
+/** The model's "remove" turned into one removal op, or the reason it can't be. */
+function toRemoval(bp: Blueprint, o: RawRemoval, planned: ChangeOp[]): ChangeOp | string {
+  const list = (ids: string[]) => (ids.length ? ` (existing: ${ids.slice(0, 30).join(", ")})` : "");
+  switch (o.what) {
+    case "record_type":
+      return bp.entities.some((e) => e.id === o.id)
+        ? { op: "remove_entity", entityId: o.id }
+        : `"${o.id}" isn't a record type${list(bp.entities.map((e) => e.id))}`;
+    case "field": {
+      const entity = bp.entities.find((e) => e.id === o.parentId);
+      if (!entity) return `parentId must be the field's record type${list(bp.entities.map((e) => e.id))}`;
+      if (!entity.fields.some((f) => f.id === o.id))
+        return `"${o.id}" isn't a field of ${entity.id}${list(entity.fields.map((f) => f.id))}`;
+      if (entity.primaryFieldId === o.id) return `"${o.id}" names each ${entity.name} and can't be removed`;
+      return { op: "remove_field", entityId: entity.id, fieldId: o.id };
+    }
+    case "page":
+      return bp.systems.some((s) => s.id === o.id)
+        ? { op: "remove_system", systemId: o.id }
+        : `"${o.id}" isn't a page${list(bp.systems.map((s) => s.id))}`;
+    case "tab":
+      return bp.views.some((v) => v.id === o.id)
+        ? { op: "remove_view", viewId: o.id }
+        : `"${o.id}" isn't a tab${list(bp.views.map((v) => v.id))}`;
+    case "card":
+      return bp.widgets.some((w) => w.id === o.id)
+        ? { op: "remove_widget", widgetId: o.id }
+        : `"${o.id}" isn't a card${list(bp.widgets.map((w) => w.id))}`;
+    case "rule":
+      return bp.rules.some((r) => r.id === o.id)
+        ? { op: "remove_rule", ruleId: o.id }
+        : `"${o.id}" isn't a rule${list(bp.rules.map((r) => r.id))}`;
+    case "block": {
+      const view = bp.views.find((v) => v.id === o.parentId);
+      const blocks =
+        view && (view.type === "form" || view.type === "landing") ? (view.blocks ?? []) : undefined;
+      const added = planned.flatMap((p) =>
+        p.op === "add_block" && p.viewId === o.parentId ? [p.block.id] : [],
+      );
+      if (!view || !blocks) return "parentId must be the form or landing view the block is on";
+      return blocks.some((b) => b.id === o.id) || added.includes(o.id)
+        ? { op: "remove_block", viewId: view.id, blockId: o.id }
+        : `"${o.id}" isn't a block on ${o.parentId}${list(blocks.map((b) => b.id))}`;
+    }
+  }
 }
 
 function toDesignOps(
@@ -242,6 +307,17 @@ function toDesignOps(
           block: structuredClone(o.block) as Block,
           ...(o.beforeBlockId ? { beforeBlockId: o.beforeBlockId } : {}),
         });
+        break;
+      case "remove": {
+        const removal = toRemoval(bp, o, ops);
+        if (typeof removal === "string") errors.push(`${at} ${o.what}: ${removal}`);
+        else ops.push(removal);
+        break;
+      }
+      case "move_page":
+        if (bp.systems.some((s) => s.id === o.pageId))
+          ops.push({ op: "move_system", systemId: o.pageId, index: Math.round(o.position) });
+        else errors.push(`${at}: page "${o.pageId}" doesn't exist`);
         break;
     }
   }
@@ -412,6 +488,14 @@ function toDesignOps(
     "add_rule",
     "rename_system",
     "rename_view",
+    "remove_block",
+    "remove_widget",
+    "remove_rule",
+    "remove_view",
+    "remove_field",
+    "remove_system",
+    "remove_entity",
+    "move_system",
   ];
   const rank = (op: ChangeOp) => {
     const i = ORDER.indexOf(op.op);
@@ -461,6 +545,51 @@ function toDesignOps(
 /** Image field values of the form "attachment:<id>": an attached photo to copy into the workspace for the record. */
 const PHOTO_VALUE = /^attachment:(\S+)$/;
 
+/** New text for document pages; only pages of type document take text. */
+function toDocOps(bp: Blueprint, raw: RawPlan["pageTexts"], errors: string[]): DocOp[] {
+  const ops: DocOp[] = [];
+  for (const [i, p] of raw.entries()) {
+    const view = bp.views.find((v) => v.id === p.viewId);
+    if (view?.type !== "document") {
+      const pages = bp.views.filter((v) => v.type === "document").map((v) => v.id);
+      errors.push(
+        `pageTexts[${i}]: "${p.viewId}" isn't a document page (document pages: ${pages.join(", ") || "none"})`,
+      );
+    } else ops.push({ viewId: view.id, body: p.markdown });
+  }
+  return ops;
+}
+
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** Team changes checked against the real team: roles change only for people who are there. */
+function toTeamOps(
+  team: { members: Member[]; invites: Invite[] } | undefined,
+  raw: RawPlan["team"],
+  errors: string[],
+): TeamOp[] {
+  const ops: TeamOp[] = [];
+  const members = team?.members ?? [];
+  const invites = team?.invites ?? [];
+  for (const [i, t] of raw.entries()) {
+    const email = t.email.trim().toLowerCase();
+    const at = `team[${i}] ${t.action}`;
+    const isMember = members.some((m) => m.email.toLowerCase() === email);
+    const invited = invites.some((x) => x.email.toLowerCase() === email);
+    if (!EMAIL.test(email)) errors.push(`${at}: "${t.email}" isn't an email address`);
+    else if (t.action === "revoke_invite") {
+      if (invited) ops.push({ op: "revoke_invite", email });
+      else errors.push(`${at}: nobody with ${email} has a pending invite`);
+    } else if (!t.role) errors.push(`${at}: needs a role (admin, staff or viewer)`);
+    else if (t.action === "invite") {
+      if (isMember) errors.push(`${at}: ${email} is already on the team; use set_role`);
+      else ops.push({ op: "invite", email, role: t.role });
+    } else if (isMember || invited) ops.push({ op: "set_role", email, role: t.role });
+    else errors.push(`${at}: ${email} isn't on the team or invited; invite them instead`);
+  }
+  return ops;
+}
+
 async function toRecordOps(
   bp: Blueprint,
   records: DataRecord[],
@@ -490,6 +619,12 @@ async function toRecordOps(
   const ops: RecordOp[] = [];
   let created = 0;
   for (const [i, o] of raw.entries()) {
+    if (o.op === "delete_record") {
+      if (o.recordId && records.some((r) => r.id === o.recordId))
+        ops.push({ op: "delete_record", recordId: o.recordId });
+      else errors.push(`recordOps[${i}]: no record "${o.recordId ?? ""}" to delete`);
+      continue;
+    }
     const entityId =
       o.op === "create_record" ? o.entityId : records.find((r) => r.id === o.recordId)?.entityId;
     const entity = bp.entities.find((e) => e.id === entityId);
@@ -550,6 +685,10 @@ export async function assistantTurn(input: {
   userId: string;
   /** The workspace the plan is for; attached photos used in records are copied into its uploads. */
   workspaceId: string;
+  /** Owners and admins see the team, so they can invite people and change roles. */
+  team?: { members: Member[]; invites: Invite[] };
+  /** Called with what the assistant is doing, shown while it works. */
+  onStatus?: (status: string) => void;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
   const permissions = input.canDesign
@@ -558,8 +697,28 @@ export async function assistantTurn(input: {
       ? "The person is staff: they can change data (records) but not the design. Don't plan design changes; say an owner or admin can."
       : "The person is a viewer: answer questions only. For changes, say an owner or admin can make them.";
   const screen = describeScreen(bp, records, input.screen, input.docs);
-  const context = `Today in Manila: ${todayKey()}
-${permissions}
+  const status = input.onStatus ?? (() => {});
+  const where = bp.systems.find((s) => s.id === input.screen.systemId);
+  if (where) status(`Looking at ${where.name}`);
+  status(
+    `Reading ${records.length} ${records.length === 1 ? "record" : "records"} across ${bp.entities.length} record types`,
+  );
+  const team =
+    input.canDesign && input.team
+      ? `\n\nTeam (you can invite people and change roles):\n${
+          [
+            ...input.team.members.map((m) => `- ${m.name} <${m.email}>: ${m.role}`),
+            ...input.team.invites.map((i) => `- invited <${i.email}>: ${i.role}, not joined yet`),
+          ].join("\n") || "- nobody besides the owner"
+        }`
+      : "";
+  const today = todayKey();
+  const weekday = new Date(`${today}T12:00:00+08:00`).toLocaleDateString("en-PH", {
+    weekday: "long",
+    timeZone: "Asia/Manila",
+  });
+  const context = `Today in Manila: ${weekday}, ${today}
+${permissions}${team}
 
 What the person is looking at:
 ${screen.text}
@@ -607,6 +766,8 @@ ${input.messages
 
   // Files the person attached follow the text on every attempt, including a repair.
   const attachments = attachmentsIn(input.messages);
+  if (attachments.length)
+    status(`Reading ${attachments.length} attached ${attachments.length === 1 ? "file" : "files"}`);
   const fileParts = await attachmentParts(input.userId, attachments);
   const withFiles = (text: string): string | Part[] => (fileParts.length ? [{ text }, ...fileParts] : text);
   // Each attached photo is copied into the workspace at most once per turn, even across repair attempts.
@@ -619,6 +780,7 @@ ${input.messages
   let prompt = withFiles(context);
   let repaired = false;
   for (let attempt = 0; attempt < 3; attempt++) {
+    status(attempt === 0 ? "Thinking it through" : "Reworking the plan so it fits your workspace");
     // Answers take 3–8 s and plans with pages 10–25 s. A stalled call gets a parallel twin after 28 s.
     const result = await generateJsonHedged(
       assistantAnswer,
@@ -638,8 +800,13 @@ ${input.messages
     const a = result.data;
     const suggestions = a.suggestions.slice(0, 3);
     const navigate = resolveGoTo(bp, records, a.goTo, { screen: input.screen, canManage: input.canDesign });
-    const withNav = navigate ? { navigate } : {};
+    const sources = resolveSources(bp, records, a.sources ?? [], {
+      screen: input.screen,
+      canManage: input.canDesign,
+    });
+    const withNav = { ...(navigate ? { navigate } : {}), ...(sources.length ? { sources } : {}) };
     if (a.kind !== "plan") return { ok: true, kind: a.kind, reply: a.reply, suggestions, ...withNav };
+    status("Checking the plan against your workspace");
 
     const design = toDesignOps(bp, a.plan.ops, a.plan.renames, a.plan.formulas);
     const errors = [...design.errors];
@@ -656,18 +823,29 @@ ${input.messages
     const recordPart = await toRecordOps(next, records, a.plan.recordOps, photo);
     errors.push(...recordPart.errors);
     if (recordPart.ops.length && !input.canEditRecords) errors.push("This person can't change data.");
+    const docOps = toDocOps(next, a.plan.pageTexts, errors);
+    if (docOps.length && !input.canEditRecords) errors.push("This person can't edit pages.");
+    const teamOps = toTeamOps(input.team, a.plan.team, errors);
+    if (teamOps.length && !input.canDesign) errors.push("Only owners and admins can change the team.");
+    let removedCount = 0;
     if (!errors.length) {
+      if (recordPart.ops.length)
+        status(
+          `Trying ${recordPart.ops.length} data ${recordPart.ops.length === 1 ? "change" : "changes"} on a copy`,
+        );
       // Rehearse the data edits on a copy so validation, rules and booking conflicts are checked now.
       const staged = design.ops.length
         ? commitChange({ blueprint: bp, records }, next).data
         : { blueprint: bp, records };
       const rehearsal = recordPart.ops.length ? applyRecordOps(staged, recordPart.ops) : null;
       if (rehearsal) errors.push(...rehearsal.errors);
+      const known = new Set(next.entities.map((e) => e.id));
+      removedCount = records.filter((r) => !known.has(r.entityId)).length + (rehearsal?.removed.length ?? 0);
       // An option can only go once no record (after this plan's own edits) still uses it.
       if (design.ops.length)
         errors.push(...strandedOptions(bp, next, optionUsage(bp, rehearsal?.data.records ?? staged.records)));
     }
-    if (!errors.length && (design.ops.length || recordPart.ops.length)) {
+    if (!errors.length && (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)) {
       // Cards the plan adds or changes show their real new value, worked out on the rehearsed workspace.
       const cardFacts = design.ops.flatMap((op) => {
         const id =
@@ -676,6 +854,9 @@ ${input.messages
         if (!w || (w.type !== "stat" && w.type !== "progress")) return [];
         return [{ label: w.title, value: metricFormatter(next, w)(widgetValue(next, w, records)) }];
       });
+      // How many records go is counted here, not trusted to the model.
+      if (removedCount)
+        cardFacts.unshift({ label: "Records deleted", value: `${removedCount} (undo brings them back)` });
       const facts = [
         ...cardFacts,
         ...a.plan.facts.filter((f) => !cardFacts.some((c) => c.label === f.label)),
@@ -688,11 +869,14 @@ ${input.messages
         ...withNav,
         plan: {
           request: input.messages.at(-1)?.text ?? "",
+          baseVersion: bp.version,
           title: a.plan.title || "Workspace change",
           facts: facts.slice(0, 6),
           steps: a.plan.steps.slice(0, 10),
           ops: design.ops,
           recordOps: recordPart.ops,
+          ...(docOps.length ? { docOps } : {}),
+          ...(teamOps.length ? { teamOps } : {}),
         },
       };
     }

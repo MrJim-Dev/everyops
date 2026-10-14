@@ -99,7 +99,7 @@ export function toView(v: Design["views"][number]): View {
         ...base,
         entityId: "",
         type: "landing",
-        blocks: v.blocks as Block[],
+        blocks: (v.blocks ?? []) as Block[],
         ...(v.public === false ? { public: false } : {}),
       };
   }
