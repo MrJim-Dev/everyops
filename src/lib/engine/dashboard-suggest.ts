@@ -36,11 +36,17 @@ export function suggestWidgets(bp: Blueprint, system: System): Widget[] {
   const out: Widget[] = [];
   const add = (w: Widget) => {
     if (taken.has(w.id) || out.length >= 6) return;
-    // Don't repeat a chart the dashboard already has for the same thing.
-    if (
-      existing.some((x) => x.type === w.type && x.entityId === w.entityId && x.chart?.kind === w.chart?.kind)
-    )
-      return;
+    // Don't repeat what the dashboard already shows: a trend over time, a breakdown by the same field, or a
+    // list of the same records.
+    const same = (x: Widget) =>
+      x.type === w.type &&
+      x.entityId === w.entityId &&
+      (w.type === "list" ||
+        (!!w.chart?.dateFieldId && !!x.chart?.dateFieldId && !x.chart.groupByFieldId) ||
+        (!!w.chart?.groupByFieldId &&
+          (x.chart?.groupByFieldId === w.chart.groupByFieldId ||
+            x.chart?.splitByFieldId === w.chart.groupByFieldId)));
+    if (existing.some(same)) return;
     taken.add(w.id);
     out.push(w);
   };

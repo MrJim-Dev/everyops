@@ -19,7 +19,10 @@ export function ListWidget({ widget, viewHref }: { widget: Widget; viewHref?: st
   const config = widget.list ?? { fieldIds: [], limit: 5 };
   const all = sortRecords(widgetRows(blueprint, widget, records), config.sort);
   const rows = all.slice(0, config.limit);
-  const fields = config.fieldIds.map((id) => getField(entity, id));
+  // Each row already leads with the record's name, so the name field isn't shown again under it.
+  const fields = config.fieldIds
+    .filter((id) => id !== entity.primaryFieldId)
+    .map((id) => getField(entity, id));
 
   return (
     <WidgetFrame
