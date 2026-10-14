@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { stepsFromMarkers } from "@/lib/blueprint/form-steps";
 import type { Blueprint, DataRecord, FormView } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
@@ -213,5 +214,39 @@ describe("add-ons on a form", () => {
     const messages = validateBlueprint(bp).map((e) => e.message);
     expect(messages).toContain("Add-on line items (Add-on) must have Booking as their parent");
     expect(messages.some((m) => m.includes('"name" to be a link'))).toBe(true);
+  });
+});
+
+describe("steps the assistant writes as markers among a form's fields", () => {
+  it("splits '# Step title' markers into steps and turns an existing form into a multi-step one", () => {
+    const split = stepsFromMarkers([
+      "# Court and time",
+      "court",
+      "slot",
+      "# Your details",
+      "guest_name",
+      "guest_phone",
+    ]);
+    expect(split.fieldIds).toEqual(["court", "slot", "guest_name", "guest_phone"]);
+    expect(split.steps).toEqual([
+      { id: "court_and_time", title: "Court and time", fieldIds: ["court", "slot"] },
+      { id: "your_details", title: "Your details", fieldIds: ["guest_name", "guest_phone"] },
+    ]);
+    expect(stepsFromMarkers(["court", "slot"])).toEqual({ fieldIds: ["court", "slot"] });
+    expect(stepsFromMarkers(["# Only", "court"]).steps).toBeUndefined();
+
+    const { bp } = venue();
+    const next = applyOps(bp, [
+      {
+        op: "update_view",
+        viewId: "book",
+        patch: { fieldIds: split.fieldIds, steps: split.steps, review: true },
+      },
+    ]);
+    const form = next.views.find((v) => v.id === "book") as FormView;
+    expect(form.steps?.map((s) => s.title)).toEqual(["Court and time", "Your details"]);
+    expect(validateBlueprint(next)).toEqual([]);
+    const flat = applyOps(next, [{ op: "update_view", viewId: "book", patch: { steps: [] } }]);
+    expect((flat.views.find((v) => v.id === "book") as FormView).steps).toBeUndefined();
   });
 });

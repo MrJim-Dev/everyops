@@ -59,3 +59,34 @@ export function stepOfField(steps: FormStep[], fieldId: string | undefined): num
   if (!fieldId) return -1;
   return steps.findIndex((s) => s.fieldIds.includes(fieldId));
 }
+
+/**
+ * The assistant writes a multi-step form as one list of fields with "# Step title" before each step's fields (its
+ * answer schema has no room for step objects). Returns the plain fields and, with two or more steps, the steps.
+ */
+export function stepsFromMarkers(ids: string[]): { fieldIds: string[]; steps?: FormStep[] } {
+  const fieldIds = ids.filter((id) => !id.trim().startsWith("#"));
+  if (fieldIds.length === ids.length) return { fieldIds };
+  const steps: FormStep[] = [];
+  for (const raw of ids) {
+    const id = raw.trim();
+    if (id.startsWith("#")) {
+      const title = id.replace(/^#+\s*/, "").slice(0, 60) || `Step ${steps.length + 1}`;
+      const slug =
+        title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_|_$/g, "") || "step";
+      steps.push({
+        id: steps.some((s) => s.id === slug) ? `${slug}_${steps.length + 1}` : slug,
+        title,
+        fieldIds: [],
+      });
+    } else {
+      if (!steps.length) steps.push({ id: "details", title: "Details", fieldIds: [] });
+      steps[steps.length - 1].fieldIds.push(id);
+    }
+  }
+  const kept = steps.filter((s) => s.fieldIds.length);
+  return kept.length > 1 ? { fieldIds, steps: kept } : { fieldIds };
+}

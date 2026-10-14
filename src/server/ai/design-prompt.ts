@@ -141,6 +141,14 @@ export const block = z.union([
 ]);
 
 // One shape per view type, so Gemini only writes the settings that view uses.
+/** One step of a multi-step form. The designer's steps can also hold the add-ons; the assistant's can't. */
+export const formStep = z.object({
+  id: z.string(),
+  title: z.string().describe("Short, e.g. Court and time, Your details"),
+  description: z.string().optional(),
+  fieldIds: z.array(z.string()).describe("This step's fields; each field in one step"),
+});
+
 export const view = z.union([
   z.object({
     ...viewBase,
@@ -198,11 +206,7 @@ export const view = z.union([
     fieldIds: z.array(z.string()).describe("The fields asked, in order"),
     steps: z
       .array(
-        z.object({
-          id: z.string(),
-          title: z.string().describe("Short, e.g. Court and time, Your details"),
-          description: z.string().optional(),
-          fieldIds: z.array(z.string()).describe("This step's fields; each field in one step"),
+        formStep.extend({
           extras: z.boolean().optional().describe("This step shows the add-ons picker; it may ask no fields"),
         }),
       )

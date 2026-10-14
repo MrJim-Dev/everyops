@@ -6,6 +6,7 @@ import type {
   Entity,
   Field,
   FieldValue,
+  FormStep,
   RecordData,
   Rule,
   System,
@@ -50,7 +51,15 @@ export type ChangeOp =
   | {
       op: "update_view";
       viewId: string;
-      patch: { public?: boolean; intro?: string; submitLabel?: string; fieldIds?: string[] };
+      /** Forms: steps replace the form's steps (an empty list makes it one page again). */
+      patch: {
+        public?: boolean;
+        intro?: string;
+        submitLabel?: string;
+        fieldIds?: string[];
+        steps?: FormStep[];
+        review?: boolean;
+      };
     }
   /** Adds a block (live data, text, a form) to a form or landing page, optionally before another block. */
   | { op: "add_block"; viewId: string; block: Block; beforeBlockId?: string }
@@ -371,9 +380,15 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "update_view": {
         const view = next.views.find((v) => v.id === op.viewId);
         if (!view) break;
-        const { fieldIds, ...settings } = op.patch;
-        if (view.type === "form") Object.assign(view, settings);
-        else if (view.type === "landing" && settings.public !== undefined) view.public = settings.public;
+        const { fieldIds, steps, ...settings } = op.patch;
+        if (view.type === "form") {
+          Object.assign(view, settings);
+          if (steps?.length) view.steps = structuredClone(steps);
+          else if (steps) {
+            delete view.steps;
+            delete view.review;
+          }
+        } else if (view.type === "landing" && settings.public !== undefined) view.public = settings.public;
         if (fieldIds) setViewFields(view, findEntity(next, view.entityId), fieldIds);
         break;
       }

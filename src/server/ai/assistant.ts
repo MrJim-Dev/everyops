@@ -8,6 +8,7 @@ import {
   resolveSources,
   type Screen,
 } from "@/lib/assistant/screen";
+import { stepsFromMarkers } from "@/lib/blueprint/form-steps";
 import type {
   Block,
   Blueprint,
@@ -233,13 +234,37 @@ function toDesignOps(
         else errors.push(`${at}: needs entity`);
         break;
       case "add_view":
-        if (o.view && systemId) ops.push({ op: "add_view", systemId, view: toView(o.view) });
-        else errors.push(`${at}: needs view and systemId`);
+        if (o.view && systemId) {
+          const view = toView(o.view);
+          // A multi-step form arrives as "# Step title" markers among its fields.
+          if (view.type === "form") {
+            const { fieldIds, steps } = stepsFromMarkers(view.fieldIds);
+            view.fieldIds = fieldIds;
+            if (steps) Object.assign(view, { steps, review: true });
+          }
+          ops.push({ op: "add_view", systemId, view });
+        } else errors.push(`${at}: needs view and systemId`);
         break;
       case "add_widget":
-        if (o.widget && systemId)
-          ops.push({ op: "add_widget", systemId, widget: structuredClone(o.widget) as Widget });
-        else errors.push(`${at}: needs widget and systemId`);
+        if (o.widget && systemId) {
+          // The assistant's widget shapes leave out what has a good default (to fit Gemini's schema budget): an
+          // agenda or heatmap counts records, and a stat that compares periods shows its trend line.
+          const { dateFieldId, fieldIds, ...rest } = structuredClone(o.widget) as Widget & {
+            dateFieldId?: string;
+            fieldIds?: string[];
+          };
+          const widget = rest as Widget;
+          if (widget.type === "agenda" && dateFieldId)
+            widget.agenda = { dateFieldId, ...(fieldIds?.length ? { fieldIds } : {}) };
+          if (widget.type === "heatmap" && dateFieldId) widget.heatmap = { dateFieldId };
+          widget.metric ??= { op: "count" };
+          if (widget.type === "stat" && widget.compare) widget.sparkline = true;
+          // Stat and progress share a shape: a progress bar needs its target, a stat has none.
+          if (widget.type === "progress" && !widget.target) widget.type = "stat";
+          if (widget.type === "stat") delete widget.target;
+          if (!widget.filter) delete widget.filter;
+          ops.push({ op: "add_widget", systemId, widget });
+        } else errors.push(`${at}: needs widget and systemId`);
         break;
       case "update_widget": {
         const widget = bp.widgets.find((w) => w.id === o.widgetId);
@@ -274,8 +299,15 @@ function toDesignOps(
       case "update_view": {
         const view = bp.views.find((v) => v.id === o.viewId);
         const entity = view && bp.entities.find((e) => e.id === view.entityId);
+        // A form's fields can carry "# Step title" markers that split it into steps.
+        const split = view?.type === "form" && o.fieldIds ? stepsFromMarkers(o.fieldIds) : undefined;
+        const fieldIds = split ? split.fieldIds : o.fieldIds;
+        // Fields added earlier in the same plan count too ("add guest name and phone, then ask them on the form").
+        const added = ops.flatMap((x) =>
+          x.op === "add_field" && x.entityId === entity?.id ? [x.field.id] : [],
+        );
         const unknown = entity
-          ? (o.fieldIds ?? []).filter((id) => !entity.fields.some((f) => f.id === id))
+          ? (fieldIds ?? []).filter((id) => !entity.fields.some((f) => f.id === id) && !added.includes(id))
           : [];
         if (unknown.length && entity) {
           errors.push(
@@ -283,11 +315,7 @@ function toDesignOps(
           );
           break;
         }
-        if (
-          view &&
-          o.fieldIds?.length &&
-          !["table", "kanban", "approval_queue", "form"].includes(view.type)
-        ) {
+        if (view && fieldIds?.length && !["table", "kanban", "approval_queue", "form"].includes(view.type)) {
           errors.push(`${at}: a ${view.type} view has no columns to order`);
           break;
         }
@@ -295,7 +323,8 @@ function toDesignOps(
           ...(o.public !== undefined ? { public: o.public } : {}),
           ...(o.intro ? { intro: o.intro } : {}),
           ...(o.submitLabel ? { submitLabel: o.submitLabel } : {}),
-          ...(o.fieldIds?.length ? { fieldIds: o.fieldIds } : {}),
+          ...(fieldIds?.length ? { fieldIds } : {}),
+          ...(split?.steps ? { steps: split.steps, review: true } : {}),
         };
         if (Object.keys(patch).length) ops.push({ op: "update_view", viewId: o.viewId, patch });
         break;

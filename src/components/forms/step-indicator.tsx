@@ -1,7 +1,10 @@
 import { CheckIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 
-/** Numbered steps with the current one highlighted. Finished steps can be revisited by clicking them. */
+/**
+ * Numbered steps with the current one highlighted. Finished steps can be revisited by clicking them. With more than
+ * three steps only the current one shows its title (the rest show it on hover), so titles never run into each other.
+ */
 export function StepIndicator({
   steps,
   current,
@@ -16,6 +19,7 @@ export function StepIndicator({
       {steps.map((title, i) => {
         const done = i < current;
         const active = i === current;
+        const labelled = steps.length <= 3 || active;
         return (
           <li key={title} className={cn("flex min-w-0 items-center gap-2", i < steps.length - 1 && "flex-1")}>
             <button
@@ -23,6 +27,8 @@ export function StepIndicator({
               disabled={!done || !onSelect}
               onClick={() => onSelect?.(i)}
               aria-current={active ? "step" : undefined}
+              aria-label={labelled ? undefined : `Step ${i + 1}: ${title}`}
+              title={labelled ? undefined : title}
               className="flex min-w-0 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-default"
             >
               <span
@@ -35,14 +41,16 @@ export function StepIndicator({
               >
                 {done ? <CheckIcon className="size-3.5" /> : i + 1}
               </span>
-              <span
-                className={cn(
-                  "hidden whitespace-nowrap text-[12.5px] sm:inline",
-                  active ? "font-medium text-foreground" : "text-muted-foreground",
-                )}
-              >
-                {title}
-              </span>
+              {labelled ? (
+                <span
+                  className={cn(
+                    "hidden truncate text-[12.5px] sm:inline",
+                    active ? "font-medium text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  {title}
+                </span>
+              ) : null}
             </button>
             {i < steps.length - 1 ? (
               <span

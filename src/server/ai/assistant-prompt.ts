@@ -20,16 +20,24 @@ import {
  */
 type AnyObject = z.ZodObject<z.ZodRawShape>;
 const assistantView = z.union(
-  view.options.map((o) =>
-    ["form", "landing"].includes(((o as AnyObject).shape.type as z.ZodLiteral<string>).value)
-      ? // Add-ons (extras) are set up by the designer; leaving them out keeps this schema under Gemini's budget.
-        (o as AnyObject).omit(
-          ((o as AnyObject).shape.type as z.ZodLiteral<string>).value === "form"
-            ? { blocks: true, extras: true }
-            : { blocks: true },
-        )
-      : o,
-  ) as unknown as [AnyObject, AnyObject, ...AnyObject[]],
+  view.options.map((o) => {
+    const type = ((o as AnyObject).shape.type as z.ZodLiteral<string>).value;
+    // Add-ons (extras), table grouping and totals are set up by the designer or in the app; leaving them out keeps
+    // this schema under Gemini's budget.
+    if (type === "form")
+      // Steps and add-ons don't fit Gemini's schema budget as their own fields: steps are "# Step title" entries
+      // among the fields (the app splits them), and add-ons are set up by the designer.
+      return (o as AnyObject).omit({ blocks: true, extras: true, review: true, steps: true }).extend({
+        fieldIds: z
+          .array(z.string())
+          .describe(
+            "The fields asked, in order. A multi-step form puts '# Step title' before each step's fields, e.g. ['# Court and time', 'court', 'slot', '# Your details', 'guest_name', 'phone']",
+          ),
+      });
+    if (type === "landing") return (o as AnyObject).omit({ blocks: true });
+    if (type === "table") return (o as AnyObject).omit({ groupByFieldId: true, totals: true });
+    return o;
+  }) as unknown as [AnyObject, AnyObject, ...AnyObject[]],
 ) as unknown as typeof view; // blocks are added with add_block; toView gives a landing page an empty list
 
 const patch = z.object({
@@ -51,7 +59,8 @@ const widgetBase = {
   id: z.string(),
   title: z.string(),
   entityId: z.string(),
-  filter: z.string().optional().describe("Formula that keeps matching records, e.g. status == 'paid'"),
+  // Required (an empty string for every record): optional fields count most against Gemini's schema budget.
+  filter: z.string().describe("Formula that keeps matching records, e.g. status == 'paid'; empty for all"),
 };
 const metric = z.object({
   op: z.enum(["count", "sum", "avg"]),
@@ -61,7 +70,8 @@ const metric = z.object({
 const assistantWidget = z.union([
   z.object({
     ...widgetBase,
-    type: z.literal("stat"),
+    // A progress bar is a stat with a target; one shape for both keeps the schema within Gemini's budget.
+    type: z.enum(["stat", "progress"]),
     metric,
     compare: z
       .object({
@@ -69,8 +79,8 @@ const assistantWidget = z.union([
         period: z.enum(["day", "week", "month"]),
       })
       .optional()
-      .describe("Show the change from the previous day, 7 days or 30 days"),
-    sparkline: z.boolean().optional().describe("With compare: a small trend line"),
+      .describe("stat: show the change from the previous day, 7 days or 30 days"),
+    target: z.number().optional().describe("progress only: the goal"),
   }),
   z.object({
     ...widgetBase,
@@ -95,25 +105,13 @@ const assistantWidget = z.union([
     metric,
     list: z.object({ fieldIds: z.array(z.string()), limit: z.number() }),
   }),
-  z.object({ ...widgetBase, type: z.literal("progress"), metric, target: z.number() }),
+  // Agenda and heatmap share one shape (the app turns it into agenda or heatmap settings), which keeps the schema
+  // within Gemini's budget.
   z.object({
     ...widgetBase,
-    type: z.literal("agenda"),
-    metric,
-    agenda: z.object({
-      dateFieldId: z.string().describe("A date, datetime or time_range field"),
-      days: z.number().optional().describe("Days ahead, today included; default 1"),
-      fieldIds: z.array(z.string()).optional().describe("Up to 3 details per item"),
-    }),
-  }),
-  z.object({
-    ...widgetBase,
-    type: z.literal("heatmap"),
-    metric,
-    heatmap: z.object({
-      dateFieldId: z.string().describe("A datetime or time_range field with times"),
-      weeks: z.number().optional(),
-    }),
+    type: z.enum(["agenda", "heatmap"]).describe("agenda: today's schedule; heatmap: busy hours by weekday"),
+    dateFieldId: z.string().describe("A date, datetime or time_range field (heatmap: one with times)"),
+    fieldIds: z.array(z.string()).optional().describe("agenda: up to 3 details per item"),
   }),
 ]);
 
@@ -136,7 +134,10 @@ const designOp = z.union([
   z.object({ op: z.literal("add_entity"), entity: entity.describe("A new record type") }),
   z.object({
     op: z.literal("add_system"),
-    system: system.describe("A new sidebar page; add its views and widgets with add_view/add_widget"),
+    // A new page's dashboard gets the default arrangement; leaving layout out keeps the schema in budget.
+    system: system
+      .omit({ layout: true })
+      .describe("A new sidebar page; add its views and widgets with add_view/add_widget"),
   }),
   z.object({
     op: z.literal("add_view"),
@@ -172,7 +173,7 @@ const designOp = z.union([
       .array(z.string())
       .optional()
       .describe(
-        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, or form questions",
+        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, or form questions. Forms: '# Step title' before each step's fields makes it a multi-step form",
       ),
   }),
   z.object({
