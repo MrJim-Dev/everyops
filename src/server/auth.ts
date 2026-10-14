@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { DEMO_LOCKED_MESSAGE, isDemoEmail } from "@/lib/auth/demo";
+import { googleAccountLinking } from "./auth-linking";
 import { db } from "./db";
 import { resetPasswordEmail } from "./emails";
 import { sendMail } from "./mail";
@@ -40,8 +41,7 @@ export const auth = betterAuth({
     },
   },
   socialProviders: google ? { google } : {},
-  // Someone who signed up with email and password can later continue with Google on the same address.
-  account: { accountLinking: { enabled: true, trustedProviders: ["google"] } },
+  ...googleAccountLinking,
   user: { deleteUser: { enabled: true } },
   session: {
     expiresIn: 60 * 60 * 24 * 30,

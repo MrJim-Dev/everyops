@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { DEMO_ACCOUNT, signIn } from "@/lib/auth/client";
+import { DEMO_ACCOUNT, googleErrorMessage, signIn } from "@/lib/auth/client";
 import { safeNext } from "@/lib/auth/redirect";
 import { type FormErrors, fieldErrors, signInSchema } from "@/lib/auth/schemas";
 import { RedirectIfSignedIn } from "./auth-guards";
@@ -23,7 +23,10 @@ export function SignInForm() {
   const [email, setEmail] = useState(params.get("email") ?? "");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
-  const [failure, setFailure] = useState<{ message: string; attempt: number } | null>(null);
+  const [failure, setFailure] = useState<{ message: string; attempt: number } | null>(() => {
+    const oauthError = params.get("error");
+    return oauthError ? { message: googleErrorMessage(oauthError), attempt: 0 } : null;
+  });
   const [pending, setPending] = useState(false);
 
   const submit = async (event: React.FormEvent) => {
