@@ -251,6 +251,11 @@ export function PublicFormView({
           {message}
         </p>
       ) : null}
+      {form.submitNote && last ? (
+        <p className="rounded-lg border bg-muted/40 px-3.5 py-2.5 text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+          {form.submitNote}
+        </p>
+      ) : null}
       <div className="flex items-center gap-2">
         {steps && step > 0 ? (
           <Button type="button" variant="outline" size="lg" onClick={() => setStep((s) => s - 1)}>
@@ -258,7 +263,15 @@ export function PublicFormView({
             Back
           </Button>
         ) : null}
-        <Button type="submit" size="lg" disabled={busy} className={steps ? "ml-auto" : undefined}>
+        <Button
+          type="submit"
+          size="lg"
+          disabled={busy}
+          className={cn(
+            "h-auto min-h-10 max-w-full py-2 text-left whitespace-normal [overflow-wrap:anywhere]",
+            steps && "ml-auto",
+          )}
+        >
           {busy ? (
             "Sending…"
           ) : last ? (

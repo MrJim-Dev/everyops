@@ -37,7 +37,15 @@ export async function publicPage(
   const bp = blueprintOf(doc);
   const site = siteOf(slug, doc.name, bp);
   if (!site) return null;
-  const page = resolvePage(bp, doc.records, (doc.docs ?? {}) as PageDocs, slug, viewId ?? site.pages[0].id);
+  const page = resolvePage(
+    bp,
+    doc.records,
+    (doc.docs ?? {}) as PageDocs,
+    slug,
+    viewId ?? site.pages[0].id,
+    new Date(),
+    doc.name,
+  );
   return page ? { site, page } : null;
 }
 

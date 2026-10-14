@@ -266,12 +266,18 @@ export const assistantAnswer = z.object({
     renames: z
       .array(
         z.object({
-          kind: z.enum(["page", "tab"]),
-          id: z.string().describe("The page's (system) or tab's (view) id"),
-          newName: z.string(),
+          kind: z.enum(["page", "tab", "section"]),
+          id: z
+            .string()
+            .describe("The page's (system) or tab's (view) id; for a section of a website, its blockId"),
+          newName: z
+            .string()
+            .describe(
+              "The new name. For a section: its new words as lines, only what changes: 'Title: …' (hero headline under 60 characters, or the section heading), 'Text: …' (hero line under 200 characters, or a text section's markdown), 'Button: …' (2 to 4 words); highlights and steps: one 'Item: title | one sentence' line per item, the complete new list; contact: 'Phone: …', 'Email: …', 'Address: …', 'Hours: …'",
+            ),
         }),
       )
-      .describe("Pages and tabs to rename"),
+      .describe("Pages and tabs to rename, and new words for website sections"),
     recordOps: z.array(recordOp).describe("Data changes, applied after the design changes"),
     formulas: z
       .array(
@@ -343,7 +349,8 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   datetime or time_range field), slot_grid (booking schedule; only for a booking record type that already has
   booking settings), approval_queue (statusFieldId), checkout (only for selling), and:
   - form: a page that is just the form for adding one record type ("a page for the booking form"): fieldIds in
-    the order asked, intro (one line), submitLabel ("Book court").
+    the order asked, intro (one line, or instructions such as payment details), submitLabel (the button, 2 to 4
+    words: "Book court"; never instructions).
   - notes: a notebook with a list of notes and a markdown editor ("a note taking page"). It needs a record type
     with a text title and a long_text body: add_entity (e.g. Note: title, body long_text, plus tags or a date if
     useful) unless one exists; set titleFieldId, bodyFieldId and optional metaFieldIds.
@@ -430,9 +437,13 @@ Public pages and their requests:
   add_field when bookings don't have them. Add a records block of active payment methods if they exist.
 - "payment methods… if active show them in the booking form": add_entity for payment methods, its page, and
   add_block on the booking form (records, cards, filter status == 'active').
-- "a landing page": add_system (icon house) and add_view landing with a hero (button to the public booking form),
-  a text block about the business, and records blocks for what customers should see (courts, rates, FAQs).
-  New landing and form views start empty: add each block with add_block (viewId the new view), in page order.
+- "a landing page" or "a website": add_system (icon house) and add_view landing with a hero (title, a short
+  subheading and a button to the public booking form). EveryOps lays it out in its standard design: highlights,
+  what's offered, how it works, payment methods, FAQs and contact are filled in from the data.
+- Changing a website's words ("make the headline punchier", "add our phone number", "rewrite the steps"): a renames
+  entry with kind section, the section's blockId, and newName holding only the lines that change. A section the person
+  clicked is named under "What the person is looking at"; edit that one. To show something new on the page, add_block;
+  to take a section off, remove (what block, parentId the view).
 - "FAQs shown on the landing page or booking form": add_entity, its page, and add_block (layout faq) on each.
 - update_view also changes a form's intro, button or questions (fieldIds). Blocks go on form and landing views only.
 

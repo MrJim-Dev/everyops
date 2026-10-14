@@ -9,6 +9,7 @@ import { formSteps, placeExtras } from "@/lib/blueprint/form-steps";
 import { findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type {
   Block,
+  BlockItem,
   Blueprint,
   DataRecord,
   Field,
@@ -31,6 +32,7 @@ import {
   isTimeRange,
 } from "@/lib/format";
 import { pageHtml } from "./html-page";
+import { standardBlocks } from "./site-template";
 
 export type PageDocs = Record<string, { body: string } | undefined>;
 
@@ -66,6 +68,8 @@ export type PublicForm = {
   title: string;
   intro?: string;
   submitLabel: string;
+  /** Text that was written into the button label but is too long for a button; shown above it. */
+  submitNote?: string;
   fields: PublicField[];
   /** For relation fields: the records a visitor may choose from. */
   choices: Record<string, { id: string; title: string }[]>;
@@ -93,7 +97,17 @@ export type ResolvedBlock =
       columns: { id: string; name: string }[];
       items: PublicItem[];
     }
-  | { id: string; type: "form"; title?: string; form: PublicForm };
+  | { id: string; type: "form"; title?: string; form: PublicForm }
+  | { id: string; type: "highlights" | "steps"; title?: string; items: BlockItem[] }
+  | {
+      id: string;
+      type: "contact";
+      title?: string;
+      phone?: string;
+      email?: string;
+      address?: string;
+      hours?: string;
+    };
 
 export type PublicPageData = {
   id: string;
@@ -134,9 +148,17 @@ export function siteOf(slug: string, name: string, bp: Blueprint): PublicSite | 
     (a, b) =>
       Number(b.type !== "form") - Number(a.type !== "form") || order.indexOf(a.id) - order.indexOf(b.id),
   );
-  return views.length
-    ? { slug, name, pages: views.map((v) => ({ id: v.id, name: v.name, type: v.type })) }
-    : null;
+  if (!views.length) return null;
+  const pages = views.map((v) => ({ id: v.id, name: v.name, type: v.type }));
+  // A site with only forms still gets a home page: the standard one, built from its data.
+  if (views.every((v) => v.type === "form"))
+    pages.unshift({ id: autoHomeId(bp), name: "Home", type: "landing" });
+  return { slug, name, pages };
+}
+
+/** The id of the standard home page a site gets when it has no landing page of its own. */
+export function autoHomeId(bp: Blueprint): string {
+  return bp.views.some((v) => v.id === "home") ? "site_home" : "home";
 }
 
 /** One value as text a visitor reads. Relations show the linked record's name; images and markdown pass through. */
@@ -205,6 +227,22 @@ function publishedEntities(bp: Blueprint): Set<string> {
     if (view.type !== "html")
       for (const block of view.blocks ?? []) if (block.type === "records") ids.add(block.entityId);
   return ids;
+}
+
+/** Longest label that still reads as a button. */
+const MAX_BUTTON_LABEL = 40;
+
+/**
+ * A form's button text. AI designs sometimes write instructions into the label ("Request booking (50%
+ * deposit) - scan the GCash QR…"); a button can't hold that, so the label keeps its first phrase and the
+ * whole text becomes a note shown above the button.
+ */
+export function submitButton(label: string | undefined, fallback: string): { label: string; note?: string } {
+  const text = label?.trim();
+  if (!text) return { label: fallback };
+  if (text.length <= MAX_BUTTON_LABEL) return { label: text };
+  const head = text.split(/\s[-–—(:|]|[.!?](\s|$)/)[0]?.trim() ?? "";
+  return { label: head && head.length <= MAX_BUTTON_LABEL ? head : fallback, note: text };
 }
 
 /**
@@ -291,7 +329,10 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
     viewId: view.id,
     title: view.name,
     intro: view.intro,
-    submitLabel: view.submitLabel ?? `Send ${entity.name.toLowerCase()}`,
+    ...(() => {
+      const button = submitButton(view.submitLabel, `Send ${entity.name.toLowerCase()}`);
+      return { submitLabel: button.label, ...(button.note ? { submitNote: button.note } : {}) };
+    })(),
     fields: fields.map((f) => ({
       id: f.id,
       name: f.name,
@@ -336,7 +377,8 @@ export function publicExtras(
 }
 
 function textOf(docs: PageDocs, viewId: string, block: Block): string | undefined {
-  return docs[docKey(viewId, block.id)]?.body;
+  // An empty override means "back to the block's own text" (the assistant clears overrides it rewrites).
+  return docs[docKey(viewId, block.id)]?.body || undefined;
 }
 
 /** A page's blocks with live data filled in and any text the team edited in the app. */
@@ -404,6 +446,28 @@ export function resolveBlocks(
         if (form) out.push({ id: block.id, type: "form", title: block.title, form });
         break;
       }
+      case "highlights":
+      case "steps": {
+        const items = block.items
+          .map((i) => ({ title: clamp(i.title, 60) ?? "", body: clamp(i.body, 220) ?? "" }))
+          .filter((i) => i.title);
+        if (items.length) out.push({ id: block.id, type: block.type, title: clamp(block.title, 80), items });
+        break;
+      }
+      case "contact": {
+        const { id, type, title, phone, email, address, hours } = block;
+        if (phone || email || address || hours)
+          out.push({
+            id,
+            type,
+            title: clamp(title, 80),
+            phone: clamp(phone, 40),
+            email: clamp(email, 80),
+            address: clamp(address, 200),
+            hours: clamp(hours, 160),
+          });
+        break;
+      }
     }
   }
   return out;
@@ -417,8 +481,27 @@ export function resolvePage(
   slug: string,
   viewId: string,
   now = new Date(),
+  /** The business name, for the standard home page of a site that has none of its own. */
+  siteName = "",
 ): PublicPageData | null {
   const view = bp.views.find((v) => v.id === viewId);
+  if (!view && viewId === autoHomeId(bp) && !publicViews(bp).some((v) => v.type !== "form")) {
+    if (!publicViews(bp).length) return null;
+    const home: LandingView = {
+      id: viewId,
+      entityId: "",
+      name: "Home",
+      type: "landing",
+      layout: "standard",
+      blocks: standardBlocks(bp, siteName),
+    };
+    return {
+      id: viewId,
+      name: "Home",
+      type: "landing",
+      blocks: resolveBlocks(bp, records, docs, slug, home, now),
+    };
+  }
   if (!view || !isPublic(view)) return null;
   if (view.type === "html") return htmlPage(bp, records, docs, view);
   if (view.type !== "landing" && view.type !== "form") return null;

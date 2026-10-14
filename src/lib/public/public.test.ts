@@ -5,10 +5,22 @@ import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { applyOps } from "@/lib/engine/changes";
 import { mergeRecords } from "@/lib/store/workspace-model";
 import { at, todayKey } from "@/lib/time";
-import { publicForm, resolvePage, siteOf } from "./resolve";
+import { publicForm, resolvePage, siteOf, submitButton } from "./resolve";
 import { slotsFor } from "./slots";
 
 const NOW = new Date("2026-10-13T09:30:00+08:00");
+
+describe("submitButton", () => {
+  it("keeps short labels and moves instructions out of the button", () => {
+    expect(submitButton("Book court", "Send booking")).toEqual({ label: "Book court" });
+    expect(submitButton(undefined, "Send booking")).toEqual({ label: "Send booking" });
+    const long =
+      "Request Booking (50% Deposit Needed) - PHP 300 Delivery Fee applies separately. Instructions: scan the GCash QR code";
+    expect(submitButton(long, "Send booking")).toEqual({ label: "Request Booking", note: long });
+    const noBreak = "x".repeat(80);
+    expect(submitButton(noBreak, "Send booking")).toEqual({ label: "Send booking", note: noBreak });
+  });
+});
 
 /** Court House with a guest name on bookings, a public booking form and a landing page. */
 function site() {
