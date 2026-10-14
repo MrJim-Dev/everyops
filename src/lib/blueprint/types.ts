@@ -134,8 +134,14 @@ export type ApprovalQueueView = ViewBase & {
   rejectLabel: string;
   detailFieldIds: string[];
 };
-/** One page of a multi-step form: a title and the fields it asks. */
-export type FormStep = { id: string; title: string; description?: string; fieldIds: string[] };
+/** One page of a multi-step form: a title and the fields it asks. A step with extras shows the add-ons picker. */
+export type FormStep = {
+  id: string;
+  title: string;
+  description?: string;
+  fieldIds: string[];
+  extras?: boolean;
+};
 
 /** A page that is just the form for adding one record type, e.g. a booking form for the front desk. */
 export type FormView = ViewBase & {
@@ -152,6 +158,24 @@ export type FormView = ViewBase & {
   public?: boolean;
   /** Shown with the form, e.g. the active payment methods or FAQs. */
   blocks?: Block[];
+  /** Things people add with a quantity (paddle rental, balls): each becomes a line item on the new record. */
+  extras?: FormExtras;
+};
+
+/**
+ * Add-ons on a form. Line items live in a record type whose parent is the form's record type (booking add-ons under
+ * a booking); people pick from the record type its item field links to (add-ons), filtered (e.g. active ones).
+ */
+export type FormExtras = {
+  /** The line-item record type, e.g. booking_addon. */
+  lineEntityId: string;
+  /** Its link to the item picked, e.g. add_on. */
+  itemFieldId: string;
+  /** Its number field for how many, e.g. qty. */
+  quantityFieldId?: string;
+  title?: string;
+  /** Which items are offered, e.g. active == true. */
+  filter?: string;
 };
 /** A notebook over one record type: a list of notes beside a markdown editor for the selected one. */
 export type NotesView = ViewBase & {

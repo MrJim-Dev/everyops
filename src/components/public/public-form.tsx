@@ -2,6 +2,7 @@
 
 import { ArrowLeftIcon, ArrowRightIcon, CheckCircleIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
+import { ExtrasPicker } from "@/components/forms/extras-picker";
 import { StepIndicator } from "@/components/forms/step-indicator";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -36,6 +37,7 @@ export function PublicFormView({
   const [done, setDone] = useState<Done | null>(null);
   const [website, setWebsite] = useState("");
   const [step, setStep] = useState(0);
+  const [extras, setExtras] = useState<Record<string, number>>({});
   const set = (id: string, v: FieldValue) => {
     setValues((s) => ({ ...s, [id]: v }));
     setErrors((e) => ({ ...e, [id]: "" }));
@@ -46,6 +48,9 @@ export function PublicFormView({
   const reviewing = !!steps && step === steps.length;
   const last = !steps || step === titles.length - 1;
   const shown = steps && !reviewing ? new Set(steps[step].fieldIds) : null;
+  // Add-ons show on their step, or with the fields when the form has no steps.
+  const showExtras = !!form.extras && !reviewing && (steps ? !!steps[step]?.extras : true);
+  const picked = (form.extras?.items ?? []).filter((i) => (extras[i.id] ?? 0) > 0);
   const missingOf = (ids?: Set<string>) =>
     Object.fromEntries(
       form.fields
@@ -85,7 +90,7 @@ export function PublicFormView({
       const res = await fetch(`/api/public/${slug}/${form.viewId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ values, website }),
+        body: JSON.stringify({ values, extras, website }),
       });
       const body = (await res.json().catch(() => null)) as
         | ({ ok: true } & Done)
@@ -130,6 +135,7 @@ export function PublicFormView({
           onClick={() => {
             setDone(null);
             setValues({});
+            setExtras({});
             setStep(0);
           }}
         >
@@ -177,6 +183,12 @@ export function PublicFormView({
               ];
             }),
           )}
+          {picked.length && form.extras ? (
+            <div className="flex items-center justify-between gap-4 px-3.5 py-2.5">
+              <dt className="text-muted-foreground">{form.extras.title}</dt>
+              <dd className="text-right">{picked.map((i) => `${i.title} × ${extras[i.id]}`).join(", ")}</dd>
+            </div>
+          ) : null}
         </dl>
       ) : null}
       {form.fields.map((f) => {
@@ -216,6 +228,14 @@ export function PublicFormView({
           </div>
         );
       })}
+      {showExtras && form.extras ? (
+        <ExtrasPicker
+          title={form.extras.title}
+          items={form.extras.items}
+          value={extras}
+          onChange={(id, n) => setExtras((s) => ({ ...s, [id]: n }))}
+        />
+      ) : null}
       <input
         type="text"
         name="website"

@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
-import { cleanCopy, ensurePages, mergeDateAndSlot, repairStructure } from "./design";
+import { cleanCopy, ensurePages, mergeDateAndSlot, repairStructure, tidy } from "./design";
 
 describe("ensurePages", () => {
   it("gives a record type without any screen its own page", () => {
@@ -146,5 +146,132 @@ describe("cleanCopy", () => {
     const looped = `Book your court today! Open 6 AM to 10 PM. Ready, set, smash! ${"🎉🏆✨🔥".repeat(200)}`;
     expect(cleanCopy(looped, 260)).toBe("Book your court today! Open 6 AM to 10 PM. Ready, set, smash!");
     expect(cleanCopy("A ".repeat(200), 50)?.length).toBeLessThanOrEqual(50);
+  });
+});
+
+describe("tidy add-ons on forms", () => {
+  const withAddOns = (form: Record<string, unknown>) => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
+    const bp = structuredClone(blueprint);
+    bp.entities.push(
+      {
+        id: "addon",
+        name: "Add-on",
+        pluralName: "Add-ons",
+        primaryFieldId: "name",
+        fields: [
+          { id: "name", name: "Name", type: "text", required: true },
+          { id: "price", name: "Price", type: "money" },
+          { id: "active", name: "Active", type: "checkbox" },
+        ],
+      },
+      {
+        // No parent set, as Gemini often leaves it: tidy attaches it to the booking through its relation.
+        id: "booking_addon",
+        name: "Booking add-on",
+        pluralName: "Booking add-ons",
+        primaryFieldId: "label",
+        fields: [
+          { id: "label", name: "Label", type: "text" },
+          { id: "booking", name: "Booking", type: "relation", relation: { entityId: "booking" } },
+          { id: "addon", name: "Add-on", type: "relation", relation: { entityId: "addon" } },
+          { id: "qty", name: "Qty", type: "number", required: true },
+        ],
+      },
+    );
+    bp.views.push({
+      id: "book",
+      entityId: "booking",
+      name: "Book",
+      type: "form",
+      fieldIds: ["court", "slot"],
+      ...form,
+    } as never);
+    const out = tidy(bp);
+    return out.views.find((v) => v.id === "book") as Extract<(typeof out.views)[number], { type: "form" }>;
+  };
+
+  it("works out where the add-ons live when a form plans an add-ons step", () => {
+    const form = withAddOns({
+      public: true,
+      steps: [
+        { title: "Pick a slot", fieldIds: ["court", "slot", "missing"] },
+        { title: "Add-ons", fieldIds: [], extras: true },
+      ],
+    });
+    expect(form.extras).toEqual({
+      lineEntityId: "booking_addon",
+      itemFieldId: "addon",
+      quantityFieldId: "qty",
+      filter: "active == true",
+    });
+    expect(form.steps?.[0].fieldIds).toEqual(["court", "slot"]);
+  });
+
+  it("mends near misses and drops a filter over fields the items don't have", () => {
+    const form = withAddOns({
+      extras: {
+        lineEntityId: "Booking add-ons",
+        itemFieldId: "add_on",
+        quantityFieldId: "quantity",
+        filter: "in_stock > 0",
+      },
+    });
+    expect(form.extras).toEqual({
+      lineEntityId: "booking_addon",
+      itemFieldId: "addon",
+      quantityFieldId: "qty",
+    });
+  });
+  it("makes a public booking page ask who's booking, drop questions visitors can't answer and show how to pay", () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
+    const bp = structuredClone(blueprint);
+    const booking = bp.entities.find((e) => e.id === "booking");
+    if (!booking) throw new Error("no booking");
+    booking.fields.push({
+      id: "booked_via",
+      name: "Booked via",
+      type: "select",
+      required: true,
+      options: [{ id: "walk_in", label: "Walk-in", tone: "neutral" }],
+    });
+    bp.entities.push({
+      id: "payment_method",
+      name: "Payment method",
+      pluralName: "Payment methods",
+      primaryFieldId: "label",
+      fields: [
+        { id: "label", name: "Label", type: "text", required: true },
+        { id: "account_number", name: "Account number", type: "text" },
+        { id: "qr_code", name: "QR code", type: "image" },
+        { id: "active", name: "Active", type: "checkbox" },
+      ],
+    });
+    bp.views.push({
+      id: "book",
+      entityId: "booking",
+      name: "Book",
+      type: "form",
+      public: true,
+      fieldIds: ["court", "slot"],
+      steps: [
+        { title: "Pick a slot", fieldIds: ["court"] },
+        { title: "Payment", fieldIds: ["slot"] },
+      ],
+    } as never);
+    const out = tidy(bp);
+    const form = out.views.find((v) => v.id === "book");
+    if (form?.type !== "form") throw new Error("no form");
+    expect(form.fieldIds).toEqual(["court", "slot", "guest_name", "guest_phone"]);
+    expect(form.steps?.map((s) => s.title)).toEqual(["Pick a slot", "Your details", "Payment"]);
+    const via = out.entities.find((e) => e.id === "booking")?.fields.find((f) => f.id === "booked_via");
+    expect(via?.required).toBe(false);
+    expect(form.blocks?.[0]).toMatchObject({
+      type: "records",
+      entityId: "payment_method",
+      layout: "cards",
+      filter: "active == true",
+      fieldIds: ["label", "account_number", "qr_code"],
+    });
   });
 });

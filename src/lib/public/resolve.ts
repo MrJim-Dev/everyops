@@ -5,7 +5,7 @@
  * or record types a public block already shows), never, say, the list of customers.
  */
 import { displayKind, editableFields } from "@/lib/blueprint/field-kind";
-import { formSteps } from "@/lib/blueprint/form-steps";
+import { formSteps, placeExtras } from "@/lib/blueprint/form-steps";
 import { findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type {
   Block,
@@ -70,10 +70,14 @@ export type PublicForm = {
   /** Booking forms pick a resource, a day and a free slot instead of typing times. */
   booking?: { resourceFieldId: string; timeFieldId: string; resources: PublicResource[] };
   /** Multi-step forms: the fields of each step, in order. */
-  steps?: { title: string; description?: string; fieldIds: string[] }[];
+  steps?: { title: string; description?: string; fieldIds: string[]; extras?: boolean }[];
   /** With steps: a summary to check before sending. */
   review?: boolean;
+  /** Add-ons people pick with a quantity; only their name and price are shown. */
+  extras?: { title: string; items: PublicExtraItem[] };
 };
+
+export type PublicExtraItem = { id: string; title: string; price?: number; priceText?: string };
 
 export type ResolvedBlock =
   | { id: string; type: "hero"; heading: string; subheading?: string; ctaLabel?: string; ctaHref?: string }
@@ -250,16 +254,21 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
     };
     choices[b.resourceFieldId] ??= booking.resources.map((r) => ({ id: r.id, title: r.title }));
   }
+  const extras = publicExtras(bp, records, view);
   let steps: PublicForm["steps"];
   if (view.steps?.length) {
-    steps = formSteps(
-      entity,
-      view,
-      fields.map((f) => f.id),
-    ).map(({ title, description, fieldIds }) => ({
+    steps = placeExtras(
+      formSteps(
+        entity,
+        view,
+        fields.map((f) => f.id),
+      ),
+      extras?.title,
+    ).map(({ title, description, fieldIds, extras: picker }) => ({
       title,
       description,
       fieldIds,
+      ...(picker ? { extras: true } : {}),
     }));
     // The slot is picked under the resource, so it always belongs to the resource's step.
     if (booking) {
@@ -267,7 +276,7 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
       steps = steps.map((s) => ({ ...s, fieldIds: s.fieldIds.filter((id) => id !== timeFieldId) }));
       const home = steps.find((s) => s.fieldIds.includes(resourceFieldId)) ?? steps[0];
       home.fieldIds.push(timeFieldId);
-      steps = steps.filter((s) => s.fieldIds.length);
+      steps = steps.filter((s) => s.fieldIds.length || s.extras);
     }
   }
   return {
@@ -288,7 +297,34 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
     booking,
     steps,
     review: steps ? !!view.review : undefined,
+    ...(extras ? { extras } : {}),
   };
+}
+
+/** The items a form offers as add-ons, each with its price when the item has one. */
+export function publicExtras(
+  bp: Blueprint,
+  records: DataRecord[],
+  view: FormView,
+  now = new Date(),
+): PublicForm["extras"] | undefined {
+  const extras = view.extras;
+  const line = extras && bp.entities.find((e) => e.id === extras.lineEntityId);
+  const itemField = line?.fields.find((f) => f.id === extras?.itemFieldId);
+  const items = bp.entities.find((e) => e.id === itemField?.relation?.entityId);
+  if (!extras || !line || line.parent?.entityId !== view.entityId || !items) return undefined;
+  const priceField = items.fields.find((f) => displayKind(bp, f) === "money");
+  const offered = applyFilter(bp, items, records, extras.filter, now).map((r) => {
+    const price = priceField ? Number(r.data[priceField.id]) : Number.NaN;
+    return {
+      id: r.id,
+      title: recordTitle(items, r),
+      ...(Number.isFinite(price) ? { price, priceText: formatMoney(price) } : {}),
+    };
+  });
+  return offered.length
+    ? { title: extras.title ?? items.pluralName, items: offered.slice(0, 40) }
+    : undefined;
 }
 
 function textOf(docs: PageDocs, viewId: string, block: Block): string | undefined {

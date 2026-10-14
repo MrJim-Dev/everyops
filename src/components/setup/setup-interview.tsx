@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowClockwiseIcon, ArrowUpIcon, SparkleIcon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon, ArrowUpIcon, CheckIcon, SparkleIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -53,6 +53,7 @@ type InterviewReply = {
     message: string;
     suggestions: string[];
     profile: ProfileLine[];
+    plan?: string[];
     workspaceName: string;
     brief: string;
   };
@@ -82,6 +83,7 @@ export function SetupInterview({
       : [{ role: "user", text: prompt, ...(initialFiles?.length ? { attachments: initialFiles } : {}) }],
   );
   const [profile, setProfile] = useState<ProfileLine[]>(progress?.profile ?? []);
+  const [plan, setPlan] = useState<string[]>(progress?.plan ?? []);
   const [draft, setDraft] = useState<SetupDraft | undefined>(progress?.draft);
   const [phase, setPhase] = useState<Phase>("idle");
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -92,8 +94,8 @@ export function SetupInterview({
   const busy = phase !== "idle";
 
   useEffect(() => {
-    saveSetup(ws.id, { messages, profile, draft });
-  }, [saveSetup, ws.id, messages, profile, draft]);
+    saveSetup(ws.id, { messages, profile, plan, draft });
+  }, [saveSetup, ws.id, messages, profile, plan, draft]);
 
   // Keep the latest message in view as the conversation grows.
   const turns = messages.length;
@@ -137,6 +139,7 @@ export function SetupInterview({
       }
       const { turn } = result.data;
       if (turn.profile.length) setProfile(turn.profile);
+      if (turn.plan?.length) setPlan(turn.plan);
       const reply: ChatTurn = {
         role: "assistant",
         text: turn.message,
@@ -338,6 +341,19 @@ export function SetupInterview({
             <p className="text-[13px] text-muted-foreground">Details appear here as you chat.</p>
           )}
         </section>
+        {plan.length ? (
+          <section>
+            <h2 className="mb-3 text-[13px] font-semibold">What EveryOps will set up</h2>
+            <ul className="flex flex-col gap-2 text-[13px]">
+              {plan.map((item) => (
+                <li key={item} className="flex gap-2">
+                  <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         <section className="text-[12.5px] text-muted-foreground">
           <p>Saved to your account as you go.</p>
           <p className="mt-2">

@@ -6,6 +6,7 @@ import type {
   Entity,
   Field,
   FieldValue,
+  FormStep,
   RecordData,
   Rule,
   System,
@@ -50,7 +51,15 @@ export type ChangeOp =
   | {
       op: "update_view";
       viewId: string;
-      patch: { public?: boolean; intro?: string; submitLabel?: string; fieldIds?: string[] };
+      /** Forms: steps replace the form's steps (an empty list makes it one page again). */
+      patch: {
+        public?: boolean;
+        intro?: string;
+        submitLabel?: string;
+        fieldIds?: string[];
+        steps?: FormStep[];
+        review?: boolean;
+      };
     }
   /** Adds a block (live data, text, a form) to a form or landing page, optionally before another block. */
   | { op: "add_block"; viewId: string; block: Block; beforeBlockId?: string }
@@ -193,7 +202,20 @@ function removeField(bp: Blueprint, entityId: string, fieldId: string) {
       v.fieldIds = keep(v.fieldIds);
       v.sort = v.sort?.filter((s) => s.fieldId !== fieldId);
     }
-    if (v.type === "form") v.fieldIds = keep(v.fieldIds);
+    if (v.type === "form") {
+      v.fieldIds = keep(v.fieldIds);
+      // Its steps lose the field too; a step left asking nothing (and not holding the add-ons) goes.
+      if (v.steps) {
+        v.steps = v.steps
+          .map((s) => ({ ...s, fieldIds: keep(s.fieldIds) }))
+          .filter((s) => s.fieldIds.length || (s.extras && v.extras));
+        if (!v.steps.length) delete v.steps;
+      }
+      if (v.extras?.lineEntityId === entityId) {
+        if (v.extras.itemFieldId === fieldId) delete v.extras;
+        else if (v.extras.quantityFieldId === fieldId) delete v.extras.quantityFieldId;
+      }
+    }
     if (v.type === "kanban") v.cardFieldIds = keep(v.cardFieldIds);
     if (v.type === "approval_queue") v.detailFieldIds = keep(v.detailFieldIds);
     if (v.type === "notes" && v.metaFieldIds) v.metaFieldIds = keep(v.metaFieldIds);
@@ -232,6 +254,8 @@ function removeEntity(bp: Blueprint, entityId: string) {
   for (const v of bp.views)
     if ((v.type === "form" || v.type === "landing") && v.blocks)
       v.blocks = v.blocks.filter((b) => !(b.type === "records" && b.entityId === entityId));
+  // A form whose add-ons lived in it offers none now.
+  for (const v of bp.views) if (v.type === "form" && v.extras?.lineEntityId === entityId) delete v.extras;
   dropEmptySystems(bp);
 }
 
@@ -356,9 +380,15 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "update_view": {
         const view = next.views.find((v) => v.id === op.viewId);
         if (!view) break;
-        const { fieldIds, ...settings } = op.patch;
-        if (view.type === "form") Object.assign(view, settings);
-        else if (view.type === "landing" && settings.public !== undefined) view.public = settings.public;
+        const { fieldIds, steps, ...settings } = op.patch;
+        if (view.type === "form") {
+          Object.assign(view, settings);
+          if (steps?.length) view.steps = structuredClone(steps);
+          else if (steps) {
+            delete view.steps;
+            delete view.review;
+          }
+        } else if (view.type === "landing" && settings.public !== undefined) view.public = settings.public;
         if (fieldIds) setViewFields(view, findEntity(next, view.entityId), fieldIds);
         break;
       }
