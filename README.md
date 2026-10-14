@@ -1,8 +1,36 @@
 # EveryOps
 
-Describe your business, and EveryOps builds the systems it needs (bookings, POS, content, finance, HR) inside one workspace. Built for the Google Cloud AI Builder Cup 2026.
+**A workspace for every kind of business operation**
+
+Describe how your business works, and EveryOps shapes the systems it needs inside one workspace. Bookings, point of sale, finance, HR and content management use the same engine, with connected records, views and rules. Owners can ask for changes as their business evolves, review a proposed plan, apply it and undo it.
+
+Built for the Google Cloud AI Builder Cup 2026, under **Future of Work & Enterprise Productivity**.
+
+**Team:** James Ocampo and Jared Karl Omen.
+
+## Project links
+
+- [Live prototype](https://everyops.app)
+- [Proposal deck — 12 slides in one Canva design](https://www.canva.com/d/HhNfOabEsPf0LWV)
+- [Project scope, functional requirements and architecture](https://docs.google.com/document/d/1XDItCEo7MKC9mf3s0hgONXBJoFdnMv6JfKo-BceKyCc/edit)
+
+The demo video link will be added after recording.
+
+## The problem and approach
+
+Small teams manage connected work across notebooks, spreadsheets and chat. Off-the-shelf tools often require owners to adapt their workflows, while custom software takes time and money to build and maintain. EveryOps lets non-technical owners turn their business knowledge into a working system and keep it aligned with the business.
+
+The setup flow is **describe → clarify → design → validate and preview → approve and use**. Gemini asks follow-up questions, proposes a structured blueprint, and plans later changes. Trusted application code checks schemas, permissions, formulas and record rules before approved changes are saved. One shared platform renders each business's configuration; there is no separate application deployment per business.
+
+Rental shops, sports venues, cafés, agencies and small offices are example users. A four-court venue can start with a booking calendar, customer records, payment tracking and a revenue overview, then request peak-hour pricing. The shared building blocks also support inventory, content approvals, finance and staff leave.
+
+## Prototype foundation and next steps
 
 Everything is stored in PostgreSQL (Cloud SQL): accounts and sessions (Better Auth), workspaces, teams, invites, community systems and starter templates. Gemini on Vertex AI runs the setup conversation, designs new workspaces, and plans changes; the app validates everything it produces before the owner sees it.
+
+The repository implements public booking forms, role checks, versioned change plans, record revision checks and saved assistant conversations. These are implementation capabilities; a full production acceptance exercise is separate from a successful build or an available route.
+
+Next production milestones include load testing and database capacity tuning, backup and recovery drills, monitoring and alerting, broader AI evaluations and cost budgets. Pilot evaluation should measure time to the first usable workspace, duplicate entry per workflow and task completion time. These are evaluation targets, not measured impact results.
 
 ## Run it
 
@@ -31,14 +59,15 @@ The first visit seeds four demo workspaces: Court House PH, Tita Nena's Canteen,
 | `workspace_member`, `workspace_invite` | Team access (admin, staff, viewer) and pending invite links |
 | `published_system` | Community systems: official templates (`is_official`, with sample data) and systems people publish |
 | `workspace_template` | The demo workspaces every new account starts with (`account_seed` records that it happened) |
+| `assistant_thread` | Saved assistant conversations per user and workspace |
 
 Templates store the day their sample data was built; dates move forward to today whenever one is used (`src/lib/catalog/shift.ts`). `pnpm db:migrate` applies Better Auth's schema and `src/server/migrations/*.sql`; `pnpm db:seed` refreshes templates from `src/lib/catalog`. The API checks access on every request. Saves are patches with only what changed (one edited record is one row); owners and admins save the design, settings and team, staff save records and page text, viewers read. The workspace list sends summaries; records load when a workspace opens.
 
 ## Deployment
 
-**Live:** https://everyops-web-223724593768.asia-southeast1.run.app
+**Live:** https://everyops.app · [Cloud Run service URL](https://everyops-web-223724593768.asia-southeast1.run.app)
 
-EveryOps runs on Cloud Run as the service `everyops-web` (project `everyops-prod`, `asia-southeast1`). `pnpm deploy:run` builds the `Dockerfile` (Next.js standalone, Node 22) with Cloud Build and deploys it as `everyops-run`, attached to Cloud SQL, with `DATABASE_URL` and `BETTER_AUTH_SECRET` from Secret Manager and `BETTER_AUTH_URL` set to the service URL. It scales to zero by default; run `MIN_INSTANCES=1 pnpm deploy:run` to keep one warm instance during judging. Password reset links appear in Cloud Run logs until email is connected.
+EveryOps runs on Cloud Run as the service `everyops-web` (project `everyops-prod`, `asia-southeast1`). `pnpm deploy:run` builds the `Dockerfile` (Next.js standalone, Node 22) with Cloud Build and deploys it as `everyops-run`, attached to Cloud SQL, with `DATABASE_URL` and `BETTER_AUTH_SECRET` from Secret Manager. `BETTER_AUTH_URL` uses the public address; additional origins are configured through `BETTER_AUTH_TRUSTED_ORIGINS`. It scales to zero by default; run `MIN_INSTANCES=1 pnpm deploy:run` to keep one warm instance during judging. Password resets and invitations use SMTP when configured; local development without SMTP logs the messages instead.
 
 ## Database and auth details
 
@@ -53,7 +82,7 @@ The database is `everyops` on the Cloud SQL instance `everyops-db` (PostgreSQL 1
 | `src/proxy.ts` | First gate: private pages without a session cookie redirect to `/sign-in?next=…` |
 | `src/components/auth/require-session.tsx` | Second gate: validates the session on the server before a private page renders |
 
-Private pages are `/`, `/account` and everything under `/w/`. Sign-in pages, `/community`, `/preview/…`, invites and the legal pages are public.
+Private pages are `/workspaces`, `/account` and everything under `/w/`. `/` shows the signed-in home or the public welcome page, depending on the session. Sign-in pages, `/community`, `/preview/…`, published `/s/…` pages, invites and the legal pages are public.
 
 ## How it works
 
@@ -116,7 +145,7 @@ Bookings made on a public page are written on the server. Saves from an open tab
 
 ## Design rules
 
-- Dark, compact, Linear-inspired. Tokens live in `src/app/globals.css` with one accent (#3FA796).
+- Dark, compact, Linear-inspired. Tokens live in `src/app/globals.css` with lagoon teal (#34C3A6) as the primary accent; [System Color Design](docs/system-color-design.md) describes the palette.
 - Geist and Geist Mono. Numbers are tabular.
 - Motion follows Emil Kowalski's rules. ⌘K opens with no animation. Panels use a 220 ms ease-out curve. Buttons scale to 0.97 when pressed. Reduced motion is respected.
 - shadcn/ui on Base UI with Phosphor icons. Vendored components live in `src/components/ui` and are excluded from lint.
@@ -124,12 +153,12 @@ Bookings made on a public page are written on the server. Saves from an open tab
 
 ## Known limits of this build
 
-- Saves are last-write-wins per workspace: two people editing the same workspace at the same moment can overwrite each other.
-- The interviewer guides booking businesses. Other business types are pointed to a matching community system.
-- The assistant can add fields, record types, views, dashboard widgets, pages and rules, move a tab onto its own page, rename pages and tabs, and create or update records. It doesn't delete fields, pages or records; it says so and points to Settings.
-- Status badges in tables, kanban cards and the record panel are menus: click one to change the status in place (owners, admins and staff).
-- Assistant conversations live in the browser tab's memory; the changes they make are saved with the workspace and listed in History.
-- Official community systems keep their sample authors and usage counts. Invites are links; email isn't sent yet.
+- Real payment settlement, social platform publishing, billing and subscriptions are outside the prototype scope.
+- AI-generated systems and changes still need human review. Unsupported or irreversible account and workspace actions stay in Settings rather than assistant plans.
+- Record writes check revisions and report conflicts; the browser refreshes and merges edits before retrying. This does not replace load and concurrency acceptance testing.
+- Setup uses business playbooks and community references across several business types; generated proposals should be evaluated with representative owners and workflows.
+- Assistant conversations are saved per user and workspace in `assistant_thread`, and applied changes appear in History.
+- Official community systems include sample authors and usage counts; these are demo content, not adoption metrics. SMTP delivery depends on deployment configuration.
 
 ## Accounts
 
@@ -139,7 +168,7 @@ Workspaces need an account. Community systems and their previews stay public.
 |---|---|
 | `/sign-in` | Email and password, a "Fill in the demo account" shortcut, and a return to the page you were on (`?next=`) |
 | `/sign-up` | Name, email and password with a strength meter. Duplicate emails are rejected |
-| `/forgot-password` | Always shows the same confirmation. Email isn't connected yet, so the reset link is written to the server log |
+| `/forgot-password` | Shows the same confirmation for unknown and registered emails; reset emails use SMTP, with a server-log fallback when SMTP isn't configured |
 | `/reset-password` | Single-use link, valid for 30 minutes, with a confirmation field |
 
 Demo account: `james@everyops.app` / `everyops2026`.
@@ -152,7 +181,7 @@ Each account has its own workspaces; the demo workspaces are created on an accou
 | `/w/[workspace]/settings` | Rename (versioned and undoable), export the blueprint and records as JSON, delete (type the name to confirm) |
 | `/terms`, `/privacy` | Plain-language policies for the prototype |
 
-Accounts live in PostgreSQL through Better Auth, with scrypt password hashes and HttpOnly session cookies. "Continue with Google" works once Google OAuth credentials are set; until then it explains that it's coming soon.
+Accounts live in PostgreSQL through Better Auth, with scrypt password hashes and HttpOnly session cookies. Google sign-in is available when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are configured. The shared demo account has protected profile, password and deletion settings.
 
 ## Team and Community publishing
 
