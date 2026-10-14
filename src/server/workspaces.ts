@@ -1,7 +1,8 @@
 import "server-only";
 import { sql } from "kysely";
-import type { Blueprint, WorkspaceData } from "@/lib/blueprint/types";
+import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { freshSample } from "@/lib/catalog/shift";
+import { renumberTaken } from "@/lib/engine/sequence";
 import { htmlDocKeys } from "@/lib/public/html-page";
 import {
   type ChangeEntry,
@@ -287,6 +288,7 @@ export async function patchWorkspace(
 
   const newInvites: Invite[] = [];
   let revs: Record<string, number> = {};
+  let updated: DataRecord[] = [];
   try {
     await db.transaction().execute(async (trx) => {
       // One save at a time per workspace (public bookings take the same lock); each is a few rows now.
@@ -333,7 +335,33 @@ export async function patchWorkspace(
       }
 
       if (patch.records) {
-        const put = await putRecords(trx, slug, patch.records.put);
+        // New records whose sequence number another device took a moment ago (two registers, both "#1251") get the
+        // next free one. The workspace row is locked, so every number in use is visible here.
+        let puts = patch.records.put;
+        const fresh = puts.filter((p) => p.rev === null).map((p) => p.record);
+        const bp = fresh.length ? await currentBlueprint(trx, slug) : undefined;
+        if (bp) {
+          const types = [...new Set(fresh.map((r) => r.entityId))];
+          const { rows } = await sql<{ id: string; entity_id: string; data: DataRecord["data"] }>`
+            select id, entity_id, data from workspace_record
+            where workspace_id = ${slug} and entity_id = any(${types}::text[])`.execute(trx);
+          const stored = rows.map((r) => ({
+            id: r.id,
+            entityId: r.entity_id,
+            data: r.data,
+            createdAt: "",
+            updatedAt: "",
+          }));
+          const numbered = renumberTaken(bp, stored, fresh);
+          if (numbered.changed.length) {
+            const byId = new Map(numbered.changed.map((r) => [r.id, r]));
+            puts = puts.map((p) =>
+              byId.has(p.record.id) ? { ...p, record: byId.get(p.record.id) as DataRecord } : p,
+            );
+            updated = numbered.changed;
+          }
+        }
+        const put = await putRecords(trx, slug, puts);
         const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, patch.records.delete))];
         if (conflicts.length)
           throw new Conflict({
@@ -430,7 +458,7 @@ export async function patchWorkspace(
       ),
     );
   }
-  return { ok: true, revs };
+  return { ok: true, revs, ...(updated.length ? { updated } : {}) };
 }
 
 /** Owners delete the workspace; members leave it. */
