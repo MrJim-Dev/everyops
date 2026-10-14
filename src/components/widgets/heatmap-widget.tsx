@@ -4,7 +4,6 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Widget } from "@/lib/blueprint/types";
 import { heatmapData } from "@/lib/engine/dashboard";
 import { metricFormatter } from "@/lib/engine/metric-format";
-import { TONE_COLOR, widgetLook } from "@/lib/engine/widget-look";
 import { WidgetFrame } from "./widget-frame";
 
 const hourLabel = (h: number) => (h === 0 ? "12a" : h < 12 ? `${h}a` : h === 12 ? "12p" : `${h - 12}p`);
@@ -16,11 +15,9 @@ export function HeatmapWidget({ widget }: { widget: Widget }) {
   const format = metricFormatter(blueprint, widget);
   const weeks = widget.heatmap?.weeks ?? 8;
   const shade = (v: number) => (data.max ? 0.08 + 0.92 * (v / data.max) : 0);
-  const look = widgetLook(blueprint, widget);
   return (
     <WidgetFrame
       title={widget.title}
-      look={look}
       aside={<span className="text-[12px] text-muted-foreground">Last {weeks} weeks</span>}
     >
       <div className="overflow-x-auto px-5 pb-4">
@@ -51,7 +48,7 @@ export function HeatmapWidget({ widget }: { widget: Widget }) {
                       style={
                         v
                           ? {
-                              backgroundColor: `color-mix(in oklab, ${TONE_COLOR[look.tone]} ${Math.round(shade(v) * 100)}%, transparent)`,
+                              backgroundColor: `color-mix(in oklab, var(--primary) ${Math.round(shade(v) * 100)}%, transparent)`,
                             }
                           : undefined
                       }
@@ -71,9 +68,7 @@ export function HeatmapWidget({ widget }: { widget: Widget }) {
               key={s}
               aria-hidden="true"
               className="size-3 rounded-[3px]"
-              style={{
-                backgroundColor: `color-mix(in oklab, ${TONE_COLOR[look.tone]} ${s * 100}%, transparent)`,
-              }}
+              style={{ backgroundColor: `color-mix(in oklab, var(--primary) ${s * 100}%, transparent)` }}
             />
           ))}
           More

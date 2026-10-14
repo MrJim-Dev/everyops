@@ -7,7 +7,6 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
 import type { Widget } from "@/lib/blueprint/types";
 import { type AgendaItem, agendaDays } from "@/lib/engine/dashboard";
-import { widgetLook } from "@/lib/engine/widget-look";
 import { formatDate, formatTime } from "@/lib/format";
 import { useFreshStore } from "@/lib/motion/fresh";
 import { todayKey } from "@/lib/time";
@@ -51,11 +50,7 @@ export function AgendaWidget({ widget, viewHref }: { widget: Widget; viewHref?: 
   const hidden = total - shown.reduce((n, d) => n + d.items.length, 0);
 
   return (
-    <WidgetFrame
-      title={total ? `${widget.title} · ${total}` : widget.title}
-      look={widgetLook(blueprint, widget)}
-      href={viewHref}
-    >
+    <WidgetFrame title={total ? `${widget.title} · ${total}` : widget.title} href={viewHref}>
       <div className="flex flex-col gap-3 pb-3">
         {shown.map(({ day, items }) => (
           <div key={day} className="flex flex-col">

@@ -19,17 +19,12 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Widget } from "@/lib/blueprint/types";
 import { chartData } from "@/lib/engine/aggregate";
 import { metricFormatter } from "@/lib/engine/metric-format";
-import { TONE_COLOR, type WidgetLook, widgetLook } from "@/lib/engine/widget-look";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { WidgetFrame } from "./widget-frame";
 
 const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
-/** The palette starting from the widget's own colour, so a revenue chart leads in teal and a costs chart in rose. */
-const paletteFrom = (look: WidgetLook) => {
-  const start = Math.max(0, COLORS.indexOf(TONE_COLOR[look.tone]));
-  return (i: number) => COLORS[(start + i) % COLORS.length];
-};
+const color = (i: number) => COLORS[i % COLORS.length];
 const compact = (v: number) =>
   Math.abs(v) >= 1000 ? `${formatNumber(Math.round(v / 100) / 10)}k` : formatNumber(v);
 
@@ -37,16 +32,13 @@ export function ChartWidget({ widget }: { widget: Widget }) {
   const { blueprint, records } = useWorkspace();
   const { points, series } = chartData(blueprint, widget, records);
   const format = metricFormatter(blueprint, widget);
-  const look = widgetLook(blueprint, widget);
-  const color = paletteFrom(look);
   const config: ChartConfig = Object.fromEntries(
     series.map((s, i) => [s.key, { label: s.label, color: color(i) }]),
   );
   const byCategory = !!widget.chart?.groupByFieldId;
   const kind = widget.chart?.kind ?? "line";
 
-  if (kind === "donut")
-    return <DonutChart widget={widget} points={points} format={format} look={look} color={color} />;
+  if (kind === "donut") return <DonutChart widget={widget} points={points} format={format} />;
 
   const legend =
     series.length > 1 ? (
@@ -100,11 +92,9 @@ export function ChartWidget({ widget }: { widget: Widget }) {
   );
   // Horizontal bars take the height their categories need; a time chart fills what the dashboard gives it.
   const height = horizontal ? Math.max(220, points.length * 30 + 40) : undefined;
-  // One series split by category: each category gets its own colour, so the bars read apart at a glance.
-  const colourful = byCategory && series.length === 1;
 
   return (
-    <WidgetFrame title={widget.title} look={look} aside={legend} className={height ? undefined : "flex-1"}>
+    <WidgetFrame title={widget.title} aside={legend} className={height ? undefined : "flex-1"}>
       <ChartContainer
         config={config}
         // A definite height: inside the dashboard grid a min-height alone left the chart 0 px tall and blank.
@@ -127,23 +117,11 @@ export function ChartWidget({ widget }: { widget: Widget }) {
                 radius={horizontal ? [0, 3, 3, 0] : [3, 3, 0, 0]}
                 maxBarSize={byCategory ? 32 : 18}
                 isAnimationActive={false}
-              >
-                {colourful
-                  ? points.map((p, i) => <Cell key={String(p.bucket ?? i)} fill={color(i)} />)
-                  : null}
-              </Bar>
+              />
             ))}
           </BarChart>
         ) : kind === "area" ? (
           <AreaChart data={points} margin={{ left: 4, right: 8 }}>
-            <defs>
-              {series.map((s) => (
-                <linearGradient key={s.key} id={`fill-${widget.id}-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={`var(--color-${s.key})`} stopOpacity={0.45} />
-                  <stop offset="100%" stopColor={`var(--color-${s.key})`} stopOpacity={0.02} />
-                </linearGradient>
-              ))}
-            </defs>
             {axes}
             {series.map((s) => (
               <Area
@@ -151,8 +129,9 @@ export function ChartWidget({ widget }: { widget: Widget }) {
                 dataKey={s.key}
                 type="monotone"
                 stroke={`var(--color-${s.key})`}
-                fill={`url(#fill-${widget.id}-${s.key})`}
-                strokeWidth={2}
+                fill={`var(--color-${s.key})`}
+                fillOpacity={0.18}
+                strokeWidth={1.75}
                 isAnimationActive={false}
               />
             ))}
@@ -166,9 +145,8 @@ export function ChartWidget({ widget }: { widget: Widget }) {
                 dataKey={s.key}
                 type="monotone"
                 stroke={`var(--color-${s.key})`}
-                strokeWidth={2}
-                dot={points.length <= 16 ? { r: 2.5, strokeWidth: 0, fill: `var(--color-${s.key})` } : false}
-                activeDot={{ r: 4 }}
+                strokeWidth={1.75}
+                dot={false}
                 isAnimationActive={false}
               />
             ))}
@@ -184,14 +162,10 @@ function DonutChart({
   widget,
   points,
   format,
-  look,
-  color,
 }: {
   widget: Widget;
   points: ReturnType<typeof chartData>["points"];
   format: (v: number) => string;
-  look: WidgetLook;
-  color: (i: number) => string;
 }) {
   const slices = points
     .map((p) => ({ key: p.bucket, label: p.label, value: Number(p.value ?? 0) }))
@@ -202,7 +176,7 @@ function DonutChart({
   );
 
   return (
-    <WidgetFrame title={widget.title} look={look}>
+    <WidgetFrame title={widget.title}>
       {total ? (
         <div className="flex flex-col items-center gap-4 px-5 pb-5 sm:flex-row">
           <ChartContainer config={config} className="aspect-square h-[180px] shrink-0">

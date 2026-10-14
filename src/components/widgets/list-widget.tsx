@@ -7,7 +7,6 @@ import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
 import type { Widget } from "@/lib/blueprint/types";
 import { widgetRows } from "@/lib/engine/aggregate";
 import { sortRecords } from "@/lib/engine/query";
-import { widgetLook } from "@/lib/engine/widget-look";
 import { useFreshStore } from "@/lib/motion/fresh";
 import { cn } from "@/lib/utils";
 import { WidgetFrame } from "./widget-frame";
@@ -28,7 +27,6 @@ export function ListWidget({ widget, viewHref }: { widget: Widget; viewHref?: st
   return (
     <WidgetFrame
       title={all.length ? `${widget.title} · ${all.length}` : widget.title}
-      look={widgetLook(blueprint, widget)}
       href={all.length > rows.length ? viewHref : undefined}
     >
       {rows.length === 0 ? (

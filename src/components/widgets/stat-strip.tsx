@@ -7,33 +7,23 @@ import type { Widget } from "@/lib/blueprint/types";
 import { widgetValue } from "@/lib/engine/aggregate";
 import { compareStat } from "@/lib/engine/dashboard";
 import { metricFormatter } from "@/lib/engine/metric-format";
-import { widgetLook } from "@/lib/engine/widget-look";
 import { cn } from "@/lib/utils";
-import { LookBadge, toneStyle } from "./widget-look";
 
-/**
- * Key numbers as a row of cards, each with an icon and a colour for what it measures (money teal, needs attention
- * amber, people violet…). Stats with a comparison show the change and a trend line in the card's colour.
- */
+/** Key numbers in one row, divided by thin vertical rules. Stats with a comparison show the change and a trend. */
 export function StatStrip({ widgets }: { widgets: Widget[] }) {
   const { blueprint, records } = useWorkspace();
   return (
-    <dl className="grid grid-cols-1 gap-3 border-b p-4 min-[480px]:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
+    <dl className="grid grid-cols-2 border-b sm:flex">
       {widgets.map((w, i) => {
         const comparison = compareStat(blueprint, w, records);
         const value = comparison ? comparison.current : widgetValue(blueprint, w, records);
         const format = metricFormatter(blueprint, w);
-        const look = widgetLook(blueprint, w, i);
         return (
           <div
             key={w.id}
-            style={toneStyle(look)}
-            className="relative flex min-w-0 flex-col gap-2 overflow-hidden rounded-xl border bg-card px-4 py-3.5 bg-[radial-gradient(120%_90%_at_100%_0%,var(--tone-soft),transparent_60%)]"
+            className={cn("flex min-w-0 flex-1 flex-col gap-1 px-5 py-4", i > 0 && "sm:border-l")}
           >
-            <dt className="flex min-w-0 items-center gap-2.5">
-              <LookBadge look={look} />
-              <span className="truncate text-[12.5px] text-muted-foreground">{w.title}</span>
-            </dt>
+            <dt className="truncate text-[12.5px] text-muted-foreground">{w.title}</dt>
             <dd className="flex items-end justify-between gap-3">
               <span
                 className={cn(
@@ -43,9 +33,7 @@ export function StatStrip({ widgets }: { widgets: Widget[] }) {
               >
                 <AnimatedValue value={format(value)} />
               </span>
-              {comparison && w.sparkline ? (
-                <Sparkline values={comparison.spark} className="text-(--tone)" />
-              ) : null}
+              {comparison && w.sparkline ? <Sparkline values={comparison.spark} /> : null}
             </dd>
             {comparison ? <Change change={comparison.change} against={comparison.against} /> : null}
           </div>
@@ -93,7 +81,7 @@ export function Sparkline({ values, className }: { values: number[]; className?:
       width={w}
       height={h}
       aria-hidden="true"
-      className={cn("mb-1 hidden shrink-0 overflow-visible min-[480px]:block", className ?? "text-primary")}
+      className={cn("mb-1 hidden shrink-0 overflow-visible text-primary min-[480px]:block", className)}
     >
       <polyline points={`0,${h} ${line} ${w},${h}`} fill="currentColor" opacity={0.12} stroke="none" />
       <polyline points={line} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" />

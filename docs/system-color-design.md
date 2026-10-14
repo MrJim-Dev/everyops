@@ -66,15 +66,15 @@ Destructive buttons are tinted (`destructive/10` fill with `destructive` text) r
 
 ## Charts
 
-Charts and dashboard cards use five hues so a dashboard reads at a glance. Each stat card and widget gets an icon in a tinted badge and a color from what it measures (`src/lib/engine/widget-look.ts`): money teal, things that need attention amber, costs rose, schedules and time blue, people and rates violet. A chart's series start from its widget's color, and a single series split by category gives each bar its own color. These hues mark data, never actions; buttons and focus stay teal.
+Charts use a fixed order so the same series keeps its color across a workspace.
 
 | Token | Hex | Typical series |
 |---|---|---|
-| `--chart-1` | `#34C3A6` | Teal: money in (revenue, collected, sales) |
-| `--chart-2` | `#A58CF0` | Violet: people, rates and shares |
-| `--chart-3` | `#E3A64B` | Amber: needs attention (unpaid, overdue, low stock) |
-| `--chart-4` | `#6B9BD1` | Blue: bookings, schedules, time (also "blue" booking blocks) |
-| `--chart-5` | `#E8798F` | Rose: costs, expenses, cancellations |
+| `--chart-1` | `#34C3A6` | The main measure (revenue, bookings) |
+| `--chart-2` | `#7F8B89` | Comparison or previous period |
+| `--chart-3` | `#E3A64B` | Costs, expenses |
+| `--chart-4` | `#6B9BD1` | A second category (also used for "blue" booking blocks) |
+| `--chart-5` | `#4A5452` | Everything else |
 
 ## Motion and color
 
