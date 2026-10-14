@@ -10,6 +10,7 @@ import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState 
 import { MessageFiles } from "@/components/ai/composer-tools";
 import { LogoMark } from "@/components/brand/logo";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { replyBlocks } from "@/lib/assistant/reply-format";
 import type { Navigation } from "@/lib/assistant/screen";
 import type { ChangePlan } from "@/lib/engine/changes";
 import { cn } from "@/lib/utils";
@@ -39,51 +40,37 @@ function Inline({ text, links }: { text: string; links: Link[] }) {
 }
 
 /**
- * A reply's paragraphs and "- " lists, plus bold, without pulling in a markdown library. Blank lines
- * separate paragraphs; a run of "- " or "1. " lines becomes a list.
+ * A reply's paragraphs and "- " or "1. " lists (see replyBlocks), plus bold, without pulling in a markdown library.
  */
 export function Rich({ text, links = [] }: { text: string; links?: Link[] }) {
-  const blocks: { id: number; list?: "ul" | "ol"; lines: string[] }[] = [];
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    const bullet = /^[-*•]\s+/.exec(line);
-    const numbered = /^\d+[.)]\s+/.exec(line);
-    const kind = bullet ? "ul" : numbered ? "ol" : undefined;
-    const content = kind ? line.slice((bullet ?? numbered)?.[0].length) : line;
-    const prev = blocks.at(-1);
-    if (!line) blocks.push({ id: blocks.length, lines: [] });
-    else if (prev && prev.list === kind && (kind || prev.lines.length)) prev.lines.push(content);
-    else blocks.push({ id: blocks.length, list: kind, lines: [content] });
-  }
+  const blocks = replyBlocks(text);
   return (
     <div className="flex flex-col gap-2.5">
-      {blocks
-        .filter((b) => b.lines.length)
-        .map((b) =>
-          b.list ? (
-            <ul
-              key={b.id}
-              className={cn("flex flex-col gap-1 pl-5", b.list === "ol" ? "list-decimal" : "list-disc")}
-            >
-              {b.lines.map((l, j) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: static split of one string
-                <li key={j} className="pl-0.5 marker:text-muted-foreground">
-                  <Inline text={l} links={links} />
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p key={b.id}>
-              {b.lines.map((l, j) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: static split of one string
-                <Fragment key={j}>
-                  {j ? <br /> : null}
-                  <Inline text={l} links={links} />
-                </Fragment>
-              ))}
-            </p>
-          ),
-        )}
+      {blocks.map((b) =>
+        b.list ? (
+          <ul
+            key={b.id}
+            className={cn("flex flex-col gap-1 pl-5", b.list === "ol" ? "list-decimal" : "list-disc")}
+          >
+            {b.lines.map((l, j) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static split of one string
+              <li key={j} className="pl-0.5 marker:text-muted-foreground">
+                <Inline text={l} links={links} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p key={b.id}>
+            {b.lines.map((l, j) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static split of one string
+              <Fragment key={j}>
+                {j ? <br /> : null}
+                <Inline text={l} links={links} />
+              </Fragment>
+            ))}
+          </p>
+        ),
+      )}
     </div>
   );
 }

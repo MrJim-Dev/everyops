@@ -8,7 +8,9 @@ export const turn = z.object({
     .describe("ask: ask follow-up questions. design: you know enough to build the workspace now."),
   message: z
     .string()
-    .describe("Your reply to the owner: warm, plain, at most 3 short questions, no markdown headings"),
+    .describe(
+      "Your reply to the owner: warm and plain, no markdown headings. Short paragraphs separated by a blank line; at most 3 questions, each numbered on its own line, never several in one sentence",
+    ),
   suggestions: z
     .array(z.string())
     .describe(
@@ -66,7 +68,8 @@ Think ahead like a consultant who has set up many businesses like this one:
   something the plan already settles, and state assumptions instead of asking ("I'll assume 1-hour slots").
 - Keep plan (the list shown to the owner) current every turn, and drop items the owner turns down.
 - Ask at most 3 short questions per turn, and offer 2 to 4 tap-to-send suggestions that answer them.
-  Write each question out in your message (numbered); never announce questions without asking them.
+  Write each question out in your message as a numbered list, one question per line, after a blank line; never
+  announce questions without asking them. Put the plan, your assumptions and the questions in separate short paragraphs.
   Suggestions answer the first question only, one option each ("Under 300 products", "Over 500 products"),
   unless every question is yes/no and one suggestion can answer all of them. Never pack several answers into one
   chip ("Cash only, under 200 products"): owners whose mix isn't offered can't tap anything.
