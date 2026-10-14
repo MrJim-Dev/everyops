@@ -22,7 +22,7 @@ import { useSidebar } from "@/lib/store/sidebar";
 import { cn } from "@/lib/utils";
 import { useCommandMenu } from "./command-menu";
 import { RailTip } from "./rail-tip";
-import { RAIL_ITEM, RAIL_LABEL, railWidth, SidebarLink, SidebarSection } from "./sidebar-link";
+import { ACTIVE_ITEM, RAIL_ITEM, RAIL_LABEL, railWidth, SidebarLink, SidebarSection } from "./sidebar-link";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
 /** A page made only of public website pages: listed under Website, apart from the systems the team works in. */
@@ -122,12 +122,14 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
                 type="button"
                 aria-label={rail ? "Ask EveryOps" : undefined}
                 aria-pressed={assistantOpen || onAsk}
+                data-active={assistantOpen || onAsk}
                 onClick={() => {
                   if (!onAsk) toggleAssistant();
                   onNavigate?.();
                 }}
                 className={cn(
-                  "flex h-8 items-center gap-2.5 overflow-hidden rounded-md px-2 text-[13px] whitespace-nowrap text-sidebar-foreground outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 aria-pressed:bg-sidebar-accent aria-pressed:text-foreground",
+                  "flex h-8 items-center gap-2.5 overflow-hidden rounded-md px-2 text-[13px] whitespace-nowrap text-sidebar-foreground outline-none hover:bg-sidebar-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[active=true]:hover:bg-transparent",
+                  ACTIVE_ITEM,
                   RAIL_ITEM,
                   railWidth(rail),
                 )}
