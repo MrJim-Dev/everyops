@@ -12,6 +12,7 @@ import { LogoMark } from "@/components/brand/logo";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { replyBlocks } from "@/lib/assistant/reply-format";
 import type { Navigation } from "@/lib/assistant/screen";
+import type { Blueprint } from "@/lib/blueprint/types";
 import type { ChangePlan } from "@/lib/engine/changes";
 import { cn } from "@/lib/utils";
 import { PlanCard } from "./plan-card";
@@ -75,12 +76,16 @@ export function Rich({ text, links = [] }: { text: string; links?: Link[] }) {
   );
 }
 
-/** The first page a plan adds, so it can be opened once the plan is applied. */
-function newPageOf(plan: ChangePlan): Navigation | undefined {
+/** The first page or tab a plan adds (or swaps in), so it can be opened once the plan is applied. */
+function newPageOf(plan: ChangePlan, bp: Blueprint): Navigation | undefined {
   for (const op of plan.ops) {
     if (op.op === "add_system") return { path: `/${op.system.id}`, label: op.system.name, open: false };
     if (op.op === "add_view")
       return { path: `/${op.systemId}/${op.view.id}`, label: op.view.name, open: false };
+    if (op.op === "replace_view") {
+      const system = bp.systems.find((s) => s.viewIds.includes(op.view.id) || s.viewIds.includes(op.viewId));
+      if (system) return { path: `/${system.id}/${op.view.id}`, label: op.view.name, open: false };
+    }
   }
   return undefined;
 }
@@ -290,7 +295,7 @@ export function ChatThread({
                       onDismiss={() => chat.dismiss(i)}
                       onUndo={() => chat.undo(i, t.changeId)}
                       onOpenPage={(() => {
-                        const target = newPageOf(t.plan);
+                        const target = newPageOf(t.plan, chat.ws.blueprint);
                         return target ? () => chat.go(target) : undefined;
                       })()}
                     />

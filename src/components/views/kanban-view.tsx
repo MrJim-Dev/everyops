@@ -28,19 +28,22 @@ export function KanbanView({ view }: { view: KanbanConfig }) {
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
 
-  // A lane is shown when the view's filter would allow records in that stage.
-  const lanes = useMemo(
-    () =>
-      (status.options ?? []).filter((o) =>
-        view.filter
-          ? truthy(run(view.filter, recordContext(blueprint, entity, { [status.id]: o.id }, records)))
-          : true,
-      ),
-    [status, view.filter, blueprint, entity, records],
-  );
   const rows = useMemo(
     () => applyFilter(blueprint, entity, records, view.filter),
     [blueprint, entity, records, view.filter],
+  );
+  // A lane is shown when the view's filter would allow records in that stage, or when records in it pass the filter.
+  // A filter about something else ("is_upcoming(slot)" on a board made from a table) can't be judged from the stage
+  // alone, and used to hide every lane.
+  const lanes = useMemo(
+    () =>
+      (status.options ?? []).filter(
+        (o) =>
+          !view.filter ||
+          rows.some((r) => r.data[status.id] === o.id) ||
+          truthy(run(view.filter, recordContext(blueprint, entity, { [status.id]: o.id }, records))),
+      ),
+    [status, view.filter, blueprint, entity, records, rows],
   );
   const hidden = (status.options ?? []).filter((o) => !lanes.includes(o));
 
