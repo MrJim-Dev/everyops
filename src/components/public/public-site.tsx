@@ -31,7 +31,10 @@ export function PublicSiteView({
         className={cn("w-full", preview ? "h-full min-h-[480px]" : "h-dvh")}
       />
     );
-  const book = site.pages.find((p) => p.type === "form");
+  const formPage = site.pages.find((p) => p.type === "form");
+  const book = site.book ?? (formPage ? { id: formPage.id, label: formPage.name } : undefined);
+  // A menu with one page (the home page the logo already links to) says nothing; it shows from two pages up.
+  const menu = site.pages.filter((p) => p.id !== book?.id);
   const initial = site.name.trim().charAt(0).toUpperCase() || "E";
   return (
     <div className={cn("flex min-h-full flex-col bg-shell", !preview && "min-h-dvh")}>
@@ -46,10 +49,9 @@ export function PublicSiteView({
             </span>
             <span className="truncate">{site.name}</span>
           </Link>
-          <nav aria-label="Pages" className="ml-auto hidden items-center gap-1 sm:flex">
-            {site.pages
-              .filter((p) => p.id !== book?.id)
-              .map((p) => (
+          {menu.length > 1 ? (
+            <nav aria-label="Pages" className="ml-auto hidden items-center gap-1 sm:flex">
+              {menu.map((p) => (
                 <Link
                   key={p.id}
                   href={sitePath(site.slug, p.id)}
@@ -59,15 +61,16 @@ export function PublicSiteView({
                   {p.name}
                 </Link>
               ))}
-          </nav>
+            </nav>
+          ) : null}
           {book ? (
             <Button
               size="sm"
-              className="ml-auto h-8 rounded-full px-4 sm:ml-2"
+              className={cn("ml-auto h-8 rounded-full px-4", menu.length > 1 && "sm:ml-2")}
               nativeButton={false}
               render={<Link href={sitePath(site.slug, book.id)} />}
             >
-              {book.name}
+              {book.label}
             </Button>
           ) : null}
         </div>

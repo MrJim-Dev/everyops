@@ -67,11 +67,20 @@ export function offeringOf(bp: Blueprint): Entity | undefined {
   );
 }
 
-const paymentsOf = (bp: Blueprint) => bp.entities.find((e) => PAYMENT.test(words(e)));
+export const paymentsOf = (bp: Blueprint) => bp.entities.find((e) => PAYMENT.test(words(e)));
+
+/** What a button to a public form says: "Book a court" for bookings of a resource, otherwise the form's name. */
+export function bookLabel(bp: Blueprint, formId: string): string {
+  const form = bp.views.find((v) => v.id === formId);
+  const entity = form && bp.entities.find((e) => e.id === form.entityId);
+  const offer = offeringOf(bp);
+  if (entity?.booking && offer) return `Book a ${offer.name.toLowerCase()}`;
+  return form && form.name.length <= 24 ? form.name : "Book now";
+}
 const faqsOf = (bp: Blueprint) => bp.entities.find((e) => FAQ.test(words(e)));
 
 /** Only records a visitor should see: the "active" or "available" ones when the type has such a status. */
-function liveFilter(e: Entity): string | undefined {
+export function liveFilter(e: Entity): string | undefined {
   for (const f of e.fields) {
     if (f.type === "status" || f.type === "select") {
       const on = f.options?.find((o) => /^(active|available|open|published|in.?stock)$/i.test(o.id));
@@ -103,12 +112,15 @@ export function defaultCopy(bp: Blueprint, name: string): SiteCopy {
   const offer = offeringOf(bp);
   const booking = !!entity?.booking;
   const thing = offer?.name.toLowerCase() ?? "time";
+  const things = offer?.pluralName.toLowerCase();
   return {
     headline: name,
     intro: booking
-      ? `Book ${offer ? offer.pluralName.toLowerCase() : "online"} in a few taps and get a confirmation from ${name}.`
+      ? `Pick a ${thing} and a time that suits you, book in a minute, and ${name} confirms it.`
       : form
-        ? `Send your request online and ${name} will get back to you.`
+        ? things
+          ? `See our ${things}, send your request online, and ${name} gets back to you with the details.`
+          : `Send your request online and ${name} gets back to you with the details.`
         : undefined,
     steps: !form
       ? undefined
@@ -136,6 +148,24 @@ const clean = (text: string | undefined, max: number) => {
   const cut = t.slice(0, max);
   return cut.slice(0, cut.lastIndexOf(" ") > 0 ? cut.lastIndexOf(" ") : max).trim();
 };
+
+/**
+ * An intro in whole sentences: past `max` it keeps the complete sentences that fit, so a run-on (an AI answer that
+ * looped, "…formats available now directly web based booking systems format option list") is dropped instead of
+ * cut mid-thought. A single long sentence still falls back to a cut at a word.
+ */
+export function cleanIntro(text: string | undefined, max = 200): string | undefined {
+  const t = text?.replace(/\s+/g, " ").trim();
+  if (!t) return undefined;
+  if (t.length <= max) return t;
+  let kept = "";
+  for (const sentence of t.match(/[^.!?]+[.!?]+(?=\s|$)/g) ?? []) {
+    const next = `${kept} ${sentence.trim()}`.trim();
+    if (next.length > max) break;
+    kept = next;
+  }
+  return kept || clean(t, max);
+}
 const cleanItems = (items: BlockItem[] | undefined) =>
   (items ?? [])
     .map((i) => ({ title: clean(i.title, 48) ?? "", body: clean(i.body, 160) ?? "" }))
@@ -174,8 +204,8 @@ function buildBlocks(bp: Blueprint, name: string, copy: SiteCopy): Block[] {
       id: "hero",
       type: "hero",
       heading: clean(copy.headline, 60) ?? base.headline ?? name,
-      ...(clean(copy.intro ?? base.intro, 200) ? { subheading: clean(copy.intro ?? base.intro, 200) } : {}),
-      ...(form ? { ctaViewId: form.id, ctaLabel: clean(copy.cta, 28) ?? "Book now" } : {}),
+      ...(cleanIntro(copy.intro ?? base.intro) ? { subheading: cleanIntro(copy.intro ?? base.intro) } : {}),
+      ...(form ? { ctaViewId: form.id, ctaLabel: clean(copy.cta, 28) ?? bookLabel(bp, form.id) } : {}),
     },
   ];
   const highlights = cleanItems(copy.highlights);

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowDownIcon,
   CaretDownIcon,
   CheckIcon,
   ClockIcon,
@@ -12,7 +13,10 @@ import {
   PhoneIcon,
   SealCheckIcon,
   SparkleIcon,
+  SquaresFourIcon,
   StarIcon,
+  TagIcon,
+  WalletIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -20,6 +24,7 @@ import { Markdown } from "@/components/editor/markdown";
 import { Reveal } from "@/components/landing/reveal";
 import { StatusBadge } from "@/components/records/status-badge";
 import { Button } from "@/components/ui/button";
+import type { HeroFact } from "@/lib/public/hero-facts";
 import type { Cell, ResolvedBlock } from "@/lib/public/resolve";
 import { cn } from "@/lib/utils";
 import { PublicFormView } from "./public-form";
@@ -87,11 +92,12 @@ export function PublicBlocks({
               {node}
             </Selectable>
           );
-        // Visitors see each section rise in once as they scroll; the first is there straight away.
-        return preview || compact || i === 0 ? (
-          <div key={b.id}>{node}</div>
-        ) : (
-          <Reveal key={b.id}>{node}</Reveal>
+        // Visitors see each section rise in once as they scroll; the first is there straight away. Each section can
+        // be linked to (the hero's "See our courts"), clear of the sticky header.
+        return (
+          <div key={b.id} id={b.id} className="scroll-mt-24">
+            {preview || compact || i === 0 ? node : <Reveal>{node}</Reveal>}
+          </div>
         );
       })}
     </div>
@@ -217,15 +223,31 @@ function SectionHeading({ title, center }: { title: string; center?: boolean }) 
   );
 }
 
+const FACT_ICONS: Record<HeroFact["kind"], typeof ClockIcon> = {
+  offer: SquaresFourIcon,
+  hours: ClockIcon,
+  price: TagIcon,
+  pay: WalletIcon,
+};
+
+/**
+ * The first thing a visitor sees: what the business is, one way to book, and the facts people check before they do
+ * (how many courts, hours, the price, how to pay). Its lines rise in once, in order, when the page opens.
+ */
 function Hero({ block, preview }: { block: Extract<ResolvedBlock, { type: "hero" }>; preview?: boolean }) {
   return (
-    <section className="relative overflow-hidden rounded-[22px] border px-6 py-20 text-center md:px-12 md:py-28">
+    <section className="relative overflow-hidden rounded-[22px] border px-6 py-16 text-center md:px-12 md:py-24">
       <div aria-hidden="true" className="bg-grid pointer-events-none absolute inset-0 opacity-50" />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute top-[-200px] left-1/2 h-[420px] w-[760px] -translate-x-1/2 rounded-full bg-primary/[0.18] blur-[110px]"
       />
-      <div className="relative mx-auto flex max-w-[760px] flex-col items-center gap-5">
+      <div
+        className={cn(
+          "relative mx-auto flex max-w-[760px] flex-col items-center gap-5",
+          !preview && "stagger-children",
+        )}
+      >
         <h1 className="text-balance text-[38px] font-semibold leading-[1.05] tracking-[-0.035em] md:text-[60px]">
           {block.heading}
         </h1>
@@ -234,15 +256,47 @@ function Hero({ block, preview }: { block: Extract<ResolvedBlock, { type: "hero"
             {block.subheading}
           </p>
         ) : null}
-        {block.ctaHref && block.ctaLabel ? (
-          <Button
-            size="lg"
-            className="mt-3 h-11 rounded-full px-6 text-[15px]"
-            nativeButton={false}
-            render={<Link href={block.ctaHref} target={preview ? "_blank" : undefined} />}
-          >
-            {block.ctaLabel}
-          </Button>
+        {(block.ctaHref && block.ctaLabel) || block.secondaryHref ? (
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2.5">
+            {block.ctaHref && block.ctaLabel ? (
+              <Button
+                size="lg"
+                className="h-11 rounded-full px-6 text-[15px] transition-[background-color,transform] duration-150 ease-out active:scale-[0.97]"
+                nativeButton={false}
+                render={<Link href={block.ctaHref} target={preview ? "_blank" : undefined} />}
+              >
+                {block.ctaLabel}
+              </Button>
+            ) : null}
+            {block.secondaryHref && block.secondaryLabel ? (
+              <Button
+                size="lg"
+                variant="ghost"
+                className="h-11 rounded-full px-5 text-[15px] text-muted-foreground transition-[background-color,color,transform] duration-150 ease-out hover:text-foreground active:scale-[0.97]"
+                nativeButton={false}
+                render={<Link href={block.secondaryHref} />}
+              >
+                {block.secondaryLabel}
+                <ArrowDownIcon data-icon="inline-end" />
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {block.facts?.length ? (
+          <ul aria-label="At a glance" className="mt-3 flex flex-wrap justify-center gap-2">
+            {block.facts.map((fact) => {
+              const Icon = FACT_ICONS[fact.kind];
+              return (
+                <li
+                  key={fact.kind}
+                  className="flex items-center gap-1.5 rounded-full border bg-background/50 px-3 py-1.5 text-[13px] text-muted-foreground backdrop-blur-sm"
+                >
+                  <Icon weight="duotone" className="size-4 shrink-0 text-primary" />
+                  {fact.text}
+                </li>
+              );
+            })}
+          </ul>
         ) : null}
       </div>
     </section>
@@ -369,8 +423,14 @@ function CellView({ cell, large }: { cell: Cell; large?: boolean }) {
       return <Markdown className="text-[13.5px] text-muted-foreground">{cell.text}</Markdown>;
     case "status":
       return <StatusBadge label={cell.text} tone={cell.tone ?? "neutral"} />;
+    case "tag":
+      return (
+        <span className="inline-flex items-center rounded-full border bg-background/40 px-2 py-0.5 text-[12px] text-muted-foreground">
+          {cell.text}
+        </span>
+      );
     case "number":
-      return <span className="font-mono tabular">{cell.text}</span>;
+      return <span className="tabular-nums">{cell.text}</span>;
     default:
       return <span>{cell.text}</span>;
   }
@@ -453,14 +513,18 @@ function CopyValue({ text, label }: { text: string; label: string }) {
   );
 }
 
-/** A card: picture on top, the name, a price that stands out, then the rest. */
+/** A card: picture on top, the name and its tags (surface, category), a price that stands out, then the rest. */
 function Card({ cells }: { cells: Cell[] }) {
   const [title, ...rest] = cells;
   const image = rest.find((c) => c.kind === "image" && c.text);
   const price = rest.find((c) => /₱|PHP|\$/.test(c.text) && c.kind !== "markdown" && c.kind !== "image");
+  // A tag that only repeats the name ("GCash" on the GCash card) is left out.
+  const tags = rest.filter((c) => c.kind === "tag" && c.text);
+  const shownTags = tags.filter((c) => c.text.toLowerCase() !== title?.text.toLowerCase());
   const notes = rest.filter((c) => c.kind === "markdown" && c.text);
   const others = rest.filter(
-    (c) => c !== image && c !== price && !notes.includes(c) && c.text && c.kind !== "image",
+    (c) =>
+      c !== image && c !== price && !notes.includes(c) && !tags.includes(c) && c.text && c.kind !== "image",
   );
   return (
     <article className="flex flex-col overflow-hidden rounded-2xl border bg-card/60 transition-colors duration-150 hover:border-foreground/20">
@@ -471,9 +535,18 @@ function Card({ cells }: { cells: Cell[] }) {
       ) : null}
       <div className="flex flex-1 flex-col gap-3 p-5">
         <div className="flex items-start justify-between gap-3">
-          <h3 className="text-[16px] font-semibold tracking-[-0.01em]">{title?.text}</h3>
+          <div className="flex min-w-0 flex-col gap-2">
+            <h3 className="text-[16px] font-semibold tracking-[-0.01em]">{title?.text}</h3>
+            {shownTags.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {shownTags.map((c) => (
+                  <CellView key={c.fieldId} cell={c} />
+                ))}
+              </div>
+            ) : null}
+          </div>
           {price ? (
-            <span className="shrink-0 rounded-full bg-primary/12 px-2.5 py-0.5 font-mono text-[13px] font-medium text-primary tabular">
+            <span className="shrink-0 rounded-full bg-primary/12 px-2.5 py-0.5 text-[13.5px] font-semibold text-primary tabular-nums">
               {price.text}
             </span>
           ) : null}
