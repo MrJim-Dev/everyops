@@ -25,12 +25,14 @@ The first visit seeds four demo workspaces: Court House PH, Tita Nena's Canteen,
 
 | Table | Holds |
 |---|---|
-| `workspace` | One JSON document per workspace (blueprint versions, records, change history, setup conversation) and its owner |
+| `workspace` | One row per workspace: its owner and settings (name, summary, current version, setup conversation) |
+| `workspace_record` | One row per record (`data` jsonb, `rev` for conflict checks, `changed_at` for live updates); `workspace_record_deleted` remembers deletions for 30 days |
+| `workspace_version`, `workspace_change`, `workspace_page` | Blueprint versions, the change history, and the text of document, canvas and HTML pages |
 | `workspace_member`, `workspace_invite` | Team access (admin, staff, viewer) and pending invite links |
 | `published_system` | Community systems: official templates (`is_official`, with sample data) and systems people publish |
 | `workspace_template` | The demo workspaces every new account starts with (`account_seed` records that it happened) |
 
-Templates store the day their sample data was built; dates move forward to today whenever one is used (`src/lib/catalog/shift.ts`). `pnpm db:migrate` applies Better Auth's schema and `src/server/migrations/*.sql`; `pnpm db:seed` refreshes templates from `src/lib/catalog`. The API checks access on every request: owners and admins save whole workspaces and the team, staff save records only, viewers read.
+Templates store the day their sample data was built; dates move forward to today whenever one is used (`src/lib/catalog/shift.ts`). `pnpm db:migrate` applies Better Auth's schema and `src/server/migrations/*.sql`; `pnpm db:seed` refreshes templates from `src/lib/catalog`. The API checks access on every request. Saves are patches with only what changed (one edited record is one row); owners and admins save the design, settings and team, staff save records and page text, viewers read. The workspace list sends summaries; records load when a workspace opens.
 
 ## Deployment
 

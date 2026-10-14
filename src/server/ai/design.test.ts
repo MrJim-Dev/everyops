@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
-import { cleanCopy, ensurePages, mergeDateAndSlot, repairStructure, tidy } from "./design";
+import { cleanCopy, ensurePages, givenIn, mergeDateAndSlot, repairStructure, tidy } from "./design";
 
 describe("ensurePages", () => {
   it("gives a record type without any screen its own page", () => {
@@ -273,5 +273,17 @@ describe("tidy add-ons on forms", () => {
       filter: "active == true",
       fieldIds: ["label", "account_number", "qr_code"],
     });
+  });
+});
+
+describe("givenIn", () => {
+  const brief = "A coffee shop at 12 Rizal St, Iloilo City. Call 0917 222 3344. Open 8 AM to 8 PM daily.";
+  it("keeps contact details the owner gave and drops invented ones", () => {
+    expect(givenIn(brief, "0917-222-3344")).toBe(true);
+    expect(givenIn(brief, "12 Rizal St, Iloilo City")).toBe(true);
+    expect(givenIn(brief, "8 AM to 8 PM daily")).toBe(true);
+    expect(givenIn(brief, "Mon-Sun: 8:00 AM - 6:00 PM")).toBe(false);
+    expect(givenIn(brief, "hello@kapeilaya.ph")).toBe(false);
+    expect(givenIn(brief, "0918 555 1234")).toBe(false);
   });
 });

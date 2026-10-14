@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowSquareOutIcon, CopyIcon, GlobeIcon, LockSimpleIcon } from "@phosphor-icons/react";
+import { ArrowSquareOutIcon, CopyIcon, GlobeIcon, HouseIcon, LockSimpleIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { FormView, HtmlPageView, LandingView } from "@/lib/blueprint/types";
-import { isPublic, sitePath } from "@/lib/public/resolve";
+import { autoHomeId, isPublic, sitePath } from "@/lib/public/resolve";
+import { standardLanding } from "@/lib/public/site-template";
 import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 
 /** Above a form, landing or custom HTML page: whether it's public, its link, and (for managers) a switch. */
@@ -38,6 +39,33 @@ export function PublicBar({
       });
   };
 
+  // A site with only forms shows a standard home page to visitors; this makes it a real page you can edit.
+  const noHome =
+    view.type === "form" && on && !ws.blueprint.views.some((v) => v.type === "landing" || v.type === "html");
+  const addHome = () => {
+    const systemId = ws.blueprint.systems.some((s) => s.id === "website") ? "website_home" : "website";
+    const home = standardLanding(ws.blueprint, ws.name, {}, autoHomeId(ws.blueprint));
+    const entry = applyChange(ws.id, {
+      request: "Add a home page to the website",
+      title: "Add a home page",
+      facts: [],
+      steps: [
+        { kind: "add", label: "Home page", detail: "The standard site layout, filled in from your data" },
+      ],
+      ops: [
+        {
+          op: "add_system",
+          system: { id: systemId, name: "Website", icon: "house", viewIds: [], widgetIds: [] },
+        },
+        { op: "add_view", systemId, view: home },
+      ],
+    });
+    if (entry)
+      toast.success("Home page added", {
+        description: "Open Website in the sidebar and click any section to edit it with AI.",
+      });
+  };
+
   return (
     <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-4 py-2 text-[12.5px]">
       {on ? (
@@ -55,6 +83,12 @@ export function PublicBar({
         )}
       </span>
       {children}
+      {noHome && live && canManage(ws.role) ? (
+        <Button size="sm" variant="outline" onClick={addHome}>
+          <HouseIcon data-icon="inline-start" />
+          Add home page
+        </Button>
+      ) : null}
       {on && live ? (
         <>
           <Button

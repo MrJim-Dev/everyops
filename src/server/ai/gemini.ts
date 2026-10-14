@@ -1,5 +1,11 @@
 import "server-only";
-import { GoogleGenAI, type Part, ThinkingLevel } from "@google/genai";
+import {
+  type Content,
+  FunctionCallingConfigMode,
+  GoogleGenAI,
+  type Part,
+  ThinkingLevel,
+} from "@google/genai";
 import { z } from "zod";
 
 /**
@@ -26,6 +32,17 @@ export type GenerateResult<T> =
     }
   | { ok: false; error: string; retryable: boolean };
 
+/**
+ * Read-only functions Gemini may call while it answers (the assistant's record lookups). Each round's calls run, their
+ * results go back, and Gemini continues; the last round has tools off so it has to answer.
+ */
+export type ToolSet = {
+  declarations: { name: string; description: string; parametersJsonSchema: unknown }[];
+  run: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  /** Rounds of calls before Gemini must answer (default 3). */
+  maxRounds?: number;
+};
+
 type Input = {
   system: string;
   /** The user turn: plain text, or text plus inline images (e.g. a photographed menu). */
@@ -50,6 +67,7 @@ type Input = {
    * against Gemini's structural limit, so it's on only where it was needed and fits: the designer.
    */
   enumLiterals?: boolean;
+  tools?: ToolSet;
 };
 
 /**
@@ -123,35 +141,78 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
   if (input.signal) signals.push(input.signal);
   let runaway: string | null = null;
   let text = "";
+  const contents: Content[] = [
+    { role: "user", parts: typeof input.prompt === "string" ? [{ text: input.prompt }] : input.prompt },
+  ];
+  const usage = { input: 0, output: 0, thinking: 0 };
+  let calls = 0;
   try {
-    const stream = await gemini().models.generateContentStream({
-      model: GEMINI_MODEL,
-      contents: [
-        { role: "user", parts: typeof input.prompt === "string" ? [{ text: input.prompt }] : input.prompt },
-      ],
-      config: {
-        systemInstruction: input.system,
-        ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
-        responseMimeType: "application/json",
-        responseJsonSchema: responseSchema(schema, input.enumLiterals),
-        ...(input.maxOutputTokens ? { maxOutputTokens: input.maxOutputTokens } : {}),
-        ...(input.thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel[input.thinking] } } : {}),
-        abortSignal: AbortSignal.any(signals),
-      },
-    });
-    const watch = runawayWatcher(input.maxStringChars);
-    let usage:
-      | { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
-      | undefined;
-    for await (const chunk of stream) {
-      const part = chunk.text ?? "";
-      text += part;
-      if (chunk.usageMetadata) usage = chunk.usageMetadata;
-      runaway = watch(part);
-      if (runaway) {
-        stop.abort();
-        break;
+    const rounds = input.tools ? (input.tools.maxRounds ?? 3) + 1 : 1;
+    for (let round = 0; round < rounds; round++) {
+      const last = round === rounds - 1;
+      const stream = await gemini().models.generateContentStream({
+        model: GEMINI_MODEL,
+        contents,
+        config: {
+          systemInstruction: input.system,
+          ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+          responseMimeType: "application/json",
+          responseJsonSchema: responseSchema(schema, input.enumLiterals),
+          ...(input.maxOutputTokens ? { maxOutputTokens: input.maxOutputTokens } : {}),
+          ...(input.thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel[input.thinking] } } : {}),
+          ...(input.tools
+            ? {
+                tools: [{ functionDeclarations: input.tools.declarations }],
+                ...(last
+                  ? { toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.NONE } } }
+                  : {}),
+              }
+            : {}),
+          abortSignal: AbortSignal.any(signals),
+        },
+      });
+      const watch = runawayWatcher(input.maxStringChars);
+      // Parts are kept as Gemini sent them: calls carry thought signatures it needs back on the next round.
+      const parts: Part[] = [];
+      let roundUsage:
+        | { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
+        | undefined;
+      text = "";
+      for await (const chunk of stream) {
+        parts.push(...(chunk.candidates?.[0]?.content?.parts ?? []));
+        const part = (chunk.candidates?.[0]?.content?.parts ?? [])
+          .filter((p) => typeof p.text === "string" && !p.thought)
+          .map((p) => p.text)
+          .join("");
+        text += part;
+        if (chunk.usageMetadata) roundUsage = chunk.usageMetadata;
+        runaway = watch(part);
+        if (runaway) {
+          stop.abort();
+          break;
+        }
       }
+      usage.input += roundUsage?.promptTokenCount ?? 0;
+      usage.output += roundUsage?.candidatesTokenCount ?? 0;
+      usage.thinking += roundUsage?.thoughtsTokenCount ?? 0;
+      const wanted = parts.filter((p) => p.functionCall);
+      if (runaway || !wanted.length || !input.tools) break;
+      calls += wanted.length;
+      const tools = input.tools;
+      const results = await Promise.all(
+        wanted.map(async (p) => {
+          const call = p.functionCall as NonNullable<Part["functionCall"]>;
+          const output = await tools.run(call.name ?? "", (call.args ?? {}) as Record<string, unknown>);
+          return {
+            functionResponse: {
+              name: call.name,
+              ...(call.id ? { id: call.id } : {}),
+              response: { output: JSON.stringify(output).slice(0, 12_000) },
+            },
+          } satisfies Part;
+        }),
+      );
+      contents.push({ role: "model", parts }, { role: "user", parts: results });
     }
     const ms = Date.now() - started;
     if (runaway) {
@@ -167,12 +228,17 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       );
       return { ok: false, error: "Gemini got stuck repeating itself.", retryable: true };
     }
-    const tokens = {
-      input: usage?.promptTokenCount ?? 0,
-      output: usage?.candidatesTokenCount ?? 0,
-      thinking: usage?.thoughtsTokenCount ?? 0,
-    };
-    console.info(JSON.stringify({ event: "gemini", task: input.task, model: GEMINI_MODEL, ms, ...tokens }));
+    const tokens = usage;
+    console.info(
+      JSON.stringify({
+        event: "gemini",
+        task: input.task,
+        model: GEMINI_MODEL,
+        ms,
+        ...tokens,
+        ...(input.tools ? { calls } : {}),
+      }),
+    );
     if (!text) return { ok: false, error: "Gemini returned an empty answer.", retryable: true };
     let json: unknown;
     try {

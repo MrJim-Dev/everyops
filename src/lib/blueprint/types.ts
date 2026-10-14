@@ -203,6 +203,8 @@ export type LandingView = ViewBase & {
   /** Public unless switched off. */
   public?: boolean;
   blocks: Block[];
+  /** "standard": built from EveryOps's site template (same sections and look for every business). */
+  layout?: "standard";
 };
 /**
  * A page the owner designs entirely in HTML and CSS: a custom landing page, booking or sign-up form, or
@@ -215,6 +217,9 @@ export type HtmlPageView = ViewBase & {
   public?: boolean;
   html?: string;
 };
+
+/** A short titled point: a highlight ("Open until 11 PM") or a step ("Pick a court and time"). */
+export type BlockItem = { title: string; body: string };
 
 /**
  * Pieces of a public page. Text in hero, text and html blocks can be edited in the app (kept in the workspace's
@@ -236,6 +241,20 @@ export type Block =
       limit?: number;
     }
   | { id: string; type: "form"; viewId: string; title?: string }
+  /** Three or four short reasons to choose the business. */
+  | { id: string; type: "highlights"; title?: string; items: BlockItem[] }
+  /** How booking or ordering works, in order. */
+  | { id: string; type: "steps"; title?: string; items: BlockItem[] }
+  /** Where and how to reach the business. */
+  | {
+      id: string;
+      type: "contact";
+      title?: string;
+      phone?: string;
+      email?: string;
+      address?: string;
+      hours?: string;
+    }
   /** Raw HTML, shown in a sandboxed frame so it can't touch the app or visitors' sessions. */
   | { id: string; type: "html"; html: string };
 

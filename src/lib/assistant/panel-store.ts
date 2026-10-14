@@ -22,14 +22,28 @@ export type AssistantTurn = {
   activity?: string[];
   durationMs?: number;
   error?: boolean;
+  /** The person stopped this request before an answer came back. */
+  stopped?: boolean;
+  /** The website section this message was about, e.g. "Hero". */
+  ref?: string;
 };
+
+/** A request on its way: when it started, what it's doing, and the steps reported so far. */
+export type Pending = { startedAt: number; phase: "saving" | "asking"; steps: string[] };
 
 export type ThreadSummary = { id: string; title: string; updatedAt: string; turns: number };
 
 type State = {
   open: boolean;
+  /** Opened or closed from the keyboard (⌘J): switch without animating. */
+  instant: boolean;
   setOpen: (open: boolean) => void;
-  toggle: () => void;
+  toggle: (instant?: boolean) => void;
+  /** Requests in flight per workspace, shared by the panel and the Ask EveryOps page. */
+  pending: Record<string, Pending | undefined>;
+  setPending: (workspaceId: string, pending: Pending | undefined) => void;
+  /** Drops every turn from `length` on, so a failed or stopped request can be sent again. */
+  truncate: (workspaceId: string, length: number) => void;
   /** The conversation open in each workspace. */
   active: Record<string, string>;
   /** Turns by thread id. */
@@ -104,8 +118,17 @@ export const useAssistant = create<State>()((set, get) => {
 
   return {
     open: false,
-    setOpen: (open) => set({ open }),
-    toggle: () => set((s) => ({ open: !s.open })),
+    instant: false,
+    setOpen: (open) => set({ open, instant: false }),
+    toggle: (instant = false) => set((s) => ({ open: !s.open, instant })),
+    pending: {},
+    setPending: (workspaceId, pending) => set((s) => ({ pending: { ...s.pending, [workspaceId]: pending } })),
+    truncate: (workspaceId, length) => {
+      const id = get().active[workspaceId];
+      if (!id) return;
+      set((s) => ({ threads: { ...s.threads, [id]: (s.threads[id] ?? []).slice(0, length) } }));
+      touch(workspaceId, id);
+    },
     active: {},
     threads: {},
     lists: {},

@@ -214,7 +214,10 @@ export const view = z.union([
       .describe("A multi-step form: 2 to 4 steps asking a few fields each"),
     review: z.boolean().optional().describe("With steps: a summary to check before submitting"),
     intro: z.string().optional(),
-    submitLabel: z.string().optional().describe("e.g. Book court"),
+    submitLabel: z
+      .string()
+      .optional()
+      .describe("The button, 2 to 4 words, e.g. Book court. Instructions and payment details go in intro."),
     public: z.boolean().optional().describe("Anyone with the link can submit it (a public booking page)"),
     blocks: z.array(block).optional().describe("Shown with the form, e.g. active payment methods, FAQs"),
     extras: z
@@ -388,6 +391,32 @@ export const design = z.object({
   views: z.array(view),
   widgets: z.array(widget),
   rules: z.array(rule),
+  site: z
+    .object({
+      headline: z
+        .string()
+        .describe("The website's big line: 3 to 7 words about what customers get, not the business name"),
+      intro: z
+        .string()
+        .describe("One or two plain sentences under the headline, under 180 characters, no emoji"),
+      cta: z.string().describe("The main button, 2 to 4 words, e.g. Book a court"),
+      offerTitle: z.string().describe("Heading over what's offered, e.g. Our courts or Rental items"),
+      highlights: z
+        .array(z.object({ title: z.string(), body: z.string() }))
+        .describe(
+          "Exactly 3 true, specific reasons to choose this business, from the brief (title a few words, body one sentence)",
+        ),
+      steps: z
+        .array(z.object({ title: z.string(), body: z.string() }))
+        .describe("3 steps for how a customer books or orders through the website"),
+      contact: z
+        .array(z.object({ kind: z.enum(["phone", "email", "address", "hours"]), value: z.string() }))
+        .describe("Only contact details the brief or files actually give; empty if none"),
+    })
+    .optional()
+    .describe(
+      "The words of the public website. Only when the business has a public form or asked for a website.",
+    ),
   samples: z
     .array(
       z.object({
@@ -458,6 +487,10 @@ export const PUBLIC_PAGES_GUIDE = `Public pages (customers use them without an a
   forms ask for the resource (court) and its time_range field; visitors pick a free slot, double bookings are
   refused. Bookings made publicly carry the guest's details as text fields on the booking (guest name, phone,
   email); a relation to people (players, clients) must not be required.
+- The website (a landing page) always uses EveryOps's standard layout: hero, highlights, what's offered, how it
+  works, payment methods, FAQs and contact, filled in from the data. When designing a workspace, don't add a
+  landing view: write the website's words in site, and EveryOps builds the page. Contact details come only from
+  the brief or files; never invent a phone number or address.
 - A landing page is a landing view (entityId "") made of blocks, top to bottom: hero (heading, subheading,
   ctaLabel, ctaViewId = a public form), text (markdown: about, location, hours), records (live data from a record
   type: fieldIds with the title first, a filter, layout cards, list, table or faq), form (embeds a public form),

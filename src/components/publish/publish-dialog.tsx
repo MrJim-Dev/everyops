@@ -25,7 +25,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { CATEGORIES, type CatalogCategory } from "@/lib/catalog";
 import { describeBlueprint, type PublishedSystem, usePublished } from "@/lib/community/published";
-import { blueprintOf, type Workspace } from "@/lib/store/workspace-model";
+import { blueprintOf, recordCount, type Workspace } from "@/lib/store/workspace-model";
 import {
   CATEGORY_ITEMS,
   guessCategory,
@@ -176,7 +176,7 @@ export function PublishDialog({
               <p>
                 <span className="font-medium">Private:</span>{" "}
                 <span className="text-muted-foreground">
-                  your {workspace.records.length} records, team and history
+                  your {recordCount(workspace)} records, team and history
                 </span>
               </p>
             </div>

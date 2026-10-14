@@ -19,8 +19,15 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   const ws = useWorkspace();
   const [mobileOpen, setMobileOpen] = useState(false);
   const assistantOpen = useAssistant((s) => s.open);
+  const assistantInstant = useAssistant((s) => s.instant);
   const setAssistantOpen = useAssistant((s) => s.setOpen);
   const toggleAssistant = useAssistant((s) => s.toggle);
+  // The panel stays mounted while it slides out, then unmounts.
+  const [assistantMounted, setAssistantMounted] = useState(assistantOpen);
+  useEffect(() => {
+    if (assistantOpen) setAssistantMounted(true);
+    else if (assistantInstant) setAssistantMounted(false);
+  }, [assistantOpen, assistantInstant]);
   const live = ws.mode === "live";
   const rail = useSidebarCollapsed();
   const instant = useSidebar((s) => s.instant);
@@ -39,7 +46,8 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   );
   useHotkey(
     "j",
-    useCallback(() => toggleAssistant(), [toggleAssistant]),
+    // ⌘J is used constantly, so like ⌘B it opens and closes instantly.
+    useCallback(() => toggleAssistant(true), [toggleAssistant]),
     live,
   );
 
@@ -72,7 +80,12 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             </Button>
             <span className="flex-1 truncate text-[13px] font-medium">{ws.name}</span>
             {live ? (
-              <Button variant="ghost" size="icon-sm" aria-label="Open assistant" onClick={toggleAssistant}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Open assistant"
+                onClick={() => toggleAssistant()}
+              >
                 <SparkleIcon />
               </Button>
             ) : null}
@@ -81,11 +94,37 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background md:rounded-lg md:border">
               <RecordPanelsProvider>{children}</RecordPanelsProvider>
             </main>
-            {live && assistantOpen ? (
-              <AssistantPanel
-                onClose={() => setAssistantOpen(false)}
-                className="hidden w-[380px] shrink-0 animate-rise overflow-hidden rounded-lg border md:flex"
-              />
+            {/*
+              Like the sidebar: the frame widens on the drawer curve while the panel inside, at its full width,
+              slides in from the right and fades up, so the page makes room as the panel arrives. Closing runs the
+              same path back. Keyboard toggles skip the motion.
+            */}
+            {live ? (
+              <div
+                inert={!assistantOpen}
+                onTransitionEnd={(e) => {
+                  if (e.target === e.currentTarget && !assistantOpen) setAssistantMounted(false);
+                }}
+                className={cn(
+                  "-ml-2 hidden shrink-0 overflow-clip transition-[width] duration-[280ms] ease-(--ease-drawer) md:block",
+                  assistantOpen ? "w-[388px]" : "w-0",
+                  assistantInstant && "duration-0",
+                )}
+              >
+                {assistantMounted ? (
+                  <div className="h-full w-[388px] pl-2">
+                    <AssistantPanel
+                      onClose={() => setAssistantOpen(false)}
+                      className={cn(
+                        "flex h-full w-[380px] overflow-hidden rounded-lg border will-change-transform",
+                        "transition-[opacity,translate] duration-[280ms] ease-(--ease-drawer) starting:translate-x-8 starting:opacity-0",
+                        assistantOpen ? "translate-x-0 opacity-100" : "translate-x-8 opacity-0 duration-200",
+                        assistantInstant && "duration-0 starting:translate-x-0 starting:opacity-100",
+                      )}
+                    />
+                  </div>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </div>

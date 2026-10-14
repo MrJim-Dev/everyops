@@ -6,7 +6,7 @@ import Link from "next/link";
 import { WorkspaceTile } from "@/components/shell/workspace-tile";
 import { Badge } from "@/components/ui/badge";
 import { formatNumber } from "@/lib/format";
-import type { Role, Workspace } from "@/lib/store/workspace-model";
+import { type Role, recordCount, type Workspace } from "@/lib/store/workspace-model";
 import { ROLE_LABEL } from "./workspace-card";
 import { WorkspaceVisibility } from "./workspace-visibility";
 
@@ -34,7 +34,7 @@ export function WorkspaceRow({ workspace: ws, role }: { workspace: Workspace; ro
           </span>
         </span>
         <span className="hidden w-24 shrink-0 text-right text-[12px] text-muted-foreground tabular lg:inline">
-          {formatNumber(ws.records.length)} records
+          {formatNumber(recordCount(ws))} records
         </span>
         <span className="hidden w-36 shrink-0 text-right text-[12px] text-muted-foreground md:inline">
           Opened {formatDistanceToNowStrict(new Date(ws.openedAt), { addSuffix: true })}
