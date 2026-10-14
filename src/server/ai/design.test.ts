@@ -10,11 +10,13 @@ import { computeAll } from "@/lib/engine/compute";
 import {
   cleanCopy,
   ensurePages,
+  flaggedBy,
   flattenLinks,
   givenIn,
   mergeDateAndSlot,
   pendingOnly,
   repairStructure,
+  restoreDropped,
   shrunk,
   tidy,
 } from "./design";
@@ -369,6 +371,97 @@ describe("pending approval cards", () => {
     bp.views = bp.views.filter((v) => v.type !== "approval_queue");
     pendingOnly(bp);
     expect(bp.widgets[0].filter).toBeUndefined();
+  });
+});
+
+describe("repairs that drop record types or fields", () => {
+  const field = (id: string, name: string) => ({ id, name, type: "text" });
+  const design = (entities: { id: string; name: string; fields: ReturnType<typeof field>[] }[]) => ({
+    entities,
+    samples: entities.map((e) => ({ entityId: e.id, ref: e.id, values: [] })),
+  });
+  const before = design([
+    {
+      id: "employee",
+      name: "Employee",
+      fields: [
+        field("name", "Name"),
+        field("sss_no", "SSS no."),
+        field("tin", "TIN"),
+        field("hired", "Hired"),
+      ],
+    },
+    { id: "payslip", name: "Payslip", fields: [field("label", "Label"), field("net_pay", "Net pay")] },
+    { id: "cash_advance", name: "Cash advance", fields: [field("label", "Label")] },
+  ]);
+
+  it("get back what nothing asked the repair to touch, in its old place", () => {
+    const after = design([
+      { id: "employee", name: "Employee", fields: [field("name", "Name"), field("hired", "Hired")] },
+      { id: "payslip", name: "Payslip", fields: [field("label", "Label"), field("net_pay", "Net pay")] },
+    ]);
+    const out = restoreDropped(before, after, new Set());
+    expect(out.fields).toEqual(["employee.sss_no", "employee.tin"]);
+    expect(out.entities).toEqual(["cash_advance"]);
+    expect(out.design.entities[0].fields.map((f) => f.id)).toEqual(["name", "sss_no", "tin", "hired"]);
+    expect(out.design.samples.map((s) => s.entityId)).toEqual(["employee", "payslip", "cash_advance"]);
+    expect(after.entities).toHaveLength(2);
+  });
+
+  it("stay out when a problem pointed at them, or when they were renamed", () => {
+    const after = design([
+      {
+        id: "employee",
+        name: "Employee",
+        fields: [field("name", "Name"), field("tin_no", "TIN"), field("hired", "Hired")],
+      },
+      { id: "payslip", name: "Payslip", fields: [field("label", "Label")] },
+      { id: "cash_advance", name: "Cash advance", fields: [field("label", "Label")] },
+    ]);
+    const bp = {
+      entities: before.entities.map((e) => ({ ...e, fields: e.fields })),
+    } as unknown as Blueprint;
+    const flagged = flaggedBy(bp, [
+      'entities.1.fields.1: Formula "gross - deductions" is invalid: "gross" is not a field on Payslip',
+      "employee: sss_no must be unique",
+    ]);
+    expect([...flagged].sort()).toEqual(["employee", "employee.sss_no", "payslip", "payslip.net_pay"]);
+    const out = restoreDropped(before, after, flagged);
+    expect(out.fields).toEqual([]);
+    expect(out.entities).toEqual([]);
+  });
+  it("get back the link or the stages a kept field lost", () => {
+    const rel = {
+      id: "period",
+      name: "Dues period",
+      type: "relation",
+      relation: { entityId: "dues_period" },
+    };
+    const status = {
+      id: "status",
+      name: "Status",
+      type: "status",
+      options: [{ id: "unpaid", label: "Unpaid", tone: "warning" }],
+    };
+    type D = Parameters<typeof restoreDropped>[0];
+    const old: D = { entities: [{ id: "bill", name: "Bill", fields: [rel, status] }], samples: [] };
+    const repaired: D = {
+      entities: [
+        {
+          id: "bill",
+          name: "Bill",
+          fields: [
+            { ...rel, relation: undefined, rollup: { childEntityId: "bill", op: "sum" } },
+            { ...status, options: [] },
+          ],
+        },
+      ],
+      samples: [],
+    };
+    const out = restoreDropped(old, repaired, new Set());
+    expect(out.settings).toEqual(["bill.period", "bill.status"]);
+    expect(out.design.entities[0].fields).toEqual([rel, status]);
+    expect(restoreDropped(old, repaired, new Set(["bill.period"])).settings).toEqual(["bill.status"]);
   });
 });
 

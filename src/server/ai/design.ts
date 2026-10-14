@@ -463,6 +463,117 @@ export function pendingOnly(bp: Blueprint): void {
   }
 }
 
+type ShapeField = {
+  id: string;
+  name: string;
+  type: string;
+  relation?: { entityId: string };
+  options?: unknown[];
+  formula?: unknown;
+  rollup?: unknown;
+};
+type Shape = {
+  entities: { id: string; name: string; fields: ShapeField[] }[];
+  samples: { entityId: string }[];
+};
+
+/** The setting a field of each type can't work without. */
+const SETTING: Partial<Record<string, "relation" | "options" | "formula" | "rollup">> = {
+  relation: "relation",
+  select: "options",
+  multi_select: "options",
+  status: "options",
+  formula: "formula",
+  rollup: "rollup",
+};
+
+/**
+ * The record types and fields of a rejected design that its problems point at: by path ("entities.3.fields.2") or by
+ * id in the message. A repair may drop these on purpose, so they aren't put back.
+ */
+export function flaggedBy(bp: Pick<Blueprint, "entities">, errors: string[]): Set<string> {
+  const flagged = new Set<string>();
+  const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9_]+/g) ?? []);
+  for (const error of errors) {
+    const at = /^entities\.(\d+)(?:\.fields\.(\d+))?/.exec(error);
+    const entity = at ? bp.entities[Number(at[1])] : undefined;
+    if (entity) {
+      const field = at?.[2] === undefined ? undefined : entity.fields[Number(at[2])];
+      flagged.add(field ? `${entity.id}.${field.id}` : entity.id);
+    }
+    const said = words(error);
+    for (const e of bp.entities) {
+      if (said.has(e.id)) flagged.add(e.id);
+      for (const f of e.fields) if (f.id.includes("_") && said.has(f.id)) flagged.add(`${e.id}.${f.id}`);
+    }
+  }
+  return flagged;
+}
+
+/**
+ * A repair is asked to change only what its problems need, but Gemini sometimes returns the design with a record
+ * type or a few fields missing that nothing asked it to touch, and the workspace quietly loses them. Those come back
+ * from the previous design (with their samples), in their old place. Left out: anything the problems pointed at, and
+ * a field whose name the repair still has under a new id (it was renamed, not dropped).
+ */
+export function restoreDropped<D extends Shape>(
+  previous: D,
+  next: D,
+  flagged: Set<string>,
+): { design: D; entities: string[]; fields: string[]; settings: string[] } {
+  const entities: string[] = [];
+  const fields: string[] = [];
+  const settings: string[] = [];
+  const nextIds = new Set(next.entities.map((e) => e.id));
+  const out = structuredClone(next);
+  for (const old of previous.entities) {
+    if (!nextIds.has(old.id)) {
+      if (flagged.has(old.id)) continue;
+      out.entities.push(structuredClone(old));
+      out.samples.push(...structuredClone(previous.samples.filter((s) => s.entityId === old.id)));
+      entities.push(old.id);
+      continue;
+    }
+    const now = out.entities.find((e) => e.id === old.id) as D["entities"][number];
+    const ids = new Set(now.fields.map((f) => f.id));
+    const names = new Set(now.fields.map((f) => f.name.trim().toLowerCase()));
+    old.fields.forEach((f, i) => {
+      const key = `${old.id}.${f.id}`;
+      if (flagged.has(key)) return;
+      const kept = now.fields.find((x) => x.id === f.id);
+      if (kept) {
+        // Same field, but the repair lost what makes it work (a link without its record type, a status without its
+        // stages) or swapped it for a setting of another type: the old setting comes back.
+        const setting = SETTING[f.type];
+        if (kept.type !== f.type || !setting || !f[setting]) return;
+        const lost =
+          setting === "relation"
+            ? !kept.relation?.entityId
+            : setting === "options"
+              ? !kept.options?.length
+              : !kept[setting];
+        if (!lost) return;
+        for (const other of ["relation", "options", "formula", "rollup"] as const)
+          if (other !== setting && !f[other]) delete kept[other];
+        Object.assign(kept, { [setting]: structuredClone(f[setting]) });
+        settings.push(key);
+        return;
+      }
+      if (names.has(f.name.trim().toLowerCase())) return;
+      // After the nearest earlier field that's still there, or first.
+      const before = old.fields
+        .slice(0, i)
+        .reverse()
+        .find((x) => ids.has(x.id));
+      const at = before ? now.fields.findIndex((x) => x.id === before.id) + 1 : 0;
+      now.fields.splice(at, 0, structuredClone(f));
+      ids.add(f.id);
+      fields.push(key);
+    });
+  }
+  return { design: out, entities, fields, settings };
+}
+
 /** Problems the generic validator doesn't catch but would break a screen. */
 const RESULT_TYPE: Partial<Record<Field["type"], NonNullable<Field["formula"]>["resultType"]>> = {
   money: "money",
@@ -702,7 +813,7 @@ export async function designWorkspace(
     : context;
   let repairs = 0;
   /** The last whole design that was rejected: repairs start from it, and one that returns only part of it is caught. */
-  let previous: { entities: number; views: number; data: unknown } | null = null;
+  let previous: { entities: number; views: number; data: Design; flagged: Set<string> } | null = null;
   for (let attempt = 0; attempt < 4; attempt++) {
     // Designs take 8–40 s; a stalled call gets a parallel twin after 45 s instead of a minute's wait, and a call
     // that runs away (see runawayWatcher) is stopped within seconds and replaced. Real designs are 2–8k tokens: with
@@ -721,23 +832,41 @@ export async function designWorkspace(
       { hedgeMs: 45_000, attempts: 4 },
     );
     if (!result.ok) return { ok: false, message: result.error };
-    const raw = toBlueprint(result.data);
-    const samples = mergeDateAndSlot(raw, result.data.samples);
-    const name = result.data.workspaceName || workspaceName;
-    const bp = ensurePages(
-      withStandardSite(
-        repairStructure(tidy(raw)),
-        name,
-        result.data.site,
-        fileParts.length ? undefined : brief,
-      ),
-    );
-    const partial = shrunk(previous, bp);
-    const errors = [
-      ...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`),
-      ...extraChecks(bp, brief),
-      ...partial,
-    ];
+    const build = (data: Design) => {
+      const raw = toBlueprint(data);
+      const samples = mergeDateAndSlot(raw, data.samples);
+      const name = data.workspaceName || workspaceName;
+      const bp = ensurePages(
+        withStandardSite(repairStructure(tidy(raw)), name, data.site, fileParts.length ? undefined : brief),
+      );
+      const partial = shrunk(previous, bp);
+      const errors = [
+        ...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`),
+        ...extraChecks(bp, brief),
+        ...partial,
+      ];
+      return { data, samples, name, bp, partial, errors };
+    };
+    let built = build(result.data);
+    if (previous) {
+      // Record types and fields the repair dropped without being asked come back, then the design is checked again.
+      // They stay out if they bring problems the repair alone didn't have.
+      const back = restoreDropped(previous.data, result.data, previous.flagged);
+      if (back.entities.length || back.fields.length || back.settings.length) {
+        const restored = build(back.design);
+        const kept = restored.errors.length <= built.errors.length;
+        console.info(
+          JSON.stringify({
+            event: kept ? "design_repair_restored" : "design_repair_restore_skipped",
+            entities: back.entities,
+            fields: back.fields,
+            settings: back.settings,
+          }),
+        );
+        if (kept) built = restored;
+      }
+    }
+    const { data, samples, name, bp, partial, errors } = built;
     if (!errors.length) {
       // Samples in the wrong year (the right month and day, but 2023) move to this year.
       const dated = samplesThisYear(bp, toRecords(bp, samples, now), now);
@@ -746,15 +875,20 @@ export async function designWorkspace(
       return {
         ok: true,
         name,
-        summary: result.data.summary,
+        summary: data.summary,
         data: { blueprint: bp, records },
       };
     }
     console.warn(JSON.stringify({ event: "design_rejected", attempt, errors: errors.slice(0, 15) }));
     if (!partial.length)
-      previous = { entities: bp.entities.length, views: bp.views.length, data: result.data };
+      previous = {
+        entities: bp.entities.length,
+        views: bp.views.length,
+        data,
+        flagged: flaggedBy(bp, errors),
+      };
     if (++repairs > 2) break;
-    prompt = `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour previous design:\n${JSON.stringify(previous?.data ?? result.data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\nReturn the full corrected design. Change only what these problems need: keep every other record type, field id, view, widget, rule and sample exactly as it was.`;
+    prompt = `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour previous design:\n${JSON.stringify(previous?.data ?? data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\nReturn the full corrected design. Change only what these problems need: keep every other record type, field id, view, widget, rule and sample exactly as it was.`;
   }
   return {
     ok: false,
