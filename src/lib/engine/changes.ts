@@ -280,6 +280,13 @@ function removeField(bp: Blueprint, entityId: string, fieldId: string) {
     if (v.type === "notes" && v.metaFieldIds) v.metaFieldIds = keep(v.metaFieldIds);
   }
   for (const w of bp.widgets) if (w.entityId === entityId && w.list) w.list.fieldIds = keep(w.list.fieldIds);
+  // A duplicate removed beside its original (payment_method_select next to payment_method, a merge): a chart grouped
+  // by the duplicate groups by the original instead of breaking.
+  const original = entity.fields.find((f) => fieldId.startsWith(`${f.id}_`));
+  if (original)
+    for (const w of bp.widgets)
+      if (w.entityId === entityId && w.chart?.groupByFieldId === fieldId)
+        w.chart.groupByFieldId = original.id;
   for (const v of bp.views)
     if ((v.type === "form" || v.type === "landing") && v.blocks)
       for (const b of v.blocks)
@@ -328,7 +335,12 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
     switch (op.op) {
       case "add_field": {
         const entity = next.entities.find((e) => e.id === op.entityId);
-        if (entity && !entity.fields.some((f) => f.id === op.field.id)) entity.fields.push(op.field);
+        if (!entity) break;
+        // An existing id is redefined in place ("make Rider a choice of Jun or Manuel"): the id stays, so views,
+        // filters and record values keep pointing at it. Undo restores the previous blueprint.
+        const at = entity.fields.findIndex((f) => f.id === op.field.id);
+        if (at >= 0) entity.fields[at] = op.field;
+        else entity.fields.push(op.field);
         break;
       }
       case "update_field": {
