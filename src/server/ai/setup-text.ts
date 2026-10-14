@@ -1,4 +1,4 @@
-import type { SetupQuestion } from "@/lib/store/workspace-model";
+import type { AskQuestion, SetupQuestion } from "@/lib/store/workspace-model";
 
 /**
  * The interview may name the community system it built on by id ("built on our canteen-pos system"). Owners know
@@ -39,6 +39,7 @@ export function mergeQuestions(previous: SetupQuestion[], next: SetupQuestion[])
       question: q.question.trim(),
       required: q.required || (!!old?.required && !old.answer.trim()),
       answer: q.answer.trim() || old?.answer.trim() || "",
+      ...(q.options?.length ? { options: q.options } : old?.options?.length ? { options: old.options } : {}),
     });
   }
   // Kept in their old place among the rest would reorder the list the owner sees; they go at the end instead.
@@ -51,11 +52,25 @@ export function openRequired(questions: SetupQuestion[]): SetupQuestion[] {
   return questions.filter((q) => q.required && !q.answer.trim());
 }
 
-/** A reply that asks the open required questions again, for when Gemini wanted to design without them. */
+/** A reply for when Gemini wanted to design without required answers: the questions follow on cards. */
 export function askAgainMessage(open: SetupQuestion[]): string {
-  const list = open
+  return `Almost there. I still need ${open.length === 1 ? "one answer" : "a few answers"} before I build it, so the workspace uses your real details. ${open.length === 1 ? "It's" : "They're"} below.`;
+}
+
+/**
+ * The cards to show this turn: the questions Gemini asked, then any required one still unanswered that it moved on
+ * from (required questions are asked until answered), at most four, required first.
+ */
+export function askList(questions: SetupQuestion[], askedIds: string[]): AskQuestion[] {
+  const key = (id: string) => id.trim().toLowerCase();
+  const asked = new Set(askedIds.map(key));
+  const open = questions.filter((q) => !q.answer.trim());
+  const picked = [
+    ...open.filter((q) => asked.has(key(q.id))),
+    ...open.filter((q) => q.required && !asked.has(key(q.id))),
+  ];
+  return picked
+    .sort((a, b) => Number(b.required) - Number(a.required))
     .slice(0, 4)
-    .map((q, i) => `${i + 1}. ${q.question}`)
-    .join("\n");
-  return `Almost there. I still need ${open.length === 1 ? "one answer" : "a few answers"} before I build it, so the workspace uses your real details:\n\n${list}`;
+    .map((q) => ({ id: q.id, question: q.question, required: q.required, options: q.options ?? [] }));
 }

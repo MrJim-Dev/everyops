@@ -1,19 +1,24 @@
 import "server-only";
 import { attachmentNames, attachmentsIn } from "@/lib/assistant/attachments";
-import type { ChatTurn, SetupQuestion } from "@/lib/store/workspace-model";
+import type { AskQuestion, ChatTurn, SetupQuestion } from "@/lib/store/workspace-model";
 import { promptWithFiles } from "./attachments";
 import { generateJson } from "./gemini";
 import { INTERVIEW_SYSTEM, type Turn, turn } from "./interview-prompt";
 import { referencesText, setupReferences } from "./references";
 import {
   askAgainMessage,
+  askList,
   mergeQuestions,
   openRequired,
   questionsMissing,
   withSystemNames,
 } from "./setup-text";
 
-export type InterviewTurn = Omit<Turn, "questions"> & { questions: SetupQuestion[] };
+export type InterviewTurn = Omit<Turn, "questions"> & {
+  questions: SetupQuestion[];
+  ask: AskQuestion[];
+  suggestions: string[];
+};
 export type InterviewResult = { ok: true; turn: InterviewTurn } | { ok: false; message: string };
 
 const checklistText = (questions: SetupQuestion[]) =>
@@ -74,22 +79,25 @@ export async function interviewTurn(
         // A design without a brief can't be built; ask the model to try again.
         continue;
       }
-      // Announcing questions and then not asking them leaves the owner guessing what the chips answer.
-      if (t.action === "ask" && questionsMissing(t.message) && attempt < 2) continue;
+      const askedNow = t.questions.filter((q) => q.askNow && !q.answer.trim());
+      // Asking without any question to answer (or announcing ones it never gave) leaves the owner stuck.
+      if (t.action === "ask" && !askedNow.length && questionsMissing(t.message) && attempt < 2) continue;
       const questions = mergeQuestions(
         previous,
-        t.questions.map(({ id, question, required, answer }) => ({
+        t.questions.map(({ id, question, required, answer, options }) => ({
           id,
           question: named(question),
           required,
           answer: named(answer),
+          options: options.map(named).filter(Boolean).slice(0, 3),
         })),
       );
       const shaped: InterviewTurn = {
         ...t,
         message: named(t.message),
-        suggestions: t.action === "ask" ? t.suggestions.slice(0, 4) : [],
+        suggestions: [],
         questions,
+        ask: [],
         profile: t.profile.slice(0, 12).map((p) => ({ ...p, value: named(p.value) })),
         plan: t.plan.slice(0, 8).map(named),
       };
@@ -103,15 +111,11 @@ export async function interviewTurn(
           .join(" ")} Set action to "ask" and ask them again, with an example answer for each.`;
         continue;
       }
-      const asked = new Set(t.questions.filter((q) => q.askNow).map((q) => q.id.trim().toLowerCase()));
-      if (t.action === "ask" && open.length && !open.some((q) => asked.has(q.id.toLowerCase()))) {
-        // Required questions are asked until answered; when Gemini moved on without them, they go below its reply.
-        const again = open
-          .slice(0, 3)
-          .map((q, i) => `${i + 1}. ${q.question}`)
-          .join("\n");
-        shaped.message = `${shaped.message.trim()}\n\nI still need these before I can build it:\n\n${again}`;
-      }
+      if (t.action === "ask")
+        shaped.ask = askList(
+          questions,
+          askedNow.map((q) => q.id),
+        );
       return { ok: true, turn: shaped };
     }
     if (!result.retryable) return { ok: false, message: result.error };
@@ -125,6 +129,10 @@ export async function interviewTurn(
         brief: "",
         message: askAgainMessage(held.open),
         suggestions: [],
+        ask: askList(
+          held.turn.questions,
+          held.open.map((q) => q.id),
+        ),
       },
     };
   return { ok: false, message: "Gemini didn't answer in time. Send your message again." };

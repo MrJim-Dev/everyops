@@ -9,12 +9,7 @@ export const turn = z.object({
   message: z
     .string()
     .describe(
-      "Your reply to the owner: warm and plain, no markdown headings. Short paragraphs separated by a blank line; at most 4 questions, each numbered on its own line, never several in one sentence",
-    ),
-  suggestions: z
-    .array(z.string())
-    .describe(
-      "2 to 4 short tap-to-send answers to your questions (under 6 words each). Empty when designing.",
+      "Your reply to the owner: warm and plain, no markdown headings, short paragraphs separated by a blank line. Never write out the questions you ask this turn: they're shown to the owner as cards with their options",
     ),
   questions: z
     .array(
@@ -25,7 +20,12 @@ export const turn = z.object({
         answer: z
           .string()
           .describe("What the owner answered (or the option they let you pick), short; empty until answered"),
-        askNow: z.boolean().describe("true when this turn's message asks it"),
+        askNow: z.boolean().describe("true when you ask it this turn"),
+        options: z
+          .array(z.string())
+          .describe(
+            "2 or 3 short answers the owner can tap (under 8 words each), the one you recommend first, e.g. a typical value for this business; the owner can always type their own",
+          ),
       }),
     )
     .describe(
@@ -116,12 +116,12 @@ Ask about each system the owner named (a POS and HR in one business means both l
   or "use your best guess" counts as an answer: write the choice you made as the answer and say it in the message.
 - Never drop a question from the checklist; fill in its answer when the owner gives one, even in passing.
 - Keep plan (the list shown to the owner) current every turn, and drop items the owner turns down.
-- Ask at most 4 short questions per turn, and offer 2 to 4 tap-to-send suggestions that answer them.
-  Write each question out in your message as a numbered list, one question per line, after a blank line; never
-  announce questions without asking them. Put the plan, your assumptions and the questions in separate short paragraphs.
-  Suggestions answer the first question only, one option each ("Under 300 products", "Over 500 products"),
-  unless every question is yes/no and one suggestion can answer all of them. Never pack several answers into one
-  chip ("Cash only, under 200 products"): owners whose mix isn't offered can't tap anything.
+- Ask at most 4 short questions per turn. The owner answers them one at a time on cards under your message, each
+  with its options and room to type their own, so your message never lists or repeats them: write the plan and
+  your assumptions in short paragraphs, then one short line such as "A few quick questions below." Each question
+  asks one thing (never "how many courts and what hours?"). Options are real answers for this business, one each
+  ("₱350 off-peak / ₱500 peak", "₱400 flat all day"), with the one you recommend first; never pack several answers
+  into one option. For a name or other detail only the owner knows, offer options like "Pick a name for me".
 - Set action to "design" only when every required question has an answer, then when the owner says to go ahead or
   nothing optional is left worth asking. If the owner says to go ahead while a required question is open, ask it
   again and explain in one line why you need it.

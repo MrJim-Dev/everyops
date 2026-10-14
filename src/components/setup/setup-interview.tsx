@@ -30,6 +30,7 @@ import { useFollowBottom } from "@/hooks/use-follow-bottom";
 import { typingMs } from "@/hooks/use-typewriter";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import {
+  type AskQuestion,
   type ChatTurn,
   type ProfileLine,
   type SetupDraft,
@@ -39,6 +40,7 @@ import {
 } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 import { AssistantMessage, UserMessage } from "./messages";
+import { QuestionCard } from "./question-card";
 
 type Phase = "idle" | "thinking" | "designing";
 type Failure = { message: string; retry: () => void };
@@ -132,6 +134,7 @@ type InterviewReply = {
     message: string;
     suggestions: string[];
     questions?: SetupQuestion[];
+    ask?: AskQuestion[];
     profile: ProfileLine[];
     plan?: string[];
     workspaceName: string;
@@ -238,7 +241,8 @@ export function SetupInterview({
       const reply: ChatTurn = {
         role: "assistant",
         text: turn.message,
-        suggestions: turn.action === "ask" ? turn.suggestions : undefined,
+        suggestions: turn.action === "ask" && turn.suggestions.length ? turn.suggestions : undefined,
+        ...(turn.action === "ask" && turn.ask?.length ? { ask: turn.ask } : {}),
         ...(turn.action === "design" ? { brief: turn.brief, workspaceName: turn.workspaceName } : {}),
       };
       const next = [...history, reply];
@@ -287,7 +291,9 @@ export function SetupInterview({
   };
 
   const last = messages.at(-1);
-  const suggestions = !busy && !failure && last?.role === "assistant" ? (last.suggestions ?? []) : [];
+  const waiting = !busy && !failure && last?.role === "assistant";
+  const suggestions = waiting && !last.ask?.length ? (last.suggestions ?? []) : [];
+  const asking = waiting && !draft ? (last.ask ?? []) : [];
 
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_360px]">
@@ -423,6 +429,14 @@ export function SetupInterview({
             }}
             {...files.dropProps}
           >
+            {asking.length ? (
+              <QuestionCard
+                key={messages.length}
+                questions={asking}
+                disabled={busy}
+                onSend={(text) => send(text, false)}
+              />
+            ) : null}
             <InputGroup className="relative h-auto">
               <DropOverlay attachments={files} />
               {files.items.length ? (

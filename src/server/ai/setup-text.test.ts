@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   askAgainMessage,
+  askList,
   mergeQuestions,
   openRequired,
   questionsMissing,
@@ -25,7 +26,8 @@ describe("setup reply text", () => {
 describe("setup checklist", () => {
   const courts = { id: "court_count", question: "How many courts do you have?", required: true, answer: "" };
   const rate = { id: "rate", question: "What do you charge per hour?", required: true, answer: "₱400" };
-  const promo = { id: "promo", question: "Any promos?", required: false, answer: "" };
+  const promo0 = () => ({ id: "promo", question: "Any promos?", required: false, answer: "" });
+  const promo = promo0();
 
   it("keeps questions Gemini dropped and answers it blanked", () => {
     const merged = mergeQuestions([courts, rate], [{ ...rate, answer: "" }, promo]);
@@ -43,7 +45,26 @@ describe("setup checklist", () => {
     expect(openRequired(merged)).toEqual([]);
   });
 
-  it("asks the open required questions again as a numbered list", () => {
-    expect(askAgainMessage([courts])).toMatch(/one answer[\s\S]*\n\n1\. How many courts do you have\?$/);
+  it("puts the asked questions on cards, required first, plus required ones it moved on from", () => {
+    const options = { options: ["₱400 flat all day", "₱350 off-peak / ₱500 peak"] };
+    const name = {
+      id: "name",
+      question: "What's the venue called?",
+      required: true,
+      answer: "Dink District",
+    };
+    const promo = { ...promo0(), ...options };
+    const cards = askList([name, { ...courts, ...options }, promo, rate], ["promo"]);
+    expect(cards.map((q) => q.id)).toEqual(["court_count", "promo"]);
+    expect(cards[0]).toEqual({
+      id: "court_count",
+      question: courts.question,
+      required: true,
+      options: options.options,
+    });
+  });
+
+  it("says the questions are below when it holds a design back", () => {
+    expect(askAgainMessage([courts])).toMatch(/one answer.*It's below\.$/);
   });
 });

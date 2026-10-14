@@ -27,13 +27,23 @@ export type ChatTurn = {
   /** Files the owner sent with this message (stored under their account). */
   attachments?: AttachmentRef[];
   suggestions?: string[];
+  /** The questions this turn asks, answered one at a time on cards under it. */
+  ask?: AskQuestion[];
   /** Set on the turn where Gemini decided to design, so an interrupted design can resume. */
   brief?: string;
   workspaceName?: string;
 };
 export type ProfileLine = { label: string; value: string };
 /** One question on Ask EveryOps's setup checklist. Required ones are asked again until the owner answers them. */
-export type SetupQuestion = { id: string; question: string; required: boolean; answer: string };
+export type SetupQuestion = {
+  id: string;
+  question: string;
+  required: boolean;
+  answer: string;
+  options?: string[];
+};
+/** A question Ask EveryOps asked on a turn, answered on a card with its options or the owner's own words. */
+export type AskQuestion = { id: string; question: string; required: boolean; options: string[] };
 /** A workspace Gemini designed, waiting for the owner to create it. */
 export type SetupDraft = {
   name: string;
