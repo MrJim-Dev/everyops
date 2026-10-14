@@ -33,6 +33,7 @@ import { hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
 import { DESIGN_SYSTEM, type Design, designRequest } from "./design-prompt";
 import { generateJsonHedged } from "./gemini";
+import { withOverviewLayout } from "./overview-layout";
 import { referencesText, setupReferences } from "./references";
 import { fillEmptySamples } from "./samples";
 
@@ -911,11 +912,13 @@ export async function designWorkspace(
       const records = computeAll(bp, dated.records, now);
       // Businesses whose customers book on their own get a custom HTML website and a calendar that suits them.
       withCustomSite(bp, records, name, now);
+      // The Overview becomes a layout of library components; when that step fails the plain dashboard stays.
+      const blueprint = await withOverviewLayout(bp, name, brief, now);
       return {
         ok: true,
         name,
         summary: data.summary,
-        data: { blueprint: bp, records },
+        data: { blueprint, records },
       };
     }
     console.warn(JSON.stringify({ event: "design_rejected", attempt, errors: errors.slice(0, 15) }));
