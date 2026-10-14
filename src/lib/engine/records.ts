@@ -256,12 +256,25 @@ export function updateRecord(
   const record: DataRecord = { ...existing, data, updatedAt: now.toISOString() };
   const replaced = ws.records.map((r) => (r.id === id ? record : r));
   const ruled = runRules(bp, replaced, record, "updated", changed, now);
-  const synced = settle(
+  let synced = settle(
     ruled.records,
     contributions(bp, ws.records, existing, now),
     contributions(bp, ruled.records, ruled.records.find((r) => r.id === id) ?? record, now),
     now,
   );
+  // Line items whose automations read this record (a purchase order received, an order cancelled) follow it.
+  for (const lineType of bp.entities.filter((e) => e.parent?.entityId === existing.entityId)) {
+    const via = lineType.parent?.fieldId ?? "";
+    for (const line of ws.records.filter((r) => r.entityId === lineType.id && r.data[via] === id)) {
+      const current = synced.find((r) => r.id === line.id) ?? line;
+      synced = settle(
+        synced,
+        contributions(bp, ws.records, line, now),
+        contributions(bp, synced, current, now),
+        now,
+      );
+    }
+  }
   const records = computeAll(bp, synced, now);
   const saved = records.find((r) => r.id === id) ?? record;
   return { ok: true, data: { ...ws, records }, record: saved, notices: ruled.notices };

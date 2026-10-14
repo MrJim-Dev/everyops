@@ -527,7 +527,9 @@ Formula language (formula.expr, freezeWhen, filters, rule conditions and values)
 - Status and select values compare against option ids: status == 'done'.
 
 Rules for a valid blueprint:
-- Automations (rules) change other records when something happens. adjust_number adds a formula to a number
+- Automations (rules) change other records when something happens. Totals records move (stock from deliveries,
+  sales and stock movements; balances; leave days) are also connected automatically when a record type links to
+  the record with the total and has a quantity or amount, so a missing one gets added. adjust_number adds a formula to a number
   field: on the record itself (target self) or on a linked one (target relation with the link's fieldId). Always
   set fieldId to the field it changes and delta to what it adds: receiving stock on a Stock Delivery with product
   and quantity is trigger created on the delivery, target relation product, fieldId stock, delta quantity (or

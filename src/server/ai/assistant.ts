@@ -22,6 +22,7 @@ import type {
   Widget,
 } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
+import { requestGuide } from "@/lib/catalog/playbooks";
 import { widgetValue } from "@/lib/engine/aggregate";
 import {
   applyOps,
@@ -33,6 +34,7 @@ import {
   type RecordOp,
   type TeamOp,
 } from "@/lib/engine/changes";
+import { impliedRules, misplacedStock, replaceableRules } from "@/lib/engine/implied-rules";
 import { metricFormatter } from "@/lib/engine/metric-format";
 import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
@@ -995,7 +997,7 @@ ${digest}${
 Looked up just now for this message (exact, from the database):
 ${looked}`
     : ""
-}
+}${requestGuide(input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")}
 
 Conversation:
 ${input.messages
@@ -1073,7 +1075,6 @@ ${input.messages
     const design = toDesignOps(bp, a.plan.ops, a.plan.renames, a.plan.formulas, input.workspaceName);
     // Operations that fit no shape were set aside; Gemini gets them back to fix with the rest of the plan.
     const errors = [...setAside, ...design.errors];
-    errors.push(...unbackedRuleSteps(a.plan.steps, design.ops));
     if (design.ops.length && !input.canDesign)
       errors.push("This person can't change the design; plan data changes only or explain who can.");
     if (design.ops.length)
@@ -1084,7 +1085,34 @@ ${input.messages
         // "A multistep booking form": a form the plan touches gets steps even when Gemini left them out.
         /multi[\s-]?step|in steps|step[\s-]by[\s-]step|wizard/i.test(input.messages.at(-1)?.text ?? ""),
       );
-    const next = design.ops.length ? applyOps(bp, design.ops) : bp;
+    let next = design.ops.length ? applyOps(bp, design.ops) : bp;
+    // An automation Gemini got wrong that EveryOps can work out itself is replaced, not sent back.
+    const replace = design.ops.length
+      ? replaceableRules(
+          bp,
+          next,
+          design.ops.flatMap((op) => (op.op === "add_rule" ? [op.rule.id] : [])),
+        )
+      : [];
+    if (replace.length) {
+      const kept = design.ops.filter((op) => !(op.op === "add_rule" && replace.includes(op.rule.id)));
+      design.ops.splice(0, design.ops.length, ...kept);
+      next = applyOps(bp, design.ops);
+    }
+    // What the request implies but the plan left out: receiving stock raises it, selling lowers it, approved leave
+    // takes days off the balance. Added as automations and shown on the card, so the owner sees what got connected.
+    const implied = design.ops.length ? impliedRules(bp, next) : [];
+    if (implied.length) {
+      design.ops.push(...implied.map(({ rule }) => ({ op: "add_rule" as const, rule })));
+      next = applyOps(bp, design.ops);
+    }
+    // A step that says an automation changes needs an operation behind it (the implied ones count).
+    errors.push(...unbackedRuleSteps(a.plan.steps, design.ops));
+    // "Add stock management" in a workspace that sells means stock on what it sells.
+    const stockNote = design.ops.length
+      ? misplacedStock(bp, next, input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")
+      : undefined;
+    if (stockNote) errors.push(stockNote);
     embedForms(next, records, design.ops, errors);
     errors.push(...unanswerable(next, design.ops));
     const before = new Set(validateBlueprint(bp).map((e) => `${e.path} ${e.message}`));
@@ -1147,7 +1175,10 @@ ${input.messages
           baseVersion: bp.version,
           title: a.plan.title || "Workspace change",
           facts: facts.slice(0, 6),
-          steps: a.plan.steps.slice(0, 10),
+          steps: [
+            ...a.plan.steps.slice(0, Math.max(0, 10 - implied.length)),
+            ...implied.map(({ label, detail }) => ({ kind: "add" as const, label, detail })),
+          ],
           ops: design.ops,
           recordOps: recordPart.ops,
           ...(docOps.length ? { docOps } : {}),
