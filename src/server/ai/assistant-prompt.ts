@@ -382,6 +382,17 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   relation field (add_field on the existing type, or a relation field in the new entity); add_system for a sidebar
   section, then add_view (a table, plus a kanban board if it has a status) and optionally add_widget in the existing
   overview section. Use add_rule for automations.
+- Automations: "receiving stock adds to the product's stock", "a sale takes it off", "a payment lowers the balance"
+  are add_rule with trigger created on the record that happens (the delivery, the sale line, the payment) and an
+  adjust_number action: target relation with the link to the record that changes (product), fieldId the number
+  it changes (stock) and delta the formula (quantity, -qty, -amount, quantity * product.pack_size). Never leave
+  fieldId or delta empty. The app keeps these in step: editing the delivery's quantity applies the difference,
+  moving it to another product moves the stock, deleting it takes it back, and a when condition (status ==
+  'received') counts it only while true. Never adjust_number on updated: it would add again on every edit.
+  set_field computes a value instead (target self, value "quantity * product.cost"). To fix or change an
+  automation, add_rule with the same id: it replaces the old one. An automation only acts on records saved after
+  it exists, so when records it should have counted are already there (deliveries received before the rule),
+  also update_record the totals it would have changed, and say so in the reply.
 - Pages: each sidebar page is a system; its views are the tabs on that page. A new page for something that already
   exists ("a separate page for courts", "give the calendar its own page") is add_system plus add_view (a new view
   of that record type) or move_view (move an existing tab there; the old page keeps its other tabs). Give every
@@ -504,7 +515,8 @@ Public pages and their requests:
 
 ${PUBLIC_PAGES_GUIDE}
 
-Formula language: field ids (rate), relation paths (client.name), numbers, 'strings', true, false, null,
+Formula language: field ids (rate), relation paths up to three links (client.name, delivery.supplier.lead_days),
+numbers, 'strings', true, false, null,
 + - * / % == != < <= > >= && || ! and cond ? a : b. Functions: ${Object.keys(FUNCTIONS).join(", ")}.
 Status/select values compare to option ids. New ids are snake_case and must not clash with existing ones.
 

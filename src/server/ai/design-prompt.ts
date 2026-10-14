@@ -518,15 +518,22 @@ roster) may follow the brief: the brief decides what to build, and the files sup
 sample records (use every menu item or price they show, up to 40 records per record type).
 
 Formula language (formula.expr, freezeWhen, filters, rule conditions and values):
-- Field references by id on the same record (rate, qty); through a relation field: player.member, product.price.
-  One link only: product.price works, product.category.name and crew_member.position.daily_rate don't. When a
-  formula needs a value two links away, give the record its own link (or a formula field) one step away.
+- Field references by id on the same record (rate, qty); through relation fields, up to three links:
+  product.price, delivery.supplier.lead_days, crew_member.position.daily_rate. Every part before the last must be
+  a relation field.
 - Numbers, 'strings', true, false, null. Operators: + - * / % == != < <= > >= && || ! and cond ? a : b.
 - Functions: ${Object.keys(FUNCTIONS).join(", ")}. hour/weekday read Asia/Manila time (weekday 0 = Sunday);
   duration_hours(range) and days(range) measure time ranges; is_today, is_this_month, is_upcoming test dates.
 - Status and select values compare against option ids: status == 'done'.
 
 Rules for a valid blueprint:
+- Automations (rules) change other records when something happens. adjust_number adds a formula to a number
+  field: on the record itself (target self) or on a linked one (target relation with the link's fieldId). Always
+  set fieldId to the field it changes and delta to what it adds: receiving stock on a Stock Delivery with product
+  and quantity is trigger created on the delivery, target relation product, fieldId stock, delta quantity (or
+  quantity * product.pack_size); a sale line is delta -qty. Use trigger created for these: the app keeps them in
+  step when the record is edited or deleted, and a when condition (status == 'received') makes it count only
+  while true. Never adjust_number on updated (it would count again on every edit).
 - Every id referenced (fields, entities, views, widgets, options) must exist. Ids are snake_case.
 - Each record type has a primary field (a text field) and only the fields it needs.
 - select, multi_select and status fields need options. Use status for workflows (kanban boards, approvals).

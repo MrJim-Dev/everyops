@@ -1073,6 +1073,7 @@ ${input.messages
     const design = toDesignOps(bp, a.plan.ops, a.plan.renames, a.plan.formulas, input.workspaceName);
     // Operations that fit no shape were set aside; Gemini gets them back to fix with the rest of the plan.
     const errors = [...setAside, ...design.errors];
+    errors.push(...unbackedRuleSteps(a.plan.steps, design.ops));
     if (design.ops.length && !input.canDesign)
       errors.push("This person can't change the design; plan data changes only or explain who can.");
     if (design.ops.length)
@@ -1441,4 +1442,22 @@ function fixOpNames(json: unknown): unknown {
     else o.op = name;
   }
   return json;
+}
+
+/**
+ * The card's steps are Gemini's own words, so a plan could say "Delivery automation rule: formula changed" without an
+ * operation that changes it; it then showed as applied while the automation stayed the same. A step about an
+ * automation needs an add_rule (which replaces the one with the same id) or a remove_rule behind it.
+ */
+export function unbackedRuleSteps(
+  steps: { label: string; detail?: string }[],
+  ops: { op: string }[],
+): string[] {
+  if (ops.some((o) => o.op === "add_rule" || o.op === "remove_rule")) return [];
+  const claimed = steps.find((s) => /\bautomations?\b|\brule\b/i.test(`${s.label} ${s.detail ?? ""}`));
+  return claimed
+    ? [
+        `Step "${claimed.label}" changes an automation, but no operation does: add_rule with the automation's id and the complete new rule (trigger, and actions with target, fieldId and delta) replaces it.`,
+      ]
+    : [];
 }

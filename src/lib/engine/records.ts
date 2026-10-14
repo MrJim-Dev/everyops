@@ -15,6 +15,7 @@ import { computeAll } from "./compute";
 import { recordContext } from "./context";
 import { run, truthy } from "./expr";
 import { newId } from "./ids";
+import { completeAction } from "./rule-repair";
 
 export type FieldError = { fieldId?: string; message: string };
 
@@ -117,7 +118,10 @@ function runRules(
     if (!matches(rule, record, event, changed)) continue;
     const ctx = recordContext(bp, entity, record.data, rows, now);
     if (rule.when && !truthy(run(rule.when, ctx))) continue;
-    for (const action of rule.actions) {
+    for (const raw of rule.actions) {
+      // Saved automations with the stock field or amount left blank still do what their name says.
+      const action = completeAction(bp, rule, raw);
+      if (!action) continue;
       if (action.type === "notify") {
         notices.push(template(action.message, record.data));
         continue;
@@ -140,6 +144,66 @@ function runRules(
     }
   }
   return { records: rows, notices };
+}
+
+type Contribution = { targetId: string; fieldId: string; amount: number };
+
+/**
+ * What a record adds to linked records through its "when created" adjust rules: a delivery's quantity on its
+ * product's stock, a sale line's -qty. These stay in step with the record: an edit applies the difference (or
+ * moves it when the link changes, or starts once a "when" condition becomes true) and a delete takes it back.
+ */
+function contributions(bp: Blueprint, records: DataRecord[], record: DataRecord, now: Date): Contribution[] {
+  const entity = bp.entities.find((e) => e.id === record.entityId);
+  if (!entity) return [];
+  const out: Contribution[] = [];
+  for (const rule of bp.rules) {
+    if (rule.trigger.event !== "created" || rule.trigger.entityId !== record.entityId) continue;
+    const ctx = recordContext(bp, entity, record.data, records, now);
+    if (rule.when && !truthy(run(rule.when, ctx))) continue;
+    for (const raw of rule.actions) {
+      const action = completeAction(bp, rule, raw);
+      if (action?.type !== "adjust_number" || action.target.kind !== "relation") continue;
+      const targetId = record.data[action.target.fieldId];
+      if (typeof targetId !== "string") continue;
+      out.push({ targetId, fieldId: action.fieldId, amount: Number(run(action.delta, ctx)) || 0 });
+    }
+  }
+  return out;
+}
+
+/** Applies the net change between what records added before and what they add now. */
+function settle(rows: DataRecord[], before: Contribution[], after: Contribution[], now: Date): DataRecord[] {
+  const net = new Map<string, { targetId: string; fieldId: string; amount: number }>();
+  const add = (c: Contribution, sign: number) => {
+    const key = `${c.targetId}\u0000${c.fieldId}`;
+    const entry = net.get(key) ?? { targetId: c.targetId, fieldId: c.fieldId, amount: 0 };
+    entry.amount += sign * c.amount;
+    net.set(key, entry);
+  };
+  for (const c of before) add(c, -1);
+  for (const c of after) add(c, 1);
+  const changes = [...net.values()].filter((c) => Math.abs(c.amount) > 1e-9);
+  if (!changes.length) return rows;
+  return rows.map((row) => {
+    const mine = changes.filter((c) => c.targetId === row.id);
+    if (!mine.length) return row;
+    const data = { ...row.data };
+    for (const c of mine)
+      data[c.fieldId] = Math.round(((Number(data[c.fieldId]) || 0) + c.amount) * 100) / 100;
+    return { ...row, data, updatedAt: now.toISOString() };
+  });
+}
+
+/** Removes records and takes back what their automations added to the records that remain. */
+function withdraw(bp: Blueprint, records: DataRecord[], gone: ReadonlySet<string>, now: Date): DataRecord[] {
+  const before = records.filter((r) => gone.has(r.id)).flatMap((r) => contributions(bp, records, r, now));
+  return settle(
+    records.filter((r) => !gone.has(r.id)),
+    before,
+    [],
+    now,
+  );
 }
 
 /* ---------- Mutations ---------- */
@@ -192,7 +256,13 @@ export function updateRecord(
   const record: DataRecord = { ...existing, data, updatedAt: now.toISOString() };
   const replaced = ws.records.map((r) => (r.id === id ? record : r));
   const ruled = runRules(bp, replaced, record, "updated", changed, now);
-  const records = computeAll(bp, ruled.records, now);
+  const synced = settle(
+    ruled.records,
+    contributions(bp, ws.records, existing, now),
+    contributions(bp, ruled.records, ruled.records.find((r) => r.id === id) ?? record, now),
+    now,
+  );
+  const records = computeAll(bp, synced, now);
   const saved = records.find((r) => r.id === id) ?? record;
   return { ok: true, data: { ...ws, records }, record: saved, notices: ruled.notices };
 }
@@ -200,12 +270,16 @@ export function updateRecord(
 /** Deletes a record and any line items that belong to it. */
 export function deleteRecord(ws: WorkspaceData, id: string, now: Date = new Date()): WorkspaceData {
   const childEntities = ws.blueprint.entities.filter((e) => e.parent);
-  const remaining = ws.records.filter((r) => {
-    if (r.id === id) return false;
-    const parent = childEntities.find((e) => e.id === r.entityId)?.parent;
-    return !(parent && r.data[parent.fieldId] === id);
-  });
-  return { ...ws, records: computeAll(ws.blueprint, remaining, now) };
+  const gone = new Set(
+    ws.records
+      .filter((r) => {
+        if (r.id === id) return true;
+        const parent = childEntities.find((e) => e.id === r.entityId)?.parent;
+        return !!parent && r.data[parent.fieldId] === id;
+      })
+      .map((r) => r.id),
+  );
+  return { ...ws, records: computeAll(ws.blueprint, withdraw(ws.blueprint, ws.records, gone, now), now) };
 }
 
 /**
@@ -248,11 +322,28 @@ export function applyRecordOps(ws: WorkspaceData, ops: RecordOp[], now: Date = n
   const replaced: DataRecord[] = [];
   const removed: DataRecord[] = [];
   const errors: string[] = [];
+  // Records an op's automations changed (a product's stock) come back on undo too.
+  const track = (prev: DataRecord[], next: DataRecord[]) => {
+    const old = new Map(prev.map((r) => [r.id, r]));
+    for (const r of next) {
+      const was = old.get(r.id);
+      if (
+        was &&
+        was !== r &&
+        JSON.stringify(was.data) !== JSON.stringify(r.data) &&
+        !created.includes(r.id) &&
+        !replaced.some((x) => x.id === r.id)
+      )
+        replaced.push(was);
+    }
+  };
   for (const op of ops) {
+    const prev = data.records;
     if (op.op === "create_record") {
       const result = createRecord(data, op.entityId, op.data, now, op.id);
       if (result.ok) {
         data = result.data;
+        track(prev, data.records);
         created.push(result.record.id);
       } else errors.push(`New ${op.entityId}: ${result.errors.map((e) => e.message).join("; ")}`);
     } else if (op.op === "delete_record") {
@@ -277,19 +368,14 @@ export function applyRecordOps(ws: WorkspaceData, ops: RecordOp[], now: Date = n
         if (gone.has(r.id) && !created.includes(r.id)) removed.push(replaced.find((x) => x.id === r.id) ?? r);
       data = {
         ...data,
-        records: computeAll(
-          data.blueprint,
-          data.records.filter((r) => !gone.has(r.id)),
-          now,
-        ),
+        records: computeAll(data.blueprint, withdraw(data.blueprint, data.records, gone, now), now),
       };
+      track(prev, data.records);
     } else {
-      const before = findRecord(data.records, op.recordId);
       const result = updateRecord(data, op.recordId, op.patch, now);
       if (result.ok) {
         data = result.data;
-        if (before && !created.includes(before.id) && !replaced.some((r) => r.id === before.id))
-          replaced.push(before);
+        track(prev, data.records);
       } else errors.push(`${op.recordId}: ${result.errors.map((e) => e.message).join("; ")}`);
     }
   }

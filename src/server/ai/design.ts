@@ -181,7 +181,8 @@ export function toRule(r: Design["rules"][number]): Rule {
           : {
               type: "adjust_number" as const,
               target: target(a.target),
-              fieldId: a.fieldId ?? "",
+              // Gemini sometimes names the field it changes in value ("value": "stock").
+              fieldId: a.fieldId ?? (a.value && /^[a-z_][a-z0-9_]*$/.test(a.value) ? a.value : ""),
               delta: a.delta ?? "0",
             },
     ),
