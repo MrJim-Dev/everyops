@@ -41,6 +41,7 @@ export function PublicFormView({
   const [website, setWebsite] = useState("");
   const [step, setStep] = useState(0);
   const [extras, setExtras] = useState<Record<string, number>>({});
+  const [quote, setQuote] = useState<{ name: string; text: string }[] | null>(null);
   const set = (id: string, v: FieldValue) => {
     setValues((s) => ({ ...s, [id]: v }));
     setErrors((e) => ({ ...e, [id]: "" }));
@@ -64,6 +65,33 @@ export function PublicFormView({
         ]),
     );
   const stepOf = (fieldId: string) => steps?.findIndex((s) => s.fieldIds.includes(fieldId)) ?? -1;
+
+  // What it comes to, on the payment step and the review (or under a one-page form): worked out by the server from
+  // the answers so far, the same way a real booking is, and never saved.
+  const priced = !!booking || !!form.extras;
+  const wantsQuote =
+    priced && !preview && (!steps || reviewing || /pay/i.test(steps[step]?.title ?? "") || last);
+  useEffect(() => {
+    if (!wantsQuote) return setQuote(null);
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      fetch(`/api/public/${slug}/${form.viewId}/quote`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ values, extras }),
+        signal: controller.signal,
+      })
+        .then((res) => res.json())
+        .then((body: { ok: boolean; lines?: { name: string; text: string }[] }) =>
+          setQuote(body.ok && body.lines?.length ? body.lines : null),
+        )
+        .catch(() => {});
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [wantsQuote, slug, form.viewId, values, extras]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -162,6 +190,11 @@ export function PublicFormView({
         </div>
       ) : null}
       {steps && !reviewing && steps[step].blocks?.length && renderBlocks ? (
+        quote ? (
+          <AmountDue lines={quote} />
+        ) : null
+      ) : null}
+      {steps && !reviewing && steps[step].blocks?.length && renderBlocks ? (
         <div className="flex flex-col gap-6">{renderBlocks(steps[step].blocks ?? [])}</div>
       ) : null}
       {reviewing && steps ? (
@@ -197,6 +230,7 @@ export function PublicFormView({
           ) : null}
         </dl>
       ) : null}
+      {quote && (reviewing || !steps || !steps[step]?.blocks?.length) ? <AmountDue lines={quote} /> : null}
       {form.fields.map((f) => {
         if (reviewing || (shown && !shown.has(f.id))) return null;
         if (booking && f.id === booking.timeFieldId) return null;
@@ -296,6 +330,28 @@ export function PublicFormView({
 
 const isEmpty = (v: FieldValue | undefined) =>
   v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0);
+
+/** The money lines of a booking before it's sent; the last one is what's due. */
+function AmountDue({ lines }: { lines: { name: string; text: string }[] }) {
+  return (
+    <dl className="flex flex-col gap-1 rounded-lg border bg-muted/30 px-3.5 py-3 text-[13.5px]">
+      {lines.map((l, i) => (
+        <div
+          key={l.name}
+          className={cn(
+            "flex justify-between gap-4",
+            i === lines.length - 1 && lines.length > 1 && "mt-1 border-t pt-2 font-medium",
+          )}
+        >
+          <dt className={cn(i === lines.length - 1 ? "text-foreground" : "text-muted-foreground")}>
+            {i === lines.length - 1 ? `Amount due · ${l.name}` : l.name}
+          </dt>
+          <dd className="font-mono tabular">{l.text}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 /** A visitor's answer as text for the review step. */
 function summaryText(
