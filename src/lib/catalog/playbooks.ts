@@ -45,8 +45,8 @@ export const BUILD_PRINCIPLES = `- Lists the business will add to, rename or ret
   types, leave types, departments and positions, branches, suppliers, channels and sources. Give each a name (the
   primary field), an active checkbox (pickers and public forms show active == true), an order number when order
   matters, and the values it carries (price, rate, duration, budget, credits) so amounts read them through the link
-  (service.price) instead of being typed again. Formulas reach one link away (position.rate, never
-  position.department.name): when a record needs a value two links away, link it directly too.
+  (service.price) instead of being typed again. Formulas reach up to three links (position.rate,
+  position.department.name, delivery.supplier.lead_days).
 - Short fixed choices that only change with the design are select fields: payment type, priority, unit of measure,
   channel of a ticket, yes/no style choices.
 - Everything that moves through work has a status field with its whole lifecycle in order: the first option is
@@ -101,4 +101,27 @@ export function matchPlaybooks(text: string): Playbook[] {
     if (!p.unless?.some((id) => chosen.some((c) => c.id === id))) chosen.push(p);
   }
   return chosen;
+}
+
+/**
+ * What a request for a whole area usually involves ("add stock management" is items with stock, receiving, stock
+ * movements and the automations between them), from the same playbooks setup builds from, so an edit gets the same
+ * judgment as a new workspace instead of building only the words. Empty when nothing matches.
+ */
+export function requestGuide(request: string): string {
+  // Only requests for something new; renaming, moving or tweaking what exists needs no checklist.
+  const wantsNew =
+    /\b(add|create|set ?up|build|make|track|manage|need|want|start|include|enable|implement|introduce|integrate)\b/i.test(
+      request,
+    ) &&
+    !/^\s*(please\s+)?(rename|move|reorder|change|edit|update|fix|delete|remove|hide|show|sort|filter)\b/i.test(
+      request,
+    );
+  if (!wantsNew) return "";
+  const playbooks = matchPlaybooks(request).slice(0, 2);
+  if (!playbooks.length) return "";
+  return `
+
+What this request usually involves (build the parts this workspace needs, connected to what it already has):
+${playbooks.map((p) => `${p.name}:\n${p.needs}`).join("\n\n")}`;
 }

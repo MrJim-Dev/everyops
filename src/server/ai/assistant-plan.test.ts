@@ -6,7 +6,8 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import type { ChangeOp } from "@/lib/engine/changes";
 import { applyOps } from "@/lib/engine/changes";
-import { embedForms, openUpPublicForms, setAsideBadOps, unanswerable } from "./assistant";
+import { embedForms, openUpPublicForms, setAsideBadOps, unanswerable, unbackedRuleSteps } from "./assistant";
+import { toRule } from "./design";
 
 describe("assistant plans", () => {
   it("sets aside an operation that fits no shape instead of failing the whole answer", () => {
@@ -241,5 +242,33 @@ describe("assistant plans", () => {
     openUpPublicForms(bp, ops);
     const after = applyOps(bp, ops).views.find((v) => v.id === form.id);
     expect(after?.type === "form" && after.public).toBe(true);
+  });
+});
+
+describe("automation changes", () => {
+  it("sends back a plan whose steps change an automation that no operation changes", () => {
+    const steps = [
+      { label: "Delivery automation rule", detail: "Formula changed to quantity * product.pack_size" },
+    ];
+    expect(unbackedRuleSteps(steps, [{ op: "add_field" }])[0]).toMatch(/no operation does: add_rule/);
+    expect(unbackedRuleSteps(steps, [{ op: "add_rule" }])).toEqual([]);
+    expect(unbackedRuleSteps([{ label: "House rules section", detail: "New FAQ" }], [])).toEqual([]);
+  });
+
+  it("reads the changed field when Gemini puts it in value", () => {
+    const rule = toRule({
+      id: "add_stock_on_delivery",
+      name: "Add stock on delivery",
+      trigger: { entityId: "stock_delivery", event: "created" },
+      actions: [
+        {
+          type: "adjust_number",
+          target: { kind: "relation", fieldId: "product" },
+          value: "stock",
+          delta: "quantity * product.pack_size",
+        },
+      ],
+    });
+    expect(rule.actions[0]).toMatchObject({ fieldId: "stock", delta: "quantity * product.pack_size" });
   });
 });

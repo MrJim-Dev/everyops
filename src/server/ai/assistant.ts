@@ -22,6 +22,7 @@ import type {
   Widget,
 } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
+import { requestGuide } from "@/lib/catalog/playbooks";
 import { widgetValue } from "@/lib/engine/aggregate";
 import {
   applyOps,
@@ -33,6 +34,7 @@ import {
   type RecordOp,
   type TeamOp,
 } from "@/lib/engine/changes";
+import { impliedRules, misplacedStock, replaceableRules } from "@/lib/engine/implied-rules";
 import { metricFormatter } from "@/lib/engine/metric-format";
 import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
@@ -995,7 +997,7 @@ ${digest}${
 Looked up just now for this message (exact, from the database):
 ${looked}`
     : ""
-}
+}${requestGuide(input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")}
 
 Conversation:
 ${input.messages
@@ -1083,7 +1085,34 @@ ${input.messages
         // "A multistep booking form": a form the plan touches gets steps even when Gemini left them out.
         /multi[\s-]?step|in steps|step[\s-]by[\s-]step|wizard/i.test(input.messages.at(-1)?.text ?? ""),
       );
-    const next = design.ops.length ? applyOps(bp, design.ops) : bp;
+    let next = design.ops.length ? applyOps(bp, design.ops) : bp;
+    // An automation Gemini got wrong that EveryOps can work out itself is replaced, not sent back.
+    const replace = design.ops.length
+      ? replaceableRules(
+          bp,
+          next,
+          design.ops.flatMap((op) => (op.op === "add_rule" ? [op.rule.id] : [])),
+        )
+      : [];
+    if (replace.length) {
+      const kept = design.ops.filter((op) => !(op.op === "add_rule" && replace.includes(op.rule.id)));
+      design.ops.splice(0, design.ops.length, ...kept);
+      next = applyOps(bp, design.ops);
+    }
+    // What the request implies but the plan left out: receiving stock raises it, selling lowers it, approved leave
+    // takes days off the balance. Added as automations and shown on the card, so the owner sees what got connected.
+    const implied = design.ops.length ? impliedRules(bp, next) : [];
+    if (implied.length) {
+      design.ops.push(...implied.map(({ rule }) => ({ op: "add_rule" as const, rule })));
+      next = applyOps(bp, design.ops);
+    }
+    // A step that says an automation changes needs an operation behind it (the implied ones count).
+    errors.push(...unbackedRuleSteps(a.plan.steps, design.ops));
+    // "Add stock management" in a workspace that sells means stock on what it sells.
+    const stockNote = design.ops.length
+      ? misplacedStock(bp, next, input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")
+      : undefined;
+    if (stockNote) errors.push(stockNote);
     embedForms(next, records, design.ops, errors);
     errors.push(...unanswerable(next, design.ops));
     const before = new Set(validateBlueprint(bp).map((e) => `${e.path} ${e.message}`));
@@ -1146,7 +1175,10 @@ ${input.messages
           baseVersion: bp.version,
           title: a.plan.title || "Workspace change",
           facts: facts.slice(0, 6),
-          steps: a.plan.steps.slice(0, 10),
+          steps: [
+            ...a.plan.steps.slice(0, Math.max(0, 10 - implied.length)),
+            ...implied.map(({ label, detail }) => ({ kind: "add" as const, label, detail })),
+          ],
           ops: design.ops,
           recordOps: recordPart.ops,
           ...(docOps.length ? { docOps } : {}),
@@ -1441,4 +1473,22 @@ function fixOpNames(json: unknown): unknown {
     else o.op = name;
   }
   return json;
+}
+
+/**
+ * The card's steps are Gemini's own words, so a plan could say "Delivery automation rule: formula changed" without an
+ * operation that changes it; it then showed as applied while the automation stayed the same. A step about an
+ * automation needs an add_rule (which replaces the one with the same id) or a remove_rule behind it.
+ */
+export function unbackedRuleSteps(
+  steps: { label: string; detail?: string }[],
+  ops: { op: string }[],
+): string[] {
+  if (ops.some((o) => o.op === "add_rule" || o.op === "remove_rule")) return [];
+  const claimed = steps.find((s) => /\bautomations?\b|\brule\b/i.test(`${s.label} ${s.detail ?? ""}`));
+  return claimed
+    ? [
+        `Step "${claimed.label}" changes an automation, but no operation does: add_rule with the automation's id and the complete new rule (trigger, and actions with target, fieldId and delta) replaces it.`,
+      ]
+    : [];
 }
