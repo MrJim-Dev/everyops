@@ -36,6 +36,7 @@ import {
 import { metricFormatter } from "@/lib/engine/metric-format";
 import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
+import { registerFields } from "@/lib/engine/register";
 import { formSnippet } from "@/lib/public/html-page";
 import { isPublic, publicFieldsOf, publicForm } from "@/lib/public/resolve";
 import { copyFromBlocks, mainForm, standardBlocks } from "@/lib/public/site-template";
@@ -402,7 +403,11 @@ function toDesignOps(
           );
           break;
         }
-        if (view && fieldIds?.length && !["table", "kanban", "approval_queue", "form"].includes(view.type)) {
+        if (
+          view &&
+          fieldIds?.length &&
+          !["table", "kanban", "approval_queue", "form", "checkout"].includes(view.type)
+        ) {
           errors.push(`${at}: a ${view.type} view has no columns to order`);
           break;
         }
@@ -963,7 +968,14 @@ ${bp.systems
                   ? isPublic(v)
                     ? ", public"
                     : ", team only"
-                  : "";
+                  : v.type === "checkout"
+                    ? // What the Register really shows, so "where do I pick the branch" gets a true answer.
+                      `, the register asks: products, payment method${registerFields(bp, v)
+                        .map(
+                          ({ field }) => `, ${field.name} (${field.id}${field.required ? ", required" : ""})`,
+                        )
+                        .join("")}${v.fieldIds?.length ? `, fieldIds: ${JSON.stringify(v.fieldIds)}` : ""}`
+                    : "";
             return `${v.name} (${v.id}, ${v.type}${v.entityId ? ` of ${v.entityId}` : ""}${extra})`;
           }),
           ...(s.widgetIds.length ? [`${s.widgetIds.length} dashboard widgets`] : []),

@@ -1,5 +1,15 @@
+import { editableFields } from "@/lib/blueprint/field-kind";
 import { recordTitle } from "@/lib/blueprint/lookup";
-import type { DataRecord, Entity, Field, FieldType, FieldValue, RecordData } from "@/lib/blueprint/types";
+import type {
+  Blueprint,
+  CheckoutView,
+  DataRecord,
+  Entity,
+  Field,
+  FieldType,
+  FieldValue,
+  RecordData,
+} from "@/lib/blueprint/types";
 import { todayKey } from "@/lib/time";
 
 /**
@@ -120,6 +130,11 @@ export type SaleInput = {
   cashier?: string;
   /** The customer record, for credit sales or when the cashier picked one. */
   customer?: string;
+  /**
+   * What the cashier answered for the fields the Register asks (registerFields): a branch, a table, a note.
+   * Keyed by field id; order fields go on the order, line fields on every line.
+   */
+  answers?: RecordData;
   now?: Date;
 };
 
@@ -174,6 +189,8 @@ export function saleRecords(input: SaleInput): { order: RecordData; lines: Recor
     for (const f of order.fields)
       if (f.type === "person" && !used.has(f.id)) set(orderData, f, input.cashier);
   if (input.customer) set(orderData, customerFieldOf(order, product.id), input.customer);
+  const answers = input.answers ?? {};
+  for (const f of order.fields) if (!used.has(f.id)) set(orderData, f, answers[f.id] ?? undefined);
 
   const lineProduct = line.fields.find((f) => f.type === "relation" && f.relation?.entityId === product.id);
   const lines = items.map(({ product: p, qty }) => {
@@ -217,7 +234,113 @@ export function saleRecords(input: SaleInput): { order: RecordData; lines: Recor
       (title.type === "text" || title.type === "long_text")
     )
       set(data, title, recordTitle(product, p));
+    // A line that also keeps the branch (or anything the order was asked) gets the order's answer.
+    for (const f of line.fields) {
+      if (used.has(f.id) || computed(f)) continue;
+      const twin = f.relation
+        ? order.fields.find((o) => o.relation?.entityId === f.relation?.entityId && orderData[o.id] != null)
+        : f.required
+          ? order.fields.find((o) => o.id === f.id && o.type === f.type)
+          : undefined;
+      set(data, f, answers[f.id] ?? (twin ? orderData[twin.id] : undefined) ?? undefined);
+    }
     return data;
   });
   return { order: orderData, lines };
+}
+
+const empty = (v: FieldValue | undefined) =>
+  v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0);
+
+export type RegisterField = { field: Field; on: "order" | "line" };
+
+/**
+ * The fields the Register asks the cashier, besides products, payment method, customer and cash: every required
+ * field a sale can't fill by itself (a Branch, a Table, a Shift) plus the optional ones the view lists in
+ * fieldIds. Found by ringing up a pretend sale, so whatever saleRecords learns to fill stops being asked.
+ * Without this a blueprint with one extra required field has a Register that can never complete a sale.
+ */
+export function registerFields(bp: Blueprint, view: CheckoutView): RegisterField[] {
+  const product = bp.entities.find((e) => e.id === view.productEntityId);
+  const order = bp.entities.find((e) => e.id === view.entityId);
+  const line = bp.entities.find((e) => e.id === view.lineEntityId);
+  if (!product || !order || !line) return [];
+  const customer = customerFieldOf(order, product.id);
+  const probe = saleRecords({
+    product,
+    order,
+    line,
+    paymentFieldId: view.paymentFieldId,
+    items: [
+      { product: { id: "probe", entityId: product.id, data: {}, createdAt: "", updatedAt: "" }, qty: 1 },
+    ],
+    code: "#1",
+    method: "probe",
+    cash: 1,
+    status: "completed",
+    cashier: "probe",
+    customer: "probe",
+  });
+  const extra = view.fieldIds ?? [];
+  const asked = (f: Field) => f.required || extra.includes(f.id);
+  const orderFields = editableFields(order).filter(
+    (f) => f.id !== view.paymentFieldId && f.id !== customer?.id && empty(probe.order[f.id]) && asked(f),
+  );
+  // Required line fields nothing fills, and that the order doesn't ask under the same id, are asked once for
+  // the whole sale.
+  const lineFields = editableFields(line).filter(
+    (f) =>
+      f.required &&
+      !(f.type === "relation" && f.relation?.entityId === product.id) &&
+      probe.lines.every((l) => empty(l[f.id])) &&
+      !orderFields.some((o) => o.id === f.id || (f.relation && o.relation?.entityId === f.relation.entityId)),
+  );
+  const rank = (f: Field) => (extra.includes(f.id) ? extra.indexOf(f.id) : extra.length);
+  return [
+    ...orderFields.sort((a, b) => rank(a) - rank(b)).map((field) => ({ field, on: "order" as const })),
+    ...lineFields.map((field) => ({ field, on: "line" as const })),
+  ];
+}
+
+/** Answers that stay put between sales: which branch, till or shift the register is ringing up for. */
+export const stickyField = (f: Field) =>
+  f.type === "relation" ||
+  f.type === "select" ||
+  f.type === "multi_select" ||
+  f.type === "person" ||
+  f.type === "checkbox";
+
+/**
+ * Starting answers: what this register used last (when it still exists), otherwise the only possible choice, so a
+ * one-branch store never has to pick. Everything else starts empty and the cashier chooses.
+ */
+export function registerDefaults(
+  fields: RegisterField[],
+  records: DataRecord[],
+  saved: RecordData = {},
+): RecordData {
+  const out: RecordData = {};
+  for (const { field } of fields) {
+    const last = saved[field.id];
+    const targets = field.relation ? records.filter((r) => r.entityId === field.relation?.entityId) : [];
+    const options = field.options ?? [];
+    const valid =
+      !empty(last) &&
+      stickyField(field) &&
+      (field.type === "relation"
+        ? targets.some((r) => r.id === last)
+        : field.type === "select" || field.type === "status"
+          ? options.some((o) => o.id === last)
+          : true);
+    if (valid) out[field.id] = last;
+    else if (field.type === "relation" && targets.length === 1) out[field.id] = targets[0].id;
+    else if ((field.type === "select" || field.type === "status") && options.length === 1)
+      out[field.id] = options[0].id;
+  }
+  return out;
+}
+
+/** Required answers still missing, in the order the Register shows them. */
+export function missingAnswers(fields: RegisterField[], answers: RecordData): Field[] {
+  return fields.filter(({ field }) => field.required && empty(answers[field.id])).map(({ field }) => field);
 }

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { findEntity, recordTitle } from "@/lib/blueprint/lookup";
 import type { Block, Blueprint, DataRecord, Entity, FieldValue, System, View } from "@/lib/blueprint/types";
 import { applyFilter } from "@/lib/engine/query";
+import { registerFields } from "@/lib/engine/register";
 import { formatDate } from "@/lib/format";
 import { dateKey } from "@/lib/time";
 
@@ -137,6 +138,12 @@ export function describeScreen(
           `- On screen: ${shown.length} ${shown.length === 1 ? entity.name : entity.pluralName}${
             names.length ? `: ${names.join(", ")}${more}` : ""
           }.`,
+        );
+      }
+      if (view.type === "checkout") {
+        const asked = registerFields(bp, view).map(({ field }) => field.name);
+        lines.push(
+          `- The register asks for: products, payment method${asked.length ? `, ${asked.join(", ")}` : ""}.`,
         );
       }
       if (view.type === "document") {

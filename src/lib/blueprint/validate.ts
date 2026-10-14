@@ -128,7 +128,7 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
       case "checkout":
         if (!entityIds.has(view.productEntityId) || !entityIds.has(view.lineEntityId))
           errors.push({ path, message: "Checkout needs products and line items" });
-        missing([view.paymentFieldId]);
+        missing([view.paymentFieldId, ...(view.fieldIds ?? [])]);
         break;
       case "approval_queue":
         missing([view.statusFieldId, ...view.detailFieldIds]);

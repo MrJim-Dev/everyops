@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
-import type { DataRecord, Entity } from "@/lib/blueprint/types";
+import type { CheckoutView, DataRecord, Entity, WorkspaceData } from "@/lib/blueprint/types";
+import { CATALOG } from "@/lib/catalog";
 import { posSample } from "@/lib/catalog/canteen-pos";
 import { f } from "@/lib/catalog/define";
+import { DEMO_WORKSPACES } from "@/lib/catalog/demo-workspaces";
 import { createWithLines } from "./records";
 import {
   customerFieldOf,
   isCreditMethod,
   lowStockFieldOf,
+  missingAnswers,
   paymentChoices,
+  registerDefaults,
+  registerFields,
   saleRecords,
   stockFieldOf,
 } from "./register";
@@ -202,4 +207,158 @@ describe("register sale", () => {
       { id: "m2", label: "GCash" },
     ]);
   });
+});
+
+// The Salo-Salo case: a generated multi-branch POS whose orders (and lines) must say which branch sold them.
+describe("register questions", () => {
+  const branch: Entity = {
+    id: "branches",
+    name: "Branch",
+    pluralName: "Branches",
+    primaryFieldId: "name",
+    fields: [f.text("name", "Name", { required: true })],
+  };
+  const branchOrder: Entity = {
+    ...order,
+    fields: [
+      ...order.fields,
+      f.relation("branch", "Branch", "branches", { required: true }),
+      f.longText("notes", "Notes"),
+    ],
+  };
+  const branchLine: Entity = {
+    ...line,
+    fields: [...line.fields, f.relation("branch", "Branch", "branches", { required: true })],
+  };
+  const view: CheckoutView = {
+    id: "register",
+    name: "Register",
+    type: "checkout",
+    entityId: "orders",
+    productEntityId: "products",
+    lineEntityId: "order_lines",
+    paymentFieldId: "payment_method",
+  };
+  const rec = (id: string, name: string): DataRecord => ({
+    id,
+    entityId: "branches",
+    data: { name },
+    createdAt: "",
+    updatedAt: "",
+  });
+  const branches = [rec("b1", "Salo-Salo Makati"), rec("b2", "Salo-Salo QC")];
+  const workspace = (records: DataRecord[]): WorkspaceData => {
+    const base = posSample(NOW);
+    return {
+      ...base,
+      blueprint: {
+        ...base.blueprint,
+        entities: [product, branchOrder, branchLine, branch],
+        views: [view],
+        rules: [],
+      },
+      records: [noodles, ...records],
+    };
+  };
+  const sale = (answers: Record<string, string>) =>
+    saleRecords({
+      product,
+      order: branchOrder,
+      line: branchLine,
+      paymentFieldId: "payment_method",
+      items: [{ product: noodles, qty: 2 }],
+      code: "#1005",
+      method: "cash",
+      cash: 50,
+      status: "completed",
+      cashier: "James Ocampo",
+      answers,
+      now: NOW,
+    });
+
+  it("asks for a required branch and puts it on the order and every line", () => {
+    const ws = workspace(branches);
+    const asked = registerFields(ws.blueprint, view);
+    expect(asked.map((a) => a.field.id)).toEqual(["branch"]);
+    expect(missingAnswers(asked, {}).map((x) => x.id)).toEqual(["branch"]);
+
+    const without = createWithLines(ws, "orders", sale({}).order, "order_lines", sale({}).lines, NOW);
+    expect(without.ok).toBe(false);
+
+    const picked = sale({ branch: "b2" });
+    expect(picked.order.branch).toBe("b2");
+    expect(picked.lines.every((l) => l.branch === "b2")).toBe(true);
+    expect(createWithLines(ws, "orders", picked.order, "order_lines", picked.lines, NOW).ok).toBe(true);
+  });
+
+  it("asks optional fields only when the view lists them, in that order", () => {
+    const ws = workspace(branches);
+    expect(registerFields(ws.blueprint, { ...view, fieldIds: ["notes"] }).map((a) => a.field.id)).toEqual([
+      "notes",
+      "branch",
+    ]);
+  });
+
+  it("starts from the register's last branch, or the only one there is", () => {
+    const ws = workspace(branches);
+    const asked = registerFields(ws.blueprint, view);
+    expect(registerDefaults(asked, ws.records, {})).toEqual({});
+    expect(registerDefaults(asked, ws.records, { branch: "b2" })).toEqual({ branch: "b2" });
+    // A branch that was deleted since isn't kept.
+    expect(registerDefaults(asked, ws.records, { branch: "gone" })).toEqual({});
+    expect(registerDefaults(asked, [rec("b9", "Only branch")], { branch: "gone" })).toEqual({ branch: "b9" });
+  });
+
+  it("asks a required line field the order doesn't have once for the whole sale", () => {
+    const ws = workspace(branches);
+    const lineOnly = {
+      ...ws.blueprint,
+      entities: [product, order, branchLine, branch],
+    };
+    expect(registerFields(lineOnly, view)).toEqual([
+      { field: branchLine.fields.find((x) => x.id === "branch"), on: "line" },
+    ]);
+  });
+});
+
+// Every register EveryOps ships must be able to complete a sale once its questions are answered.
+describe("built-in registers", () => {
+  const samples = [
+    ...CATALOG.map((c) => ({ name: c.id, ws: c.sample(NOW) })),
+    ...DEMO_WORKSPACES.map((d) => ({ name: d.slug, ws: d.build(NOW) })),
+  ];
+  for (const { name, ws } of samples)
+    for (const view of ws.blueprint.views)
+      if (view.type === "checkout")
+        it(`${name}: ${view.name} completes a sale`, () => {
+          const bp = ws.blueprint;
+          const ent = (id: string) => bp.entities.find((e) => e.id === id) as Entity;
+          const product = ent(view.productEntityId);
+          const item = ws.records.find((r) => r.entityId === product.id) as DataRecord;
+          const asked = registerFields(bp, view);
+          const answers = registerDefaults(asked, ws.records);
+          for (const { field } of asked)
+            if (answers[field.id] == null && field.required)
+              answers[field.id] = field.relation
+                ? (ws.records.find((r) => r.entityId === field.relation?.entityId)?.id ?? null)
+                : (field.options?.[0]?.id ?? "answer");
+          const payment = bp.entities
+            .find((e) => e.id === view.entityId)
+            ?.fields.find((x) => x.id === view.paymentFieldId);
+          const sold = saleRecords({
+            product,
+            order: ent(view.entityId),
+            line: ent(view.lineEntityId),
+            paymentFieldId: view.paymentFieldId,
+            items: [{ product: item, qty: 1 }],
+            code: "#7001",
+            method: payment?.options?.[0]?.id ?? "",
+            status: "completed",
+            cashier: "Test Cashier",
+            answers,
+            now: NOW,
+          });
+          const result = createWithLines(ws, view.entityId, sold.order, view.lineEntityId, sold.lines, NOW);
+          expect(result.ok ? [] : result.errors).toEqual([]);
+        });
 });

@@ -76,6 +76,7 @@ export function toView(v: Design["views"][number]): View {
         productEntityId: v.productEntityId ?? "",
         lineEntityId: v.lineEntityId ?? "",
         paymentFieldId: v.paymentFieldId ?? "",
+        ...(v.fieldIds?.length ? { fieldIds: v.fieldIds } : {}),
       };
     case "approval_queue":
       return {
@@ -341,6 +342,7 @@ export function tidy(bp: Blueprint): Blueprint {
       if (v.groupByFieldId && !has.has(v.groupByFieldId)) delete v.groupByFieldId;
     }
     if (v.type === "kanban") v.cardFieldIds = v.cardFieldIds.filter((id) => has.has(id));
+    if (v.type === "checkout" && v.fieldIds) v.fieldIds = v.fieldIds.filter((id) => has.has(id));
     if (v.type === "approval_queue") {
       // The designer isn't asked for these (they were where Gemini ran away), so they come from the record type:
       // button labels from its status options, details from its first plain fields.
