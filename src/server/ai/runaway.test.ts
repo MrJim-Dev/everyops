@@ -19,6 +19,27 @@ function watch(text: string, maxStringChars?: number) {
 const NOW = new Date("2026-10-14T03:00:00Z");
 
 describe("runaway answers", () => {
+  it("stops a short phrase that repeats, long before the length limit", () => {
+    const loop = JSON.stringify({ reply: `Here is the plan: ${"complete matches ".repeat(200)}` });
+    const result = watch(loop, 24_000);
+    expect(result?.why).toBe("text that repeats itself");
+    expect(result?.at).toBeLessThan(600);
+    // Markup that repeats a little (a row of five stars) is fine.
+    const stars = JSON.stringify({ starter: `<p>${'<span class="star">★</span>'.repeat(5)}</p>`.repeat(3) });
+    expect(watch(stars, 24_000)).toBeNull();
+  });
+
+  it("leaves a drafted HTML page alone, inline CSS and all", () => {
+    const css =
+      "body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#0b1120 0%,#13294b 55%,#1e3a8a 100%);color:#e2e8f0;min-height:100vh}";
+    const html = `<!doctype html><html><head><style>${css.repeat(20)}</style></head><body>${'<section class="hero"><h1>Summer League</h1></section>'.repeat(60)}</body></html>`;
+    expect(watch(JSON.stringify({ starter: html }), 24_000)).toBeNull();
+    expect(watch(JSON.stringify({ starter: html }))).toEqual({
+      why: "a text value that never ends",
+      at: expect.any(Number),
+    });
+  });
+
   it("leaves real designs and long, ordinary text alone", () => {
     expect(watch(JSON.stringify(courtBookingsSample(NOW)))).toBeNull();
     expect(watch(JSON.stringify(posSample(NOW)))).toBeNull();
@@ -47,7 +68,9 @@ describe("runaway answers", () => {
 
   it("stops prose that never ends", () => {
     const result = watch(`{"heading":"Play 24/7","subheading":"${"Book! Enjoy! Go! ".repeat(400)}`);
-    expect(result?.why).toBe("a text value that never ends");
+    // Caught as soon as the phrase has repeated for a few hundred characters, well before the length limit.
+    expect(result?.why).toBe("text that repeats itself");
+    expect(result?.at).toBeLessThan(600);
   });
 
   it("stops a number that never ends", () => {

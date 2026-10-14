@@ -15,6 +15,8 @@ import type {
   DataRecord,
   Entity,
   Field,
+  FormStep,
+  FormView,
   RecordData,
   View,
   Widget,
@@ -34,11 +36,12 @@ import {
 import { metricFormatter } from "@/lib/engine/metric-format";
 import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
-import { isPublic } from "@/lib/public/resolve";
+import { formSnippet } from "@/lib/public/html-page";
+import { isPublic, publicFieldsOf, publicForm } from "@/lib/public/resolve";
 import { copyFromBlocks, standardBlocks } from "@/lib/public/site-template";
 import { type Invite, type Member, randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
-import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer } from "./assistant-prompt";
+import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer, designOp } from "./assistant-prompt";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
 import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
 import { view } from "./design-prompt";
@@ -381,7 +384,11 @@ function toDesignOps(
         const patch = {
           ...(o.public !== undefined ? { public: o.public } : {}),
           ...(o.intro ? { intro: o.intro } : {}),
-          ...(o.submitLabel ? { submitLabel: o.submitLabel } : {}),
+          // A button says a few words; a run-on label ("Book Court & Pay Later/Now via GCash/Maya details below…")
+          // is dropped rather than shown.
+          ...(o.submitLabel && o.submitLabel.trim().length <= 40
+            ? { submitLabel: o.submitLabel.trim() }
+            : {}),
           ...(fieldIds?.length ? { fieldIds } : {}),
           ...(split?.steps ? { steps: split.steps, review: true } : {}),
         };
@@ -519,8 +526,14 @@ function toDesignOps(
     }
   }
   // Blocks on public pages point at real record types, fields and forms.
+  // Fields added earlier in this plan count, so a new form or block can use them.
+  const addedFields = (id: string) =>
+    ops.flatMap((x) => (x.op === "add_field" && x.entityId === id ? [x.field] : []));
   const fieldsOf = (id: string) =>
-    new Set(allEntities.find((e) => e.id === id)?.fields.map((f) => f.id) ?? []);
+    new Set([
+      ...(allEntities.find((e) => e.id === id)?.fields.map((f) => f.id) ?? []),
+      ...addedFields(id).map((f) => f.id),
+    ]);
   const formIds = new Set([
     ...bp.views.filter((v) => v.type === "form").map((v) => v.id),
     ...ops.flatMap((x) => (x.op === "add_view" && x.view.type === "form" ? [x.view.id] : [])),
@@ -537,7 +550,12 @@ function toDesignOps(
   }
   const entityFor = (id: string) => {
     const created = ops.flatMap((x) => (x.op === "add_entity" && x.entity.id === id ? [x.entity] : []))[0];
-    return { entity: created ?? bp.entities.find((e) => e.id === id), isNew: !!created };
+    const existing = bp.entities.find((e) => e.id === id);
+    const extra = addedFields(id);
+    const entity =
+      created ??
+      (existing && extra.length ? { ...existing, fields: [...existing.fields, ...extra] } : existing);
+    return { entity, isNew: !!created };
   };
   for (const op of [...ops]) {
     if (op.op === "add_widget") {
@@ -681,14 +699,22 @@ function toDesignOps(
 const PHOTO_VALUE = /^attachment:(\S+)$/;
 
 /** New text for document pages; only pages of type document take text. */
-function toDocOps(bp: Blueprint, raw: RawPlan["pageTexts"], errors: string[]): DocOp[] {
+function toDocOps(
+  bp: Blueprint,
+  records: DataRecord[],
+  raw: RawPlan["pageTexts"],
+  errors: string[],
+): DocOp[] {
   const ops: DocOp[] = [];
   for (const [i, p] of raw.entries()) {
     const view = bp.views.find((v) => v.id === p.viewId);
-    if (view?.type !== "document") {
-      const pages = bp.views.filter((v) => v.type === "document").map((v) => v.id);
+    // A custom HTML page's text is its HTML; Gemini sometimes writes a drafted page here instead of in starter.
+    if (view?.type === "html")
+      ops.push({ viewId: view.id, body: fillEmbeds(p.markdown, bp, records, view.id, errors) });
+    else if (view?.type !== "document") {
+      const pages = bp.views.filter((v) => v.type === "document" || v.type === "html").map((v) => v.id);
       errors.push(
-        `pageTexts[${i}]: "${p.viewId}" isn't a document page (document pages: ${pages.join(", ") || "none"})`,
+        `pageTexts[${i}]: "${p.viewId}" isn't a document or HTML page (those pages: ${pages.join(", ") || "none"})`,
       );
     } else ops.push({ viewId: view.id, body: p.markdown });
   }
@@ -938,8 +964,16 @@ ${input.messages
   };
   let prompt = withFiles(context);
   let repaired = false;
+  let restarted = false;
   for (let attempt = 0; attempt < 3; attempt++) {
-    status(attempt === 0 ? "Thinking it through" : "Reworking the plan so it fits your workspace");
+    status(
+      attempt === 0
+        ? "Thinking it through"
+        : repaired
+          ? "Reworking the plan so it fits your workspace"
+          : "Gemini's first answer didn't come through, trying again",
+    );
+    const setAside: string[] = [];
     // Answers take 3–8 s and plans with pages 10–25 s. A stalled call gets a parallel twin after 28 s.
     const result = await generateJsonHedged(
       assistantAnswer,
@@ -947,15 +981,25 @@ ${input.messages
         system: ASSISTANT_SYSTEM,
         prompt,
         task: "assistant",
-        repair: fixOpNames,
+        repair: (json) => setAsideBadOps(fixOpNames(json), setAside),
         timeoutMs: 60_000,
         thinking: "LOW",
-        // Real plans are 200–2,500 tokens; a looping answer stops here and the next attempt starts.
-        maxOutputTokens: 6000,
+        // Real plans are 200–2,500 tokens, and up to about 6,000 with a drafted HTML page; a looping answer stops
+        // here and the next attempt starts.
+        maxOutputTokens: 12_000,
+        // A drafted HTML page is one long text value (4–15k characters), not a runaway.
+        maxStringChars: 24_000,
       },
       { hedgeMs: 28_000 },
     );
-    if (!result.ok) return { ok: false, message: result.error };
+    if (!result.ok) {
+      // Every hedged try went wrong (a loop, a cut-off answer): start over once before telling the person.
+      if (result.retryable && !restarted) {
+        restarted = true;
+        continue;
+      }
+      return { ok: false, message: result.error };
+    }
     const a = result.data;
     const suggestions = a.suggestions.slice(0, 3);
     const navigate = resolveGoTo(bp, records, a.goTo, { screen: input.screen, canManage: input.canDesign });
@@ -968,10 +1012,21 @@ ${input.messages
     status("Checking the plan against your workspace");
 
     const design = toDesignOps(bp, a.plan.ops, a.plan.renames, a.plan.formulas, input.workspaceName);
-    const errors = [...design.errors];
+    // Operations that fit no shape were set aside; Gemini gets them back to fix with the rest of the plan.
+    const errors = [...setAside, ...design.errors];
     if (design.ops.length && !input.canDesign)
       errors.push("This person can't change the design; plan data changes only or explain who can.");
+    if (design.ops.length)
+      openUpPublicForms(
+        bp,
+        design.ops,
+        a.plan.pageTexts.map((p) => p.markdown),
+        // "A multistep booking form": a form the plan touches gets steps even when Gemini left them out.
+        /multi[\s-]?step|in steps|step[\s-]by[\s-]step|wizard/i.test(input.messages.at(-1)?.text ?? ""),
+      );
     const next = design.ops.length ? applyOps(bp, design.ops) : bp;
+    embedForms(next, records, design.ops, errors);
+    errors.push(...unanswerable(next, design.ops));
     const before = new Set(validateBlueprint(bp).map((e) => `${e.path} ${e.message}`));
     for (const e of validateBlueprint(next))
       if (!before.has(`${e.path} ${e.message}`)) errors.push(`${e.path}: ${e.message}`);
@@ -982,7 +1037,7 @@ ${input.messages
     const recordPart = await toRecordOps(next, records, a.plan.recordOps, photo);
     errors.push(...recordPart.errors);
     if (recordPart.ops.length && !input.canEditRecords) errors.push("This person can't change data.");
-    const docOps = toDocOps(next, a.plan.pageTexts, errors);
+    const docOps = toDocOps(next, records, a.plan.pageTexts, errors);
     if (docOps.length && !input.canEditRecords) errors.push("This person can't edit pages.");
     const teamOps = toTeamOps(input.team, a.plan.team, errors);
     if (teamOps.length && !input.canDesign) errors.push("Only owners and admins can change the team.");
@@ -1062,6 +1117,221 @@ ${input.messages
     ok: false,
     message: "I couldn't put together a valid change for that. Try describing it a little differently.",
   };
+}
+
+/**
+ * An operation that fits none of the operation shapes would fail the whole answer (it showed as a raw schema error).
+ * It's taken out instead and described in `setAside`, so Gemini gets it back to fix with the rest of the plan.
+ */
+export function setAsideBadOps(json: unknown, setAside: string[]): unknown {
+  const plan = (json as { plan?: { ops?: unknown } })?.plan;
+  if (!plan || !Array.isArray(plan.ops)) return json;
+  setAside.length = 0;
+  plan.ops = plan.ops.filter((o: { op?: unknown } | null, i: number) => {
+    if (designOp.safeParse(o).success) return true;
+    const branch = designOp.options.find((b) => b.shape.op.value === o?.op);
+    const issues = branch?.safeParse(o).error?.issues ?? [];
+    const why = branch
+      ? issues
+          .slice(0, 3)
+          .map((x) => `${x.path.join(".") || "op"}: ${x.message}`)
+          .join("; ")
+      : `"${String(o?.op)}" isn't an operation`;
+    setAside.push(
+      `ops[${i}] ${String(o?.op)} doesn't fit its shape (${why}): ${JSON.stringify(o).slice(0, 300)}`,
+    );
+    return false;
+  });
+  return json;
+}
+
+/** Form ids that custom HTML pages in this plan embed or post to (data-everyops-embed, data-everyops-form). */
+function embeddedIn(ops: ChangeOp[], pageHtml: string[] = []): string[] {
+  return [
+    ...ops.flatMap((op) =>
+      op.op === "add_view" && op.view.type === "html" && op.view.html ? [op.view.html] : [],
+    ),
+    ...pageHtml,
+  ].flatMap((html) =>
+    [...html.matchAll(/data-everyops-(?:embed|form)\s*=\s*["']([^"']+)["']/g)].map((m) => m[1]),
+  );
+}
+
+/** Forms this plan adds, changes or puts on a custom page: the ones whose public use it must check. */
+function touchedForms(ops: ChangeOp[], embeds: string[]): Set<string> {
+  return new Set([
+    ...ops.flatMap((op) =>
+      op.op === "add_view" ? [op.view.id] : op.op === "update_view" ? [op.viewId] : [],
+    ),
+    ...embeds,
+  ]);
+}
+
+/**
+ * Public forms that would fail every visitor, fixed the way an owner would: a form embedded on a custom page is made
+ * public (the page saves through it), and a public form this plan adds or opens up stops requiring what visitors
+ * can't fill in (a link to a private list such as players) and asks who is booking when it doesn't yet. Gemini was
+ * told this and still slipped often; the fix is the same every time, so it's made here.
+ */
+export function openUpPublicForms(
+  bp: Blueprint,
+  ops: ChangeOp[],
+  pageHtml: string[] = [],
+  wantsSteps = false,
+) {
+  const embeds = embeddedIn(ops, pageHtml);
+  let next = applyOps(bp, ops);
+  for (const id of new Set(embeds)) {
+    const view = next.views.find((v) => v.id === id);
+    if (view?.type !== "form" || view.public) continue;
+    const added = ops.find((op) => op.op === "add_view" && op.view.id === id);
+    if (added?.op === "add_view" && added.view.type === "form") added.view.public = true;
+    else ops.push({ op: "update_view", viewId: id, patch: { public: true } });
+  }
+  next = applyOps(bp, ops);
+  const touched = touchedForms(ops, embeds);
+  for (const view of next.views) {
+    if (view.type !== "form" || !view.public || !touched.has(view.id)) continue;
+    const entity = next.entities.find((e) => e.id === view.entityId);
+    if (!entity) continue;
+    const asked = new Set(publicFieldsOf(next, view).map((f) => f.id));
+    for (const f of entity.fields)
+      if (
+        f.required &&
+        !asked.has(f.id) &&
+        (f.type === "relation" || f.type === "select" || f.type === "multi_select") &&
+        f.id !== entity.booking?.resourceFieldId
+      )
+        ops.push({ op: "update_field", entityId: entity.id, fieldId: f.id, patch: { required: false } });
+    const contact = view.fieldIds.some((id) => {
+      const f = entity.fields.find((x) => x.id === id);
+      return f?.type === "text" && /name|phone|mobile|email|contact|guest|customer|client/.test(f.id);
+    });
+    if (contact) continue;
+    const guest = [
+      { id: "guest_name", name: "Your name", type: "text" as const, required: true },
+      { id: "guest_phone", name: "Mobile number", type: "text" as const, required: true },
+    ];
+    for (const f of guest)
+      if (!entity.fields.some((x) => x.id === f.id))
+        ops.push({ op: "add_field", entityId: entity.id, field: f });
+    const ids = guest.map((f) => f.id);
+    const added = ops.find((op) => op.op === "add_view" && op.view.id === view.id);
+    if (added?.op === "add_view" && added.view.type === "form") {
+      added.view.fieldIds.push(...ids);
+      if (added.view.steps) added.view.steps = withGuestStep(added.view.steps, ids);
+    } else
+      ops.push({
+        op: "update_view",
+        viewId: view.id,
+        patch: {
+          fieldIds: [...view.fieldIds, ...ids],
+          ...(view.steps?.length ? { steps: withGuestStep(view.steps, ids) } : {}),
+        },
+      });
+  }
+
+  if (!wantsSteps) return;
+  // Asked for a form in steps: a form the plan touches that still has none is split the usual way.
+  next = applyOps(bp, ops);
+  for (const view of next.views) {
+    if (view.type !== "form" || !touched.has(view.id) || view.steps?.length) continue;
+    const entity = next.entities.find((e) => e.id === view.entityId);
+    const steps = entity && autoSteps(next, view, entity);
+    if (!steps) continue;
+    const added = ops.find((op) => op.op === "add_view" && op.view.id === view.id);
+    if (added?.op === "add_view" && added.view.type === "form")
+      Object.assign(added.view, { steps, review: true });
+    else ops.push({ op: "update_view", viewId: view.id, patch: { steps, review: true } });
+  }
+}
+
+/** A form's fields in the usual steps: the booking's resource and time, then who it's for, then the rest. */
+function autoSteps(bp: Blueprint, view: FormView, entity: Entity): FormStep[] | undefined {
+  const asked = view.public ? publicFieldsOf(bp, view).map((f) => f.id) : view.fieldIds;
+  const booking = entity.booking;
+  const when = asked.filter((id) => id === booking?.resourceFieldId || id === booking?.timeFieldId);
+  const you = asked.filter((id) => {
+    const f = entity.fields.find((x) => x.id === id);
+    return (
+      !when.includes(id) &&
+      f?.type === "text" &&
+      /name|phone|mobile|email|contact|guest|customer|client/.test(id)
+    );
+  });
+  const rest = asked.filter((id) => !when.includes(id) && !you.includes(id));
+  const resourceId = entity.fields.find((f) => f.id === booking?.resourceFieldId)?.relation?.entityId;
+  const resource = bp.entities.find((e) => e.id === resourceId);
+  const steps: FormStep[] = [
+    { id: "when", title: resource ? `${resource.name} and time` : "Date and time", fieldIds: when },
+    { id: "your_details", title: "Your details", fieldIds: you },
+    { id: "details", title: when.length || you.length ? "Other details" : "Details", fieldIds: rest },
+  ].filter((s) => s.fieldIds.length);
+  return steps.length >= 2 ? steps : undefined;
+}
+
+/** Guest details go on the step about the person (details, contact, player), else on their own before the last. */
+function withGuestStep(steps: FormStep[], ids: string[]): FormStep[] {
+  const out = steps.map((s) => ({ ...s, fieldIds: [...s.fieldIds] }));
+  const home = out.find((s) => /detail|contact|you|player|guest|info/i.test(s.title));
+  if (home) home.fieldIds.push(...ids);
+  else
+    out.splice(Math.max(0, out.length - 1), 0, { id: "your_details", title: "Your details", fieldIds: ids });
+  return out;
+}
+
+/**
+ * A public form this plan adds or opens up must not require what a visitor can't fill in (a link to a private list
+ * such as players, a typed amount): every submission would fail. The assistant is told how to fix it.
+ */
+export function unanswerable(next: Blueprint, ops: ChangeOp[]): string[] {
+  const touched = touchedForms(ops, embeddedIn(ops));
+  return next.views.flatMap((v) => {
+    if (v.type !== "form" || !v.public || !touched.has(v.id)) return [];
+    const entity = next.entities.find((e) => e.id === v.entityId);
+    if (!entity) return [];
+    const asked = new Set(publicFieldsOf(next, v).map((f) => f.id));
+    const stuck = entity.fields.filter(
+      (f) =>
+        f.required &&
+        !asked.has(f.id) &&
+        !["formula", "rollup", "status", "money"].includes(f.type) &&
+        f.id !== entity.parent?.fieldId,
+    );
+    return stuck.length
+      ? [
+          `${v.id}: visitors can't fill in ${stuck.map((f) => f.id).join(", ")} (required, but not shown on public forms). Make ${stuck.length > 1 ? "them" : "it"} optional with update_field, and ask who is booking with text fields (guest name, phone) added with add_field and listed in the form.`,
+        ]
+      : [];
+  });
+}
+
+/**
+ * A custom HTML page asks for a working form with <div data-everyops-embed="formViewId"></div>; it's replaced with
+ * the same markup "Connect a form" inserts (the form's real fields, in steps when the form has them), so the page
+ * saves real records. Checked against the workspace as this plan leaves it, so a form added in the plan works too.
+ */
+export function embedForms(next: Blueprint, records: DataRecord[], ops: ChangeOp[], errors: string[]) {
+  for (const op of ops) {
+    if (op.op !== "add_view" || op.view.type !== "html" || !op.view.html?.includes("data-everyops-embed"))
+      continue;
+    op.view.html = fillEmbeds(op.view.html, next, records, op.view.id, errors);
+  }
+}
+
+/** Replaces each data-everyops-embed placeholder in a page's HTML with its public form's markup. */
+function fillEmbeds(html: string, next: Blueprint, records: DataRecord[], pageId: string, errors: string[]) {
+  const tag = /<(\w+)\b[^>]*\bdata-everyops-embed\s*=\s*["']([^"']+)["'][^>]*>(?:\s*<\/\1>)?/g;
+  const forms = next.views.filter((v) => v.type === "form" && v.public);
+  return html.replace(tag, (whole, _tag: string, id: string) => {
+    const view = next.views.find((v) => v.id === id);
+    const form = view?.type === "form" && view.public ? publicForm(next, records, view) : null;
+    if (form) return formSnippet(form);
+    errors.push(
+      `${pageId}: data-everyops-embed="${id}" isn't a public form (public forms: ${forms.map((f) => f.id).join(", ") || "none; add one with public true"})`,
+    );
+    return whole;
+  });
 }
 
 const OP_NAMES = new Set([

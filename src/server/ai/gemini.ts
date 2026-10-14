@@ -98,17 +98,38 @@ function constToEnum(node: unknown): unknown {
  * "…_done_now_perfectly_setup…") or writes a number that never ends, until it hits the token limit a minute later.
  * Spotted within seconds, the call is stopped and a fresh one starts. Returns why, or null while all is well.
  */
+const BREAKS = new Set([" ", "\n", ";", ",", "{", "}", "<", ">"]);
+
+/** A text value whose last 400 characters are one short phrase over and over ("complete matches complete matches…"). */
+function repeating(tail: string): boolean {
+  if (tail.length < 400) return false;
+  for (let unit = 1; unit <= 40; unit++) {
+    let i = tail.length - unit - 1;
+    while (i >= 0 && tail[i] === tail[i + unit]) i--;
+    if (tail.length - 1 - i >= 400 - unit) return true;
+  }
+  return false;
+}
+
 export function runawayWatcher(maxStringChars = 3000) {
   let inString = false;
   let escaped = false;
   let length = 0;
   let unbroken = 0;
   let digits = 0;
+  let tail = "";
   return (chunk: string): string | null => {
     for (const ch of chunk) {
       if (inString) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") {
+        if (escaped) {
+          escaped = false;
+          // An escaped line break or tab ("\n") is a break in the text, like a space.
+          if (ch === "n" || ch === "t" || ch === "r") {
+            length++;
+            unbroken = 0;
+            continue;
+          }
+        } else if (ch === "\\") {
           escaped = true;
           continue;
         } else if (ch === '"') {
@@ -116,7 +137,12 @@ export function runawayWatcher(maxStringChars = 3000) {
           continue;
         }
         length++;
-        unbroken = ch === " " || ch === "\n" ? 0 : unbroken + 1;
+        tail = (tail + ch).slice(-400);
+        // Checked every 20 characters: a short phrase repeating for 400 characters is a loop, however long it is.
+        if (length % 20 === 0 && repeating(tail)) return "text that repeats itself";
+        // HTML and CSS run long without spaces (body{margin:0;font-family:…}); their punctuation breaks a run too.
+        // Filler that never ends ("…_done_now_perfectly_setup_…") has none of it.
+        unbroken = BREAKS.has(ch) ? 0 : unbroken + 1;
         if (length > maxStringChars) return "a text value that never ends";
         if (unbroken > 160) return "text with no spaces that never ends";
       } else if (ch === '"') {
@@ -124,6 +150,7 @@ export function runawayWatcher(maxStringChars = 3000) {
         length = 0;
         unbroken = 0;
         digits = 0;
+        tail = "";
       } else if (/[0-9.eE+-]/.test(ch)) {
         if (++digits > 40) return "a number that never ends";
       } else digits = 0;
@@ -224,6 +251,8 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           ms,
           why: runaway,
           chars: text.length,
+          // The end of what came back, to tell a real runaway from an answer that's just long.
+          tail: text.slice(-160),
         }),
       );
       return { ok: false, error: "Gemini got stuck repeating itself.", retryable: true };
@@ -260,7 +289,8 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       );
       return {
         ok: false,
-        error: `Gemini's answer didn't match the schema: ${parsed.error.message}`,
+        // The details are in the log above; people only need to know it didn't come together.
+        error: "Gemini's answer came back incomplete. Try again.",
         retryable: true,
       };
     }
