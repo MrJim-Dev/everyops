@@ -1,7 +1,8 @@
 import type { Blueprint } from "@/lib/blueprint/types";
 
 /** What a blueprint contains, in words, for listings. */
-export function describeBlueprint(bp: Blueprint): string[] {
+/** What a system contains, for listings (the first few) or the publish page (limit: everything). */
+export function describeBlueprint(bp: Blueprint, limit = 5): string[] {
   const names: Partial<Record<string, string>> = {
     slot_grid: "Schedule",
     checkout: "Register",
@@ -19,5 +20,5 @@ export function describeBlueprint(bp: Blueprint): string[] {
     ...bp.entities.map((e) => `${e.name} records`),
     ...screens,
     ...(bp.rules.length ? [`${bp.rules.length} automatic ${bp.rules.length === 1 ? "rule" : "rules"}`] : []),
-  ].slice(0, 5);
+  ].slice(0, limit);
 }
