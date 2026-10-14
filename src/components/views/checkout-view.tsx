@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckIcon, MinusIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AnimatedValue } from "@/components/motion/animated-value";
 import { SegmentedControl } from "@/components/motion/segmented-control";
@@ -26,6 +26,7 @@ import {
 } from "@/lib/engine/register";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { type Receipt, SaleReceipt } from "./sale-receipt";
 import { SearchInput } from "./search-input";
 import { ViewEmpty } from "./view-empty";
 
@@ -44,7 +45,7 @@ function resolve(entity: Entity, type: Field["type"], prefer?: string) {
 }
 
 export function CheckoutView({ view }: { view: CheckoutConfig }) {
-  const { blueprint, records } = useWorkspace();
+  const { blueprint, records, id: workspaceId, name: workspaceName, mode } = useWorkspace();
   const actions = useRecordActions();
   const user = useCurrentUser();
   const product = getEntity(blueprint, view.productEntityId);
@@ -63,6 +64,23 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
   useReportView({ viewId: view.id, search: query.trim() || undefined });
   const [category, setCategory] = useState("all");
   const [cart, setCart] = useState<{ productId: string; qty: number }[]>([]);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  // The order being rung up survives a reload in this tab (sessionStorage, never the workspace's data).
+  const cartKey = `everyops:cart:${workspaceId}:${view.id}`;
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || mode !== "live") return;
+    restored.current = true;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(cartKey) ?? "[]");
+      if (Array.isArray(saved) && saved.length) setCart(saved);
+    } catch {}
+  }, [cartKey, mode]);
+  useEffect(() => {
+    if (!restored.current) return;
+    if (cart.length) sessionStorage.setItem(cartKey, JSON.stringify(cart));
+    else sessionStorage.removeItem(cartKey);
+  }, [cart, cartKey]);
   const methods = paymentChoices(
     payment,
     records,
@@ -152,9 +170,28 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
       });
       return;
     }
-    toast.success(
-      status === "held" ? `Order ${code} held` : `Sale ${code} completed · ${formatMoney(total)}`,
-    );
+    if (status === "held") toast.success(`Order ${code} held`);
+    else {
+      const buyer = customer ? records.find((r) => r.id === customer) : undefined;
+      const buyerEntity = customerField?.relation
+        ? findEntity(blueprint, customerField.relation.entityId)
+        : undefined;
+      setReceipt({
+        business: workspaceName,
+        code,
+        at: new Date(),
+        items: items.map((i) => ({
+          name: recordTitle(product, i.product),
+          qty: i.qty,
+          unit: price(i.product),
+        })),
+        total,
+        method: methodLabel || "Paid",
+        cash: isCash ? (cash === "" ? total : cashValue) : undefined,
+        cashier: user?.name || user?.email,
+        customer: buyer && buyerEntity ? recordTitle(buyerEntity, buyer) : undefined,
+      });
+    }
     setCart([]);
     setCash("");
     setCustomer(null);
@@ -400,6 +437,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
           </Button>
         </div>
       ) : null}
+      <SaleReceipt receipt={receipt} onClose={() => setReceipt(null)} />
     </div>
   );
 }
