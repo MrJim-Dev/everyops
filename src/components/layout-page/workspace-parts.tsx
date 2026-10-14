@@ -1,6 +1,5 @@
 "use client";
 
-import { Card } from "@/components/ui/card";
 import { ViewRenderer } from "@/components/views/view-renderer";
 import { AgendaWidget } from "@/components/widgets/agenda-widget";
 import { ChartWidget } from "@/components/widgets/chart-widget";
@@ -11,18 +10,29 @@ import { StatStrip } from "@/components/widgets/stat-strip";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useViewHref } from "./shared";
 
-/** An existing tab (table, board, calendar, schedule, register, form...) shown inside the layout as it is. */
+/** A slim title row over an embedded tab or form, the height of the dashboard's. */
+function Titled({ title, height, children }: { title: string; height?: number; children: React.ReactNode }) {
+  return (
+    <section className="flex h-full min-w-0 flex-col bg-background">
+      <header className="flex h-11 shrink-0 items-center border-b px-5 text-[13.5px] font-semibold">
+        {title}
+      </header>
+      <div className="flex min-h-0 flex-col overflow-hidden" style={height ? { height } : undefined}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+/** An existing tab (table, board, calendar, schedule, register...) shown inside the layout as it is. */
 export function ViewPart({ props }: { props: { viewId: string; height: number } }) {
   const { blueprint } = useWorkspace();
   const view = blueprint.views.find((v) => v.id === props.viewId);
   if (!view || view.type === "layout") return null;
   return (
-    <Card className="gap-0 overflow-hidden py-0">
-      <div className="flex h-10 items-center border-b px-4 text-[13px] font-medium">{view.name}</div>
-      <div className="flex min-h-0 flex-col overflow-hidden" style={{ height: props.height }}>
-        <ViewRenderer view={view} />
-      </div>
-    </Card>
+    <Titled title={view.name} height={props.height}>
+      <ViewRenderer view={view} />
+    </Titled>
   );
 }
 
@@ -32,14 +42,9 @@ export function FormPart({ props }: { props: { viewId: string; title?: string } 
   const view = blueprint.views.find((v) => v.id === props.viewId);
   if (view?.type !== "form") return null;
   return (
-    <Card className="gap-0 overflow-hidden py-0">
-      <div className="flex h-10 items-center border-b px-4 text-[13px] font-medium">
-        {props.title ?? view.name}
-      </div>
-      <div className="flex min-h-0 flex-col">
-        <ViewRenderer view={view} />
-      </div>
-    </Card>
+    <Titled title={props.title ?? view.name}>
+      <ViewRenderer view={view} />
+    </Titled>
   );
 }
 
@@ -66,5 +71,5 @@ export function WidgetPart({ props }: { props: { widgetId: string } }) {
         return <HeatmapWidget widget={widget} />;
     }
   })();
-  return <Card className="h-full gap-0 overflow-hidden py-0 [&_dl]:border-b-0">{body}</Card>;
+  return <div className="h-full min-w-0 bg-background [&_dl]:border-b-0">{body}</div>;
 }

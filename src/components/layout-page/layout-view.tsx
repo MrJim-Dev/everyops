@@ -39,6 +39,7 @@ import {
   StatPart,
   TablePart,
 } from "./data";
+import { PartGrid } from "./shared";
 import { FormPart, ViewPart, WidgetPart } from "./workspace-parts";
 
 // biome-ignore lint/suspicious/noExplicitAny: each renderer gets the settings its registry schema produced
@@ -78,20 +79,6 @@ export const RENDERERS: Record<string, Renderer> = {
   widget: WidgetPart,
 };
 
-/** Static classes so Tailwind keeps them: columns per section and how far an item spans. */
-const COLS: Record<number, string> = {
-  1: "",
-  2: "md:grid-cols-2",
-  3: "md:grid-cols-2 xl:grid-cols-3",
-  4: "md:grid-cols-2 xl:grid-cols-4",
-};
-const SPAN: Record<number, string> = {
-  1: "",
-  2: "md:col-span-2",
-  3: "md:col-span-2 xl:col-span-3",
-  4: "md:col-span-2 xl:col-span-4",
-};
-
 /** One broken part shows a quiet note instead of taking the whole page down. */
 class PartBoundary extends Component<{ name: string; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -127,29 +114,31 @@ export function LayoutItemView({ item }: { item: LayoutItem }) {
   );
 }
 
-function Section({ section }: { section: LayoutSection }) {
-  const columns = Math.min(4, Math.max(1, section.columns || 1));
+/**
+ * A section like a stretch of the dashboard: a small label, then its parts edge to edge with hairlines between them.
+ */
+function Section({ section, first }: { section: LayoutSection; first: boolean }) {
+  const head = section.title || section.description;
   return (
-    <section className="flex flex-col gap-3">
-      {section.title || section.description ? (
-        <header className="flex flex-col gap-0.5">
-          {section.title ? <h2 className="text-[15px] font-semibold">{section.title}</h2> : null}
+    <section className="flex flex-col">
+      {head ? (
+        <header className={cn("flex items-baseline gap-2 px-5 pt-5 pb-2", !first && "border-t")}>
+          {section.title ? (
+            <h2 className="text-[11.5px] font-medium uppercase tracking-wide text-muted-foreground">
+              {section.title}
+            </h2>
+          ) : null}
           {section.description ? (
-            <p className="text-[13px] text-muted-foreground">{section.description}</p>
+            <p className="truncate text-[12px] text-muted-foreground/80">{section.description}</p>
           ) : null}
         </header>
       ) : null}
-      <div className={cn("grid grid-cols-1 gap-4", COLS[columns])}>
-        {section.items.map((item) => {
-          const wide = componentDef(item.component)?.wide;
-          const span = Math.min(columns, item.span ?? (wide ? columns : 1));
-          return (
-            <div key={item.id} className={cn("min-w-0", SPAN[span])}>
-              <LayoutItemView item={item} />
-            </div>
-          );
-        })}
-      </div>
+      <PartGrid
+        items={section.items}
+        columns={section.columns}
+        className={cn("border-b", head && "border-t", !head && !first && "border-t")}
+        render={(item) => <LayoutItemView item={item} />}
+      />
     </section>
   );
 }
@@ -192,9 +181,9 @@ export function LayoutView({ view }: { view: LayoutViewType }) {
         </div>
       ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 p-4 sm:p-6">
-          {view.sections.map((s) => (
-            <Section key={s.id} section={s} />
+        <div className="flex w-full flex-col pb-6">
+          {view.sections.map((s, i) => (
+            <Section key={s.id} section={s} first={i === 0} />
           ))}
         </div>
       </div>

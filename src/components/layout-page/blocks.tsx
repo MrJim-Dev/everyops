@@ -4,14 +4,10 @@ import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useRecordPanels } from "@/components/records/record-panels";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
-import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
-import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { getEntity, getField } from "@/lib/blueprint/lookup";
 import type { Sort } from "@/lib/blueprint/types";
@@ -32,56 +28,27 @@ import {
 import { valueText } from "@/lib/engine/value-text";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { RecordTable, Trend } from "./data";
+import { counted, RecordTable, StatCell } from "./data";
 import { chartColor, Nothing, PartCard, useRows } from "./shared";
 
 type P<T> = { props: T };
 
-/** shadcn's dashboard section cards: each key number with its trend as a badge and a line under it. */
+/** Key numbers in one row divided by thin rules, exactly like the dashboard's stat strip. */
 export function StatCardsView({ stats }: { stats: StatData[] }) {
-  const cols = stats.length;
   return (
-    <div
-      className={cn(
-        "grid grid-cols-1 gap-4 sm:grid-cols-2",
-        cols >= 3 && "xl:grid-cols-3",
-        cols >= 4 && "xl:grid-cols-4",
-      )}
-    >
-      {stats.map((s) => {
-        const c = s.comparison;
-        const pct = !c || c.change === null ? null : Math.round(c.change * 100);
-        return (
-          <Card key={s.title} className="bg-gradient-to-t from-primary/5 to-card">
-            <CardHeader>
-              <CardDescription>{s.title}</CardDescription>
-              <CardTitle className="text-[26px] font-semibold tracking-[-0.02em] tabular-nums">
-                {formatValue(s.kind, s.value)}
-              </CardTitle>
-              {pct !== null ? (
-                <CardAction>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "tabular-nums",
-                      pct > 0 ? "text-primary" : pct < 0 ? "text-destructive" : "",
-                    )}
-                  >
-                    {pct > 0 ? "+" : ""}
-                    {pct}%
-                  </Badge>
-                </CardAction>
-              ) : null}
-            </CardHeader>
-            {c ? (
-              <CardFooter className="text-[12.5px]">
-                <Trend change={c.change} against={c.against} />
-              </CardFooter>
-            ) : null}
-          </Card>
-        );
-      })}
-    </div>
+    <dl className="grid h-full grid-cols-2 bg-background sm:flex">
+      {stats.map((s, i) => (
+        <StatCell
+          key={s.title}
+          data={s}
+          className={cn(
+            i > 0 && "sm:border-l",
+            i % 2 === 1 && "border-l sm:border-l",
+            i > 1 && "border-t sm:border-t-0",
+          )}
+        />
+      ))}
+    </dl>
   );
 }
 
@@ -92,7 +59,7 @@ export function StatCardsPart({ props }: P<{ stats: StatProps[] }>) {
 
 const RANGES = { "7d": 7, "30d": 30, "90d": 90 } as const;
 
-/** shadcn's interactive area chart over the last 90 days of points; the switch shows the last 7, 30 or 90. */
+/** A total over the last 7, 30 or 90 days as an area chart, with a small range switch in its title row. */
 export function DailyChartView({
   title,
   description,
@@ -112,24 +79,28 @@ export function DailyChartView({
       title={title}
       description={description ?? `Last ${RANGES[range]} days`}
       action={
-        <Tabs value={range} onValueChange={(v) => setRange(v as keyof typeof RANGES)}>
-          <TabsList>
-            {Object.keys(RANGES).map((k) => (
-              <TabsTrigger key={k} value={k} className="px-2.5 text-[12px]">
-                {k}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        <ToggleGroup
+          value={[range]}
+          onValueChange={(v: string[]) => v[0] && setRange(v[0] as keyof typeof RANGES)}
+          size="sm"
+          variant="outline"
+          aria-label="Period"
+        >
+          {Object.keys(RANGES).map((k) => (
+            <ToggleGroupItem key={k} value={k} className="h-7 px-2 text-[12px]">
+              {k}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       }
     >
-      <ChartContainer config={config} className="aspect-auto h-[260px] w-full">
-        <AreaChart data={points} margin={{ left: 0, right: 8 }}>
+      <ChartContainer config={config} className="aspect-auto h-[220px] w-full">
+        <AreaChart data={points} margin={{ left: 0, right: 8, top: 4 }}>
           <defs>
             {data.series.map((s, i) => (
               <linearGradient key={s.key} id={`ia-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={chartColor(i)} stopOpacity={0.6} />
-                <stop offset="95%" stopColor={chartColor(i)} stopOpacity={0.05} />
+                <stop offset="5%" stopColor={chartColor(i)} stopOpacity={0.5} />
+                <stop offset="95%" stopColor={chartColor(i)} stopOpacity={0.04} />
               </linearGradient>
             ))}
           </defs>
@@ -138,7 +109,7 @@ export function DailyChartView({
           <YAxis
             tickLine={false}
             axisLine={false}
-            width={44}
+            width={40}
             tickFormatter={(v) => formatNumber(Number(v))}
           />
           <ChartTooltip
@@ -154,8 +125,9 @@ export function DailyChartView({
             <Area
               key={s.key}
               dataKey={s.key}
-              type="natural"
+              type="monotone"
               stroke={chartColor(i)}
+              strokeWidth={1.5}
               fill={`url(#ia-${s.key})`}
               stackId="a"
             />
@@ -179,7 +151,7 @@ export function ChartInteractivePart({
   );
 }
 
-/** shadcn's data table: search, sortable columns and pages over live records; rows open the record. */
+/** The app's table with search in its title row and pages at the foot; rows open the record. */
 export function DataTablePart({
   props,
 }: P<{
@@ -218,8 +190,7 @@ export function DataTablePart({
     );
   return (
     <PartCard
-      title={props.title}
-      description={`${matching.length} of ${rows.length}`}
+      title={counted(props.title, matching.length)}
       action={
         <SearchBox
           value={query}
@@ -230,13 +201,13 @@ export function DataTablePart({
           label={`Search ${entity.pluralName.toLowerCase()}`}
         />
       }
-      contentClassName="px-0"
-      footer={<Pager at={at} pages={pages} onPage={setPage} />}
+      contentClassName="px-0 pb-0"
+      footer={pages > 1 ? <Pager at={at} pages={pages} onPage={setPage} /> : undefined}
     >
       {shown.length ? (
         <RecordTable rows={shown} fields={fields} onOpen={openRecord} sort={sort} onSort={onSort} />
       ) : (
-        <div className="px-6">
+        <div className="px-5 pb-3">
           <Nothing>{query ? "Nothing matches." : undefined}</Nothing>
         </div>
       )}
@@ -254,7 +225,7 @@ export function SearchBox({
   label: string;
 }) {
   return (
-    <div className="relative w-44 sm:w-56">
+    <div className="relative w-40 sm:w-52">
       <MagnifyingGlassIcon
         aria-hidden="true"
         className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
@@ -264,7 +235,7 @@ export function SearchBox({
         onChange={(e) => onChange(e.target.value)}
         placeholder={label}
         aria-label={label}
-        className="h-8 pl-8 text-[13px]"
+        className="h-7 pl-7 text-[12.5px]"
       />
     </div>
   );
@@ -272,48 +243,80 @@ export function SearchBox({
 
 export function Pager({ at, pages, onPage }: { at: number; pages: number; onPage: (n: number) => void }) {
   return (
-    <div className="flex w-full items-center justify-between gap-3">
-      <span>
+    <nav aria-label="Pages" className="flex w-full items-center justify-between gap-3 border-t pt-3">
+      <span className="tabular-nums">
         Page {at + 1} of {pages}
       </span>
-      <Pagination className="mx-0 w-auto">
-        <PaginationContent>
-          <PaginationItem>
-            <Button variant="outline" size="sm" disabled={at === 0} onClick={() => onPage(at - 1)}>
-              Previous
-            </Button>
-          </PaginationItem>
-          <PaginationItem>
-            <Button variant="outline" size="sm" disabled={at >= pages - 1} onClick={() => onPage(at + 1)}>
-              Next
-            </Button>
-          </PaginationItem>
-        </PaginationContent>
-      </Pagination>
-    </div>
+      <span className="flex gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-[12px]"
+          disabled={at === 0}
+          onClick={() => onPage(at - 1)}
+        >
+          Previous
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-[12px]"
+          disabled={at >= pages - 1}
+          onClick={() => onPage(at + 1)}
+        >
+          Next
+        </Button>
+      </span>
+    </nav>
+  );
+}
+
+/** A thin bar under a label and its value, used by rankings and stages. */
+function BarRow({
+  label,
+  value,
+  ratio,
+  color,
+  lead,
+}: {
+  label: string;
+  value: string;
+  ratio: number;
+  color: string;
+  lead?: string;
+}) {
+  return (
+    <li className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2 text-[13px]">
+        {lead ? <span className="w-4 text-[12px] text-muted-foreground tabular-nums">{lead}</span> : null}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <span className="shrink-0 text-[12.5px] tabular-nums text-muted-foreground">{value}</span>
+      </div>
+      <div className={cn("h-1 overflow-hidden rounded-full bg-muted", lead && "ml-6")}>
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${Math.max(0, Math.min(1, ratio)) * 100}%`, background: color }}
+        />
+      </div>
+    </li>
   );
 }
 
 export function LeaderboardView({ title, ranked, kind }: { title: string; ranked: Ranked; kind: ValueKind }) {
-  const top = ranked[0]?.value ?? 1;
+  const top = ranked[0]?.value || 1;
   return (
     <PartCard title={title}>
       {ranked.length ? (
-        <ol className="flex flex-col gap-3">
+        <ol className="flex flex-col gap-2.5">
           {ranked.map((r, i) => (
-            <li key={r.label} className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-2 text-[13px]">
-                <span className="w-4 text-muted-foreground tabular-nums">{i + 1}</span>
-                <span className="flex-1 truncate">{r.label}</span>
-                <span className="tabular-nums">{formatValue(kind, r.value)}</span>
-              </div>
-              <div className="ml-6 h-1.5 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full"
-                  style={{ width: `${(r.value / top) * 100}%`, background: chartColor(i) }}
-                />
-              </div>
-            </li>
+            <BarRow
+              key={r.label}
+              lead={String(i + 1)}
+              label={r.label}
+              value={formatValue(kind, r.value)}
+              ratio={r.value / top}
+              color={chartColor(i)}
+            />
           ))}
         </ol>
       ) : (
@@ -344,18 +347,22 @@ export function StagesView({
 }) {
   const of = total || 1;
   return (
-    <PartCard title={title} description={`${total} ${plural}`}>
-      <ul className="flex flex-col gap-3">
+    <PartCard title={title} description={`${formatNumber(total)} ${plural}`}>
+      <ul className="flex flex-col gap-2.5">
         {stages.map((s) => (
-          <li key={s.label} className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between text-[13px]">
-              <span>{s.label}</span>
-              <span className="tabular-nums text-muted-foreground">
-                {formatNumber(s.count)} · {formatPercent(Math.round((s.count / of) * 1000) / 10)}
-              </span>
-            </div>
-            <Progress value={(s.count / of) * 100} aria-label={s.label} />
-          </li>
+          <BarRow
+            key={s.label}
+            label={s.label}
+            value={`${formatNumber(s.count)} · ${formatPercent(Math.round((s.count / of) * 1000) / 10)}`}
+            ratio={s.count / of}
+            color={
+              s.tone === "danger"
+                ? "var(--destructive)"
+                : s.tone === "warning"
+                  ? "var(--color-amber-500)"
+                  : "var(--primary)"
+            }
+          />
         ))}
       </ul>
     </PartCard>
