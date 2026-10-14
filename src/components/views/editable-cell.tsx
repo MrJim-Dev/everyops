@@ -154,8 +154,10 @@ export function EditableCell({ record, field }: { record: DataRecord; field: Fie
           }
         }}
         className={cn(
-          "-mx-1.5 block w-[calc(100%+12px)] cursor-default truncate rounded-sm px-1.5 py-0.5 text-inherit outline-none select-none [text-align:inherit]",
-          "transition-[background-color,box-shadow] duration-100 hover:bg-muted/60 focus:bg-primary/8 focus:shadow-[inset_0_0_0_1.5px] focus:shadow-primary/70",
+          "block w-full cursor-default truncate py-0.5 text-inherit outline-none select-none [text-align:inherit]",
+          // Hover and selection cover the whole cell, edge to edge, like Supabase (the cell is `relative`).
+          "after:pointer-events-none after:absolute after:inset-0 after:transition-[background-color,box-shadow] after:duration-100",
+          "hover:after:bg-muted/40 focus:after:bg-primary/8 focus:after:shadow-[inset_0_0_0_1.5px_var(--primary)]",
           editing && "opacity-0",
         )}
       >
@@ -167,12 +169,11 @@ export function EditableCell({ record, field }: { record: DataRecord; field: Fie
       </button>
       <Popover.Portal>
         <Popover.Positioner
-          anchor={cell}
+          // Lined up with the whole cell, not just its text.
+          anchor={() => cell.current?.closest("td") ?? cell.current}
           side="bottom"
           align="start"
-          // Sit right on top of the cell, a little wider so there's room to type.
-          sideOffset={({ anchor }) => -anchor.height - 4}
-          alignOffset={-6}
+          sideOffset={({ anchor }) => -anchor.height}
           className="isolate z-50"
         >
           <Popover.Popup
@@ -186,7 +187,7 @@ export function EditableCell({ record, field }: { record: DataRecord; field: Fie
               return input;
             }}
             className={cn(
-              "w-[max(var(--anchor-width),280px)] origin-(--transform-origin) rounded-lg bg-popover p-2 text-popover-foreground shadow-[0_16px_40px_-12px_rgb(0_0_0/0.8)] ring-1 ring-primary/50 outline-none",
+              "w-[max(var(--anchor-width),280px)] origin-(--transform-origin) rounded-[3px] bg-popover p-2 text-popover-foreground shadow-[0_16px_40px_-12px_rgb(0_0_0/0.8)] ring-[1.5px] ring-primary outline-none",
               "transition-[opacity,transform] duration-150 ease-(--ease-out-strong)",
               "data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 data-[ending-style]:duration-100",
             )}
