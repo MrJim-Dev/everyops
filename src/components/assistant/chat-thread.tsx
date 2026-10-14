@@ -35,7 +35,7 @@ function Inline({ text, links }: { text: string; links: Link[] }) {
  * A reply's paragraphs and "- " lists, plus bold, without pulling in a markdown library. Blank lines
  * separate paragraphs; a run of "- " or "1. " lines becomes a list.
  */
-function Rich({ text, links = [] }: { text: string; links?: Link[] }) {
+export function Rich({ text, links = [] }: { text: string; links?: Link[] }) {
   const blocks: { id: number; list?: "ul" | "ol"; lines: string[] }[] = [];
   for (const raw of text.split("\n")) {
     const line = raw.trim();

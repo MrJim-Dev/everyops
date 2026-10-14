@@ -148,7 +148,7 @@ export function CreatePrompt() {
               {voice.state === "idle" ? (
                 <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
                   <SparkleIcon weight="fill" className="size-3.5 shrink-0 text-primary" />
-                  <span className="truncate">Ask EveryOps asks a few questions, then builds it</span>
+                  <span className="truncate">EveryOps asks a few questions, then builds it</span>
                 </span>
               ) : null}
             </span>
