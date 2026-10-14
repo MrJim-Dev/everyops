@@ -122,13 +122,14 @@ export function Dashboard({ system }: { system: System }) {
 
   const main = rest.filter((w) => spanOf(w) === "main");
   const side = rest.filter((w) => spanOf(w) === "side");
+  // The charts and lists fill the page under the stats, so a short dashboard doesn't stop halfway down the screen.
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <DashboardSuggestions system={system} />
       {stats.length ? <StatStrip widgets={stats} /> : null}
       <div
         className={cn(
-          "grid grid-cols-1",
+          "grid flex-1 grid-cols-1",
           main.length && side.length && "xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,1fr)]",
         )}
       >
@@ -136,7 +137,7 @@ export function Dashboard({ system }: { system: System }) {
           // A page of only charts (a reports page) uses two columns on wide screens.
           <div
             className={cn(
-              "flex flex-col divide-y border-b xl:border-b-0",
+              "flex flex-col divide-y border-b xl:border-b-0 [&>*]:flex-1",
               !side.length &&
                 main.length > 1 &&
                 "xl:grid xl:grid-cols-2 xl:divide-y-0 xl:[&>*]:border-b xl:[&>*:nth-child(odd)]:border-r",
