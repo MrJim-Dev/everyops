@@ -19,8 +19,25 @@ import {
  * are added with add_block, and formula cards live in one plan-level list.
  */
 type AnyObject = z.ZodObject<z.ZodRawShape>;
+// Free pages (a markdown document, a canvas, a custom HTML page) share one shape: one union branch instead of three.
+const freePage = z.object({
+  id: z.string(),
+  entityId: z.string().describe('Always ""'),
+  name: z.string(),
+  type: z.string().describe("document, canvas or html"),
+  starter: z
+    .string()
+    .optional()
+    .describe("document: starting markdown; html: a short starting page only when asked to draft one"),
+});
 const assistantView = z.union(
-  view.options.map((o) => {
+  [
+    ...view.options.filter(
+      (o) =>
+        !["document", "canvas", "html"].includes(((o as AnyObject).shape.type as z.ZodLiteral<string>).value),
+    ),
+    freePage,
+  ].map((o) => {
     const type = ((o as AnyObject).shape.type as z.ZodLiteral<string>).value;
     // Add-ons (extras), table grouping and totals are set up by the designer or in the app; leaving them out keeps
     // this schema under Gemini's budget.
@@ -336,9 +353,11 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
     entityId is "" (no record type); put a helpful outline in starter (markdown).
   - html: a page the owner designs entirely in their own HTML and CSS ("a custom HTML page", "I have my own landing
     page design", "a fully custom booking page"). Its entityId is "". The owner pastes or uploads the HTML in the
-    page's editor, which starts with a styled template: leave html empty unless they ask you to write or draft the
-    page itself (then keep it short). Set public true only when they want it
-    live now. In the reply, say they can open Edit HTML, and that "Connect a form" adds a form that saves to one of
+    page's editor, which starts with a styled template. When they ask you to write or draft the page, put the
+    complete HTML document (short, with inline CSS) in the view's starter; otherwise leave starter empty. When they
+    want it live now, add a second op after the add_view: update_view with that view's id and public true. Only
+    say it's drafted or live when the plan does it. In the reply, say they can open Edit HTML, and that "Connect a
+    form" adds a form that saves to one of
     their public forms (so a custom booking page still saves real bookings).
 - Reports and totals pages: add_system with no views and several add_widget on it; a page without views shows
   its widgets as a dashboard. Start with 2 to 4 stat widgets for the totals (metric count/sum/avg, optional
