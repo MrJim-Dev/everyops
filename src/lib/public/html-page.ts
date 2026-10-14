@@ -2,8 +2,10 @@
  * Custom HTML pages: a whole page the owner designs (a landing page, a booking or sign-up form, instructions) shown
  * in a sandboxed frame. Scripts may run, but in an opaque origin with no access to the app, its cookies or the page
  * around it. The only way out is a small message bridge: a <form data-everyops-form="formViewId"> (or
- * EveryOps.submit(formViewId, values)) sends its values to one of the workspace's public forms, which checks them
- * exactly like its own form does.
+ * EveryOps.submit(formViewId, values, extras)) sends its values to one of the workspace's public forms, which checks
+ * them exactly like its own form does. A custom booking page also reads through it: EveryOps.form(id) (fields,
+ * courts or rooms, add-ons and payment methods), EveryOps.slots(id, resource, day), EveryOps.days(id, resource, from,
+ * count), EveryOps.quote(id, values, extras) and EveryOps.upload(id, file), all answered by the page around it.
  */
 import type { Blueprint, FieldValue, HtmlPageView } from "@/lib/blueprint/types";
 import { at } from "@/lib/time";
@@ -68,9 +70,15 @@ export function htmlDocKeys(bp: Blueprint): string[] {
 /** Runs inside the sandboxed page. Kept tiny and dependency-free; it only talks to the page that embeds it. */
 const BRIDGE = `(function(){
 var waiting={},next=0;
-function submit(form,values){return new Promise(function(done){var id=++next;waiting[id]=done;parent.postMessage({everyops:"submit",id:id,form:String(form),values:values||{}},"*");});}
+function call(method,form,args){return new Promise(function(done){var id=++next;waiting[id]=done;parent.postMessage({everyops:"call",id:id,method:method,form:String(form),args:args||{}},"*");});}
+function submit(form,values,extras){return new Promise(function(done){var id=++next;waiting[id]=done;parent.postMessage({everyops:"submit",id:id,form:String(form),values:values||{},extras:extras||{}},"*");});}
 window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.everyops!=="result")return;var done=waiting[d.id];if(done){delete waiting[d.id];done(d.result);}});
-window.EveryOps={submit:submit};
+window.EveryOps={submit:submit,
+form:function(f){return call("form",f);},
+slots:function(f,resource,day){return call("slots",f,{resource:resource,date:day});},
+days:function(f,resource,from,count){return call("days",f,{resource:resource,from:from,count:count||42});},
+quote:function(f,values,extras){return call("quote",f,{values:values||{},extras:extras||{}});},
+upload:function(f,file){return call("upload",f,{file:file});}};
 document.addEventListener("submit",function(e){var f=e.target,id=f&&f.getAttribute&&f.getAttribute("data-everyops-form");if(!id)return;e.preventDefault();
 var values={};new FormData(f).forEach(function(v,k){if(typeof v!=="string")return;if(k in values){values[k]=[].concat(values[k],v);}else values[k]=v;});
 var buttons=f.querySelectorAll("button,[type=submit]");buttons.forEach(function(b){b.disabled=true;});f.setAttribute("data-state","sending");
@@ -82,13 +90,17 @@ document.addEventListener("click",function(e){var a=e.target&&e.target.closest&&
 })();`;
 
 /**
- * The document the frame shows: the owner's HTML with the bridge added. A fragment (no <html>) is wrapped in a
- * minimal page so it still renders like a page on phones.
+ * The document the frame shows: the owner's HTML with the bridge added first thing in <head>, so the page's own
+ * scripts can call EveryOps as they run (a custom booking page reads its form on load). A fragment (no <html>) is
+ * wrapped in a minimal page so it still renders like a page on phones.
  */
 export function frameDocument(html: string): string {
   const script = `<script>${BRIDGE}</script>`;
   if (!/<html[\s>]/i.test(html))
-    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${html}${script}</body></html>`;
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${script}</head><body>${html}</body></html>`;
+  const head = /<head(\s[^>]*)?>/i.exec(html);
+  if (head)
+    return html.slice(0, head.index + head[0].length) + script + html.slice(head.index + head[0].length);
   const end = html.search(/<\/body>/i);
   if (end >= 0) return html.slice(0, end) + script + html.slice(end);
   return html + script;
@@ -105,8 +117,13 @@ export type RawFormValues = Record<string, string | string[]>;
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.trim() ?? "";
 const list = (v: string | string[] | undefined) =>
   (Array.isArray(v) ? v : (v ?? "").split(",")).map((x) => x.trim()).filter(Boolean);
-/** "2026-10-20T18:00" (a datetime-local input) as an ISO instant in Manila. */
+/**
+ * "2026-10-20T18:00" (a datetime-local input) as an ISO instant in Manila. A value that already says its zone (a slot
+ * from EveryOps.slots, "…T10:00:00.000Z") is an instant already and is kept as it is.
+ */
 const manila = (local: string) => {
+  if (/T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/i.test(local))
+    return Number.isFinite(Date.parse(local)) ? new Date(local).toISOString() : "";
   const [day, time] = local.split("T");
   return /^\d{4}-\d{2}-\d{2}$/.test(day) && /^\d{2}:\d{2}/.test(time ?? "") ? at(day, time.slice(0, 5)) : "";
 };
