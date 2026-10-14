@@ -67,11 +67,11 @@ Use pnpm only. `pnpm build` matters: `cacheComponents` errors (below) only show 
 
 ## AI
 
-- Gemini is called only from server code in `src/server/ai` (Vertex AI, `asia-southeast1`, model from `GEMINI_MODEL`, default `gemini-3.5-flash`). Never call it from the browser and never add API keys; Cloud Run uses the `everyops-run` service account and local dev uses gcloud ADC.
+- Gemini is called only from server code in `src/server/ai` (Vertex AI, model from `GEMINI_MODEL`, default `gemini-3.7-flash`, location from `GEMINI_LOCATION`, default `global`). Never call it from the browser and never add API keys; Cloud Run uses the `everyops-run` service account and local dev uses gcloud ADC.
 - Every AI feature returns structured JSON through `generateJson` with a Zod schema, and its output must pass the same validation the app already uses (`validateBlueprint`, op checks) before the user sees it. Nothing is applied without the owner's approval.
 - AI routes check the session and `takeAiToken`. Keep prompts in a `*-prompt.ts` module next to the feature so they can be tested directly.
 - The interview's brief is legitimately 3–8k characters, so the interview runs with `maxStringChars: 12_000` and a 40 s timeout, and `/api/ai/design` accepts briefs up to 12,000 characters. The default 3000 cut healthy briefs off and showed "Gemini didn't answer in time", and the old 8,000 cap on the route rejected a construction company's brief.
-- Don't lower temperature on Gemini 3 models (they loop), and don't use the `global` location (it stalls). Only the designer and the assistant set `thinking: "LOW"`.
+- Don't lower temperature on Gemini 3 models (they loop). gemini-3.7-flash is only served from `global`; that endpoint stalls now and then (calls with no output for 60 s), which the hedged retries absorb at the cost of time. To roll back, deploy with `GEMINI_MODEL=gemini-3.5-flash GEMINI_LOCATION=asia-southeast1`. Only the designer and the assistant set `thinking: "LOW"`.
 - Gemini sometimes runs away inside a value: a string or number it never closes, repeating filler until the token limit (a minute or more). `generateJson` streams every call through `runawayWatcher` and stops it within seconds so the hedged retry starts. Vertex enforces `enum` but not `const`, `maxLength` or `maximum`; optional decorative text in a big schema is where runaways start. The designer asks for `designRequest` (no hero subheading, form button, approval labels or chart target; `tidy` fills them in) with `enumLiterals`. Test designer changes with several runs of a real brief, not one.
 
 
