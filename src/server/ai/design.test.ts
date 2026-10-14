@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import type { Blueprint } from "@/lib/blueprint/types";
+import type { Blueprint, Entity } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { leaveBlueprint } from "@/lib/catalog/employee-leave";
@@ -131,6 +131,52 @@ describe("repairStructure", () => {
     });
     expect(fixed.systems.map((s) => s.name)).not.toContain("Add-on lines");
     expect(fixed.systems.find((s) => s.id === "courts")?.name).toBe("Setup");
+  });
+});
+
+describe("schedules on bookings that don't say what is booked", () => {
+  const stripped = () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
+    const bp = structuredClone(blueprint);
+    const booking = bp.entities.find((e) => e.booking) as Entity;
+    const settings = booking.booking;
+    const court = bp.entities.find(
+      (e) => e.id === booking.fields.find((f) => f.id === settings?.resourceFieldId)?.relation?.entityId,
+    ) as Entity;
+    delete booking.booking;
+    delete court.resource;
+    return { bp, booking, settings, court };
+  };
+
+  it("get the booking settings back, and the thing booked gets default hours", () => {
+    const { bp, booking, settings, court } = stripped();
+    expect(validateBlueprint(bp).map((e) => e.message)).toContain(
+      "A schedule needs a bookable resource with opening hours",
+    );
+    const fixed = repairStructure(bp);
+    const again = fixed.entities.find((e) => e.id === booking.id);
+    expect(again?.booking).toMatchObject({
+      resourceFieldId: settings?.resourceFieldId,
+      timeFieldId: settings?.timeFieldId,
+      statusFieldId: settings?.statusFieldId,
+    });
+    expect(fixed.entities.find((e) => e.id === court.id)?.resource).toEqual({
+      opensAt: "08:00",
+      closesAt: "22:00",
+      slotMinutes: 60,
+    });
+    expect(validateBlueprint(fixed)).toEqual([]);
+  });
+
+  it("become a calendar when there's no time range to book", () => {
+    const { bp, booking } = stripped();
+    const entity = bp.entities.find((e) => e.id === booking.id) as Entity;
+    for (const f of entity.fields)
+      if (f.type === "time_range") Object.assign(f, { type: "date", range: undefined });
+    const fixed = repairStructure(bp);
+    const grids = fixed.views.filter((v) => v.entityId === booking.id && v.type === "slot_grid");
+    expect(grids).toEqual([]);
+    expect(fixed.views.some((v) => v.entityId === booking.id && v.type === "calendar")).toBe(true);
   });
 });
 

@@ -1336,6 +1336,7 @@ export function repairStructure(bp: Blueprint): Blueprint {
       }
     }
   }
+  bookableSchedules(bp);
   // A booking's court fee comes from the court's rates and the hours booked, not from a number someone types.
   for (const e of bp.entities) {
     const b = e.booking;
@@ -1414,6 +1415,81 @@ function slotTimes(label: string, id: string): { start: number; end?: number } |
   return { start, ...(end !== null && end > start ? { end } : {}) };
 }
 
+/** The thing a record type books: a record type with hours, else one named like a court or room, never people. */
+function bookableField(bp: Blueprint, e: Entity): Field | undefined {
+  const relations = e.fields.filter((f) => f.type === "relation" && f.relation?.entityId !== e.id);
+  const target = (f: Field) => bp.entities.find((x) => x.id === f.relation?.entityId);
+  const named = (f: Field, re: RegExp) => re.test(`${target(f)?.id} ${target(f)?.name}`.toLowerCase());
+  return (
+    relations.find((f) => target(f)?.resource) ??
+    relations.find((f) =>
+      named(
+        f,
+        /court|room|table|space|venue|lane|field|studio|desk|resource|amenit|facilit|pool|hall|clubhouse/,
+      ),
+    ) ??
+    relations.find((f) => !named(f, /player|client|customer|member|guest|person|staff|user|people|resident/))
+  );
+}
+
+/** Hours a bookable thing gets when the design doesn't say: the owner can change them in Settings. */
+const DEFAULT_HOURS = { opensAt: "08:00", closesAt: "22:00", slotMinutes: 60 as const };
+
+/**
+ * A schedule (slot grid) only works on bookings of something with opening hours. Gemini often adds one to bookings of
+ * an amenity or room without saying the hours or which fields hold the time and status, and the validator sent the
+ * whole design back for a repair (the repair HOA setups needed about half the time). Those settings are filled in
+ * from the record type itself: the time range, the status, and the thing booked, which gets default hours. Without a
+ * time range to book, the schedule becomes a calendar, or goes when there's no date either.
+ */
+export function bookableSchedules(bp: Blueprint): Blueprint {
+  const dropped = new Set<string>();
+  bp.views = bp.views.map((v): View => {
+    if (v.type !== "slot_grid") return v;
+    const e = bp.entities.find((x) => x.id === v.entityId);
+    if (!e) return v;
+    const time =
+      e.fields.find(
+        (f) => f.id === e.booking?.timeFieldId && f.type === "time_range" && f.range !== "dates",
+      ) ?? e.fields.find((f) => f.type === "time_range" && f.range !== "dates");
+    const status =
+      e.fields.find((f) => f.id === e.booking?.statusFieldId) ?? e.fields.find((f) => f.type === "status");
+    const resourceField =
+      e.fields.find((f) => f.id === e.booking?.resourceFieldId && f.type === "relation") ??
+      bookableField(bp, e);
+    const resource = bp.entities.find((x) => x.id === resourceField?.relation?.entityId);
+    if (time && status && resourceField && resource) {
+      resource.resource ??= { ...DEFAULT_HOURS };
+      e.booking = {
+        resourceFieldId: resourceField.id,
+        timeFieldId: time.id,
+        statusFieldId: status.id,
+        blockingStatuses:
+          e.booking?.blockingStatuses.filter((id) => status.options?.some((o) => o.id === id)) ??
+          (status.options ?? []).map((o) => o.id).filter((id) => !/cancel/.test(id)),
+      };
+      return v;
+    }
+    const date = e.fields.find((f) => f.type === "time_range" || f.type === "datetime" || f.type === "date");
+    if (date)
+      return {
+        id: v.id,
+        entityId: v.entityId,
+        name: v.name,
+        type: "calendar",
+        dateFieldId: date.id,
+        titleFieldId: e.primaryFieldId,
+      };
+    dropped.add(v.id);
+    return v;
+  });
+  if (dropped.size) {
+    bp.views = bp.views.filter((v) => !dropped.has(v.id));
+    for (const s of bp.systems) s.viewIds = s.viewIds.filter((id) => !dropped.has(id));
+  }
+  return bp;
+}
+
 /**
  * Gemini sometimes models a court booking as a date plus a dropdown of time slots. Bookings need one time_range
  * for the schedule, double-booking checks and public slots, so the pair becomes a "Time" range: screens, charts and
@@ -1431,14 +1507,7 @@ export function mergeDateAndSlot(bp: Blueprint, samples: Design["samples"]): Des
         (f.options?.length ?? 0) >= 2 &&
         f.options?.every((o) => slotTimes(o.label, o.id)),
     );
-    // The thing being booked: a record type with hours, else one named like a court or room, never people.
-    const relations = e.fields.filter((f) => f.type === "relation" && f.relation?.entityId !== e.id);
-    const target = (f: Field) => bp.entities.find((x) => x.id === f.relation?.entityId);
-    const named = (f: Field, re: RegExp) => re.test(`${target(f)?.id} ${target(f)?.name}`.toLowerCase());
-    const resourceField =
-      relations.find((f) => target(f)?.resource) ??
-      relations.find((f) => named(f, /court|room|table|space|venue|lane|field|studio|desk|resource/)) ??
-      relations.find((f) => !named(f, /player|client|customer|member|guest|person|staff|user|people/));
+    const resourceField = bookableField(bp, e);
     const resource = bp.entities.find((x) => x.id === resourceField?.relation?.entityId);
     if (!date || !slot?.options || !resourceField || !resource) continue;
 
