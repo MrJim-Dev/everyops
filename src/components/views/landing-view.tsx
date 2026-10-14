@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Block, LandingView as LandingConfig } from "@/lib/blueprint/types";
 import { docKey, resolveBlocks } from "@/lib/public/resolve";
-import { canEdit } from "@/lib/store/workspaces";
+import { canEdit, canManage } from "@/lib/store/workspaces";
 import { PublicBar } from "./public-bar";
 
 /** A landing page inside the app: a live preview of the public page, with its text editable in place. */
@@ -21,7 +21,10 @@ export function LandingView({ view }: { view: LandingConfig }) {
     () => resolveBlocks(ws.blueprint, ws.records, ws.docs, ws.id, view),
     [ws.blueprint, ws.records, ws.docs, ws.id, view],
   );
-  const editable = view.blocks.filter((b) => b.type === "hero" || b.type === "text" || b.type === "html");
+  // Custom HTML is code on the public page: only owners and admins change it (the server enforces this too).
+  const editable = view.blocks.filter(
+    (b) => b.type === "hero" || b.type === "text" || (b.type === "html" && canManage(ws.role)),
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

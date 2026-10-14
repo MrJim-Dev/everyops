@@ -81,7 +81,7 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
 
   bp.views.forEach((view, vi) => {
     const path = `views.${vi}`;
-    if (view.type === "document" || view.type === "canvas") return;
+    if (view.type === "document" || view.type === "canvas" || view.type === "html") return;
     if (view.type === "landing") {
       checkBlocks(bp, view.blocks, path, errors);
       return;

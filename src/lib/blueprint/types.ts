@@ -204,6 +204,17 @@ export type LandingView = ViewBase & {
   public?: boolean;
   blocks: Block[];
 };
+/**
+ * A page the owner designs entirely in HTML and CSS: a custom landing page, booking or sign-up form, or
+ * instructions. entityId is "". The page lives in the workspace's docs under the view id; `html` is what it starts
+ * with. It runs in a sandboxed frame and can send forms to the workspace's public forms (src/lib/public/html-page.ts).
+ */
+export type HtmlPageView = ViewBase & {
+  type: "html";
+  /** Shown at /s/[workspace]/[view] once published (private until then). */
+  public?: boolean;
+  html?: string;
+};
 
 /**
  * Pieces of a public page. Text in hero, text and html blocks can be edited in the app (kept in the workspace's
@@ -239,7 +250,8 @@ export type View =
   | NotesView
   | DocumentView
   | CanvasView
-  | LandingView;
+  | LandingView
+  | HtmlPageView;
 
 export type ViewType = View["type"];
 

@@ -334,6 +334,12 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
     board"): shapes, text, sticky notes, arrows and pictures. Its entityId is "" and it needs no other settings.
   - document: one free page of markdown the team edits ("a markdown page", "our policies", "an SOP page"). Its
     entityId is "" (no record type); put a helpful outline in starter (markdown).
+  - html: a page the owner designs entirely in their own HTML and CSS ("a custom HTML page", "I have my own landing
+    page design", "a fully custom booking page"). Its entityId is "". The owner pastes or uploads the HTML in the
+    page's editor, which starts with a styled template: leave html empty unless they ask you to write or draft the
+    page itself (then keep it short). Set public true only when they want it
+    live now. In the reply, say they can open Edit HTML, and that "Connect a form" adds a form that saves to one of
+    their public forms (so a custom booking page still saves real bookings).
 - Reports and totals pages: add_system with no views and several add_widget on it; a page without views shows
   its widgets as a dashboard. Start with 2 to 4 stat widgets for the totals (metric count/sum/avg, optional
   filter, e.g. revenue from paid bookings, bookings this month), then chart for graphs: over

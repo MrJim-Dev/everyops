@@ -244,6 +244,17 @@ export const view = z.union([
   z.object({ ...viewBase, type: z.literal("canvas") }),
   z.object({
     ...viewBase,
+    type: z.literal("html"),
+    public: z.boolean().optional().describe("true only when the person wants it live now"),
+    html: z
+      .string()
+      .optional()
+      .describe(
+        "A short starting page only when asked to draft one; the owner pastes or uploads their own design",
+      ),
+  }),
+  z.object({
+    ...viewBase,
     type: z.literal("landing"),
     public: z.boolean().optional(),
     blocks: z.array(block).describe("The public page, top to bottom"),
@@ -498,7 +509,8 @@ Rules for a valid blueprint:
   are a notebook over a record type with a text title and a long_text body (titleFieldId, bodyFieldId).
   document views are one free markdown page with entityId "" and a starter outline. canvas views are a free
   whiteboard (shapes, text, sticky notes, arrows, pictures) with entityId "", for a floor plan, mood board,
-  layout or process map. Use them when asked.
+  layout or process map. html views are a page the owner designs in their own HTML (entityId ""); add one only
+  when asked for a custom HTML page. Use them when asked.
 - Charts plot over time (dateFieldId, bucket; kind line, area or bar) or by category (groupByFieldId; kind bar
   or donut). A reports page is a system with only widgets: stats for totals and several charts.
 - A stat that combines record types or needs arithmetic (total income = bookings + other income, profit,

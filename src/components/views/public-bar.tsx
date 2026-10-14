@@ -5,12 +5,18 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/components/workspace/workspace-context";
-import type { FormView, LandingView } from "@/lib/blueprint/types";
+import type { FormView, HtmlPageView, LandingView } from "@/lib/blueprint/types";
 import { isPublic, sitePath } from "@/lib/public/resolve";
 import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 
-/** Above a form or landing page: whether it's public, its link, and (for owners and admins) a switch. */
-export function PublicBar({ view, children }: { view: FormView | LandingView; children?: React.ReactNode }) {
+/** Above a form, landing or custom HTML page: whether it's public, its link, and (for managers) a switch. */
+export function PublicBar({
+  view,
+  children,
+}: {
+  view: FormView | LandingView | HtmlPageView;
+  children?: React.ReactNode;
+}) {
   const ws = useWorkspace();
   const applyChange = useWorkspaces((s) => s.applyChange);
   const live = ws.mode === "live";

@@ -15,6 +15,7 @@ import type {
   FieldType,
   FieldValue,
   FormView,
+  HtmlPageView,
   LandingView,
   Tone,
   View,
@@ -29,6 +30,7 @@ import {
   formatRange,
   isTimeRange,
 } from "@/lib/format";
+import { pageHtml } from "./html-page";
 
 export type PageDocs = Record<string, { body: string } | undefined>;
 
@@ -96,36 +98,41 @@ export type ResolvedBlock =
 export type PublicPageData = {
   id: string;
   name: string;
-  type: "landing" | "form";
+  type: "landing" | "form" | "html";
   blocks: ResolvedBlock[];
   /** Form pages: the form itself, shown before their blocks. */
   form?: PublicForm;
+  /** HTML pages: the owner's page, and the public forms it may send to (by view id). */
+  html?: string;
+  forms?: PublicForm[];
 };
 
 export type PublicSite = {
   slug: string;
   name: string;
-  pages: { id: string; name: string; type: "landing" | "form" }[];
+  pages: { id: string; name: string; type: "landing" | "form" | "html" }[];
 };
 
 export const sitePath = (slug: string, viewId?: string) => (viewId ? `/s/${slug}/${viewId}` : `/s/${slug}`);
 export const docKey = (viewId: string, blockId: string) => `${viewId}:${blockId}`;
 
 export function isPublic(view: View): boolean {
-  return (view.type === "landing" && view.public !== false) || (view.type === "form" && view.public === true);
+  return (
+    (view.type === "landing" && view.public !== false) ||
+    ((view.type === "form" || view.type === "html") && view.public === true)
+  );
 }
 
-export function publicViews(bp: Blueprint): (LandingView | FormView)[] {
-  return bp.views.filter((v): v is LandingView | FormView => isPublic(v));
+export function publicViews(bp: Blueprint): (LandingView | FormView | HtmlPageView)[] {
+  return bp.views.filter((v): v is LandingView | FormView | HtmlPageView => isPublic(v));
 }
 
-/** The site's pages in sidebar order: landing pages first, then public forms. */
+/** The site's pages in sidebar order: landing and custom HTML pages first (the first is the home page), then forms. */
 export function siteOf(slug: string, name: string, bp: Blueprint): PublicSite | null {
   const order = bp.systems.flatMap((s) => s.viewIds);
   const views = publicViews(bp).sort(
     (a, b) =>
-      Number(b.type === "landing") - Number(a.type === "landing") ||
-      order.indexOf(a.id) - order.indexOf(b.id),
+      Number(b.type !== "form") - Number(a.type !== "form") || order.indexOf(a.id) - order.indexOf(b.id),
   );
   return views.length
     ? { slug, name, pages: views.map((v) => ({ id: v.id, name: v.name, type: v.type })) }
@@ -195,7 +202,8 @@ export function formatCell(
 function publishedEntities(bp: Blueprint): Set<string> {
   const ids = new Set(bp.entities.filter((e) => e.resource).map((e) => e.id));
   for (const view of publicViews(bp))
-    for (const block of view.blocks ?? []) if (block.type === "records") ids.add(block.entityId);
+    if (view.type !== "html")
+      for (const block of view.blocks ?? []) if (block.type === "records") ids.add(block.entityId);
   return ids;
 }
 
@@ -411,11 +419,27 @@ export function resolvePage(
   now = new Date(),
 ): PublicPageData | null {
   const view = bp.views.find((v) => v.id === viewId);
-  if (!view || !isPublic(view) || (view.type !== "landing" && view.type !== "form")) return null;
+  if (!view || !isPublic(view)) return null;
+  if (view.type === "html") return htmlPage(bp, records, docs, view);
+  if (view.type !== "landing" && view.type !== "form") return null;
   const blocks = resolveBlocks(bp, records, docs, slug, view, now);
   if (view.type === "landing") return { id: view.id, name: view.name, type: "landing", blocks };
   const form = publicForm(bp, records, view);
   return form ? { id: view.id, name: view.name, type: "form", blocks, form } : null;
+}
+
+/** A custom HTML page with the public forms it may send to; the bridge refuses any other form. */
+export function htmlPage(
+  bp: Blueprint,
+  records: DataRecord[],
+  docs: PageDocs,
+  view: HtmlPageView,
+): PublicPageData {
+  const forms = bp.views
+    .filter((v): v is FormView => v.type === "form" && v.public === true)
+    .map((v) => publicForm(bp, records, v))
+    .filter((f): f is PublicForm => !!f);
+  return { id: view.id, name: view.name, type: "html", blocks: [], html: pageHtml(view, docs), forms };
 }
 
 /** Hero text has to fit a hero. */

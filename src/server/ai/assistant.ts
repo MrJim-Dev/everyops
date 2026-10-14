@@ -416,6 +416,7 @@ function toDesignOps(
       op.op === "add_view" &&
       op.view.type !== "document" &&
       op.view.type !== "canvas" &&
+      op.view.type !== "html" &&
       op.view.type !== "landing"
     )
       op.view.entityId = resolveEntity(op.view.entityId);
@@ -448,7 +449,12 @@ function toDesignOps(
       continue;
     }
     if (op.op !== "add_view") continue;
-    if (op.view.type === "document" || op.view.type === "canvas" || op.view.type === "landing") {
+    if (
+      op.view.type === "document" ||
+      op.view.type === "canvas" ||
+      op.view.type === "html" ||
+      op.view.type === "landing"
+    ) {
       op.view.entityId = "";
       continue;
     }
@@ -768,7 +774,11 @@ ${bp.systems
                       ? `, blocks: ${v.blocks.map((b) => `${b.type} ${b.id}`).join(" / ")}`
                       : ""
                   }`
-                : "";
+                : v.type === "html"
+                  ? isPublic(v)
+                    ? ", public"
+                    : ", team only"
+                  : "";
             return `${v.name} (${v.id}, ${v.type}${v.entityId ? ` of ${v.entityId}` : ""}${extra})`;
           }),
           ...(s.widgetIds.length ? [`${s.widgetIds.length} dashboard widgets`] : []),
