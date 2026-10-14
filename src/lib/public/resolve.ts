@@ -5,6 +5,7 @@
  * or record types a public block already shows), never, say, the list of customers.
  */
 import { displayKind, editableFields } from "@/lib/blueprint/field-kind";
+import { formSteps } from "@/lib/blueprint/form-steps";
 import { findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type {
   Block,
@@ -68,6 +69,10 @@ export type PublicForm = {
   choices: Record<string, { id: string; title: string }[]>;
   /** Booking forms pick a resource, a day and a free slot instead of typing times. */
   booking?: { resourceFieldId: string; timeFieldId: string; resources: PublicResource[] };
+  /** Multi-step forms: the fields of each step, in order. */
+  steps?: { title: string; description?: string; fieldIds: string[] }[];
+  /** With steps: a summary to check before sending. */
+  review?: boolean;
 };
 
 export type ResolvedBlock =
@@ -245,6 +250,26 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
     };
     choices[b.resourceFieldId] ??= booking.resources.map((r) => ({ id: r.id, title: r.title }));
   }
+  let steps: PublicForm["steps"];
+  if (view.steps?.length) {
+    steps = formSteps(
+      entity,
+      view,
+      fields.map((f) => f.id),
+    ).map(({ title, description, fieldIds }) => ({
+      title,
+      description,
+      fieldIds,
+    }));
+    // The slot is picked under the resource, so it always belongs to the resource's step.
+    if (booking) {
+      const { resourceFieldId, timeFieldId } = booking;
+      steps = steps.map((s) => ({ ...s, fieldIds: s.fieldIds.filter((id) => id !== timeFieldId) }));
+      const home = steps.find((s) => s.fieldIds.includes(resourceFieldId)) ?? steps[0];
+      home.fieldIds.push(timeFieldId);
+      steps = steps.filter((s) => s.fieldIds.length);
+    }
+  }
   return {
     viewId: view.id,
     title: view.name,
@@ -261,6 +286,8 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
     })),
     choices,
     booking,
+    steps,
+    review: steps ? !!view.review : undefined,
   };
 }
 

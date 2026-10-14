@@ -280,6 +280,9 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         if (op.patch.calc?.terms[0]) {
           widget.entityId = op.patch.calc.terms[0].entityId;
           if (op.patch.filter === undefined) delete widget.filter;
+          // A formula's totals can span record types, so the period comparison (one date field) no longer applies.
+          delete widget.compare;
+          delete widget.sparkline;
         }
         if (widget.filter === "") delete widget.filter;
         break;

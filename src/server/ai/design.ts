@@ -33,7 +33,15 @@ export function toView(v: Design["views"][number]): View {
   const base = { id: v.id, entityId: v.entityId, name: v.name };
   switch (v.type) {
     case "table":
-      return { ...base, type: "table", fieldIds: v.fieldIds ?? [], filter: v.filter, sort: v.sort };
+      return {
+        ...base,
+        type: "table",
+        fieldIds: v.fieldIds ?? [],
+        filter: v.filter,
+        sort: v.sort,
+        ...(v.groupByFieldId ? { groupByFieldId: v.groupByFieldId } : {}),
+        ...(v.totals ? { totals: true } : {}),
+      };
     case "kanban":
       return {
         ...base,
@@ -81,6 +89,8 @@ export function toView(v: Design["views"][number]): View {
         ...(v.submitLabel ? { submitLabel: v.submitLabel } : {}),
         ...(v.public ? { public: true } : {}),
         ...(v.blocks?.length ? { blocks: v.blocks as Block[] } : {}),
+        ...(v.steps?.length ? { steps: v.steps } : {}),
+        ...(v.steps?.length && v.review ? { review: true } : {}),
       };
     case "notes":
       return {
@@ -280,6 +290,20 @@ export function tidy(bp: Blueprint): Blueprint {
     if (v.type === "form") {
       v.fieldIds = v.fieldIds.filter((id) => has.has(id));
       if (v.blocks) v.blocks = tidyBlocks(v.blocks, resolve, fieldsOf, formIds);
+      if (v.steps) {
+        // Each field in one step, only real fields, and no empty steps.
+        const seen = new Set<string>();
+        v.steps = v.steps
+          .map((s) => ({
+            ...s,
+            fieldIds: s.fieldIds.filter((id) => has.has(id) && !seen.has(id) && seen.add(id)),
+          }))
+          .filter((s) => s.fieldIds.length);
+        if (v.steps.length < 2) {
+          delete v.steps;
+          delete v.review;
+        }
+      }
     }
     if (v.type === "notes") {
       const entity = bp.entities.find((e) => e.id === v.entityId);
@@ -289,6 +313,7 @@ export function tidy(bp: Blueprint): Blueprint {
       v.fieldIds = v.fieldIds.filter((id) => has.has(id));
       if (!v.fieldIds.length) v.fieldIds = [...has].slice(0, 5);
       v.sort = v.sort?.filter((x) => has.has(x.fieldId));
+      if (v.groupByFieldId && !has.has(v.groupByFieldId)) delete v.groupByFieldId;
     }
     if (v.type === "kanban") v.cardFieldIds = v.cardFieldIds.filter((id) => has.has(id));
     if (v.type === "approval_queue") {
@@ -347,6 +372,26 @@ export function tidy(bp: Blueprint): Blueprint {
     }
     if (w.list) w.list.fieldIds = w.list.fieldIds.filter((id) => has.has(id));
     if (w.type === "list" && !w.list?.fieldIds.length) return false;
+    const fieldOf = (id: string) =>
+      bp.entities.find((e) => e.id === w.entityId)?.fields.find((f) => f.id === id);
+    const dated = (id: string) => ["date", "datetime", "time_range"].includes(fieldOf(id)?.type ?? "");
+    const timed = (id: string) => {
+      const f = fieldOf(id);
+      return !!f && (f.type === "datetime" || (f.type === "time_range" && f.range !== "dates"));
+    };
+    if (w.compare && (w.type !== "stat" || w.calc || !dated(w.compare.dateFieldId))) {
+      delete w.compare;
+      delete w.sparkline;
+    }
+    // A sparkline draws the comparison's daily values, so it means nothing without one.
+    if (!w.compare) delete w.sparkline;
+    if (w.type === "agenda") {
+      if (!w.agenda || !dated(w.agenda.dateFieldId)) return false;
+      w.agenda.fieldIds = w.agenda.fieldIds?.filter((id) => has.has(id)).slice(0, 3);
+    } else delete w.agenda;
+    if (w.type === "heatmap") {
+      if (!w.heatmap || !timed(w.heatmap.dateFieldId)) return false;
+    } else delete w.heatmap;
     return true;
   });
   const viewIds = new Set(bp.views.map((v) => v.id));

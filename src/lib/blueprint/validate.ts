@@ -1,8 +1,15 @@
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
-import type { Block, Blueprint, Entity } from "./types";
+import { displayKind } from "./field-kind";
+import type { Block, Blueprint, Entity, Field } from "./types";
 
 export type ValidationError = { path: string; message: string };
+
+const DATE_TYPES = new Set(["date", "datetime", "time_range"]);
+const GROUP_KINDS = new Set(["choice", "status", "relation", "person", "checkbox"]);
+/** A moment in time with an hour, which heatmaps need. */
+const hasHour = (f: Field | undefined) =>
+  !!f && (f.type === "datetime" || (f.type === "time_range" && f.range !== "dates"));
 
 function checkExpr(bp: Blueprint, entity: Entity, src: string, path: string, errors: ValidationError[]) {
   const parsed = parseExpr(src);
@@ -93,6 +100,14 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
       case "table":
         missing(view.fieldIds);
         if (view.filter) checkExpr(bp, entity, view.filter, path, errors);
+        if (view.groupByFieldId) {
+          const field = entity.fields.find((f) => f.id === view.groupByFieldId);
+          if (!field || !GROUP_KINDS.has(displayKind(bp, field)))
+            errors.push({
+              path,
+              message: `${view.name} can only group by a select, status, relation, person or checkbox field`,
+            });
+        }
         break;
       case "kanban":
         missing([view.statusFieldId, ...view.cardFieldIds]);
@@ -120,6 +135,18 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
       case "form":
         missing(view.fieldIds);
         if (view.blocks) checkBlocks(bp, view.blocks, path, errors);
+        if (view.steps) {
+          const seen = new Set<string>();
+          for (const step of view.steps) {
+            if (!step.fieldIds.length)
+              errors.push({ path, message: `${view.name}: step "${step.title}" asks nothing` });
+            missing(step.fieldIds);
+            for (const id of step.fieldIds) {
+              if (seen.has(id)) errors.push({ path, message: `${view.name}: "${id}" is asked in two steps` });
+              seen.add(id);
+            }
+          }
+        }
         break;
       case "notes":
         missing([view.titleFieldId, view.bodyFieldId, ...(view.metaFieldIds ?? [])]);
@@ -191,6 +218,34 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
         errors.push({ path, message: `${widget.title} needs a date field or a field to group by` });
       else if (chart.kind === "donut" && !has(chart.groupByFieldId))
         errors.push({ path, message: `${widget.title}: a donut needs a field to group by` });
+    }
+    if (entity) {
+      const path = `widgets.${wi}`;
+      const fieldOf = (id?: string) => entity.fields.find((f) => f.id === id);
+      if (widget.compare) {
+        if (widget.type !== "stat")
+          errors.push({ path, message: `${widget.title}: only stats can compare periods` });
+        if (widget.calc)
+          errors.push({ path, message: `${widget.title}: a stat with a formula can't compare periods` });
+        if (!DATE_TYPES.has(fieldOf(widget.compare.dateFieldId)?.type ?? ""))
+          errors.push({
+            path,
+            message: `${widget.title}: compare needs a date, date-time or time range field`,
+          });
+      }
+      if (widget.type === "agenda" && !DATE_TYPES.has(fieldOf(widget.agenda?.dateFieldId)?.type ?? ""))
+        errors.push({
+          path,
+          message: `${widget.title}: an agenda needs a date, date-time or time range field`,
+        });
+      if (widget.type === "agenda")
+        for (const id of widget.agenda?.fieldIds ?? [])
+          if (!fieldOf(id)) errors.push({ path, message: `${widget.title}: field "${id}" does not exist` });
+      if (widget.type === "heatmap" && !hasHour(fieldOf(widget.heatmap?.dateFieldId)))
+        errors.push({
+          path,
+          message: `${widget.title}: a heatmap needs a date-time or time range field with times`,
+        });
     }
   });
 

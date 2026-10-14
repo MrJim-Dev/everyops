@@ -1,13 +1,14 @@
 "use client";
 
-import { CheckCircleIcon } from "@phosphor-icons/react";
+import { ArrowLeftIcon, ArrowRightIcon, CheckCircleIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
+import { StepIndicator } from "@/components/forms/step-indicator";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { FieldValue } from "@/lib/blueprint/types";
-import { formatTime } from "@/lib/format";
+import { formatDate, formatRange, formatTime, isTimeRange } from "@/lib/format";
 import type { PublicField, PublicForm } from "@/lib/public/resolve";
 import type { Slot } from "@/lib/public/slots";
 import { addDays, at, dateKey, todayKey } from "@/lib/time";
@@ -34,23 +35,48 @@ export function PublicFormView({
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<Done | null>(null);
   const [website, setWebsite] = useState("");
+  const [step, setStep] = useState(0);
   const set = (id: string, v: FieldValue) => {
     setValues((s) => ({ ...s, [id]: v }));
     setErrors((e) => ({ ...e, [id]: "" }));
   };
   const booking = form.booking;
+  const steps = form.steps;
+  const titles = steps ? [...steps.map((s) => s.title), ...(form.review ? ["Review"] : [])] : [];
+  const reviewing = !!steps && step === steps.length;
+  const last = !steps || step === titles.length - 1;
+  const shown = steps && !reviewing ? new Set(steps[step].fieldIds) : null;
+  const missingOf = (ids?: Set<string>) =>
+    Object.fromEntries(
+      form.fields
+        .filter((f) => (!ids || ids.has(f.id)) && f.required && isEmpty(values[f.id]))
+        .map((f) => [
+          f.id,
+          booking && f.id === booking.timeFieldId ? "Pick a time" : `${f.name} is required`,
+        ]),
+    );
+  const stepOf = (fieldId: string) => steps?.findIndex((s) => s.fieldIds.includes(fieldId)) ?? -1;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (steps && !last) {
+      const missing = shown ? missingOf(shown) : {};
+      if (Object.keys(missing).length) {
+        setErrors(missing);
+        setMessage("Fill in the highlighted fields.");
+        return;
+      }
+      setMessage(null);
+      setStep((s) => s + 1);
+      return;
+    }
     if (preview) return setMessage("This is a preview. Open the public page to try the form.");
-    const missing = Object.fromEntries(
-      form.fields
-        .filter((f) => f.required && isEmpty(values[f.id]))
-        .map((f) => [f.id, `${f.name} is required`]),
-    );
+    const missing = missingOf();
     if (Object.keys(missing).length) {
       setErrors(missing);
       setMessage("Fill in the highlighted fields.");
+      const at = stepOf(Object.keys(missing)[0]);
+      if (at >= 0) setStep(at);
       return;
     }
     setBusy(true);
@@ -68,11 +94,10 @@ export function PublicFormView({
       if (body?.ok) setDone(body);
       else {
         setMessage(body?.message ?? "Something went wrong. Try again.");
-        setErrors(
-          Object.fromEntries(
-            (body?.fieldErrors ?? []).filter((e) => e.fieldId).map((e) => [e.fieldId, e.message]),
-          ),
-        );
+        const fieldErrors = (body?.fieldErrors ?? []).filter((e) => e.fieldId);
+        setErrors(Object.fromEntries(fieldErrors.map((e) => [e.fieldId, e.message])));
+        const at = fieldErrors[0]?.fieldId ? stepOf(fieldErrors[0].fieldId) : -1;
+        if (at >= 0) setStep(at);
       }
     } catch {
       setMessage("You seem to be offline. Try again when you're connected.");
@@ -105,6 +130,7 @@ export function PublicFormView({
           onClick={() => {
             setDone(null);
             setValues({});
+            setStep(0);
           }}
         >
           Make another
@@ -115,7 +141,46 @@ export function PublicFormView({
   return (
     <form onSubmit={submit} className="flex flex-col gap-5 rounded-xl border bg-card p-5 md:p-6" noValidate>
       {form.intro ? <p className="text-[14px] text-muted-foreground">{form.intro}</p> : null}
+      {steps ? (
+        <StepIndicator steps={titles} current={step} onSelect={(i) => i < step && setStep(i)} />
+      ) : null}
+      {steps && !reviewing ? (
+        <div className={cn("flex flex-col gap-0.5", !steps[step].description && "sm:hidden")}>
+          <h3 className="text-[15px] font-medium sm:hidden">{steps[step].title}</h3>
+          {steps[step].description ? (
+            <p className="text-[12.5px] text-muted-foreground">{steps[step].description}</p>
+          ) : null}
+        </div>
+      ) : null}
+      {reviewing && steps ? (
+        <dl className="flex flex-col divide-y rounded-lg border text-[13.5px]">
+          {steps.flatMap((s, si) =>
+            s.fieldIds.flatMap((id) => {
+              const f = form.fields.find((x) => x.id === id);
+              if (!f) return [];
+              return [
+                <div key={id} className="flex items-center justify-between gap-4 px-3.5 py-2.5">
+                  <dt className="text-muted-foreground">
+                    {booking && id === booking.timeFieldId ? "Day and time" : f.name}
+                  </dt>
+                  <dd className="flex min-w-0 items-center gap-3 text-right">
+                    <span className="truncate">{summaryText(f, values[id], form.choices[id]) || "—"}</span>
+                    <button
+                      type="button"
+                      onClick={() => setStep(si)}
+                      className="rounded-sm text-[12.5px] text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+                    >
+                      Edit
+                    </button>
+                  </dd>
+                </div>,
+              ];
+            }),
+          )}
+        </dl>
+      ) : null}
       {form.fields.map((f) => {
+        if (reviewing || (shown && !shown.has(f.id))) return null;
         if (booking && f.id === booking.timeFieldId) return null;
         const error = errors[f.id];
         const id = `pf-${form.viewId}-${f.id}`;
@@ -166,15 +231,54 @@ export function PublicFormView({
           {message}
         </p>
       ) : null}
-      <Button type="submit" size="lg" disabled={busy} className="self-start">
-        {busy ? "Sending…" : form.submitLabel}
-      </Button>
+      <div className="flex items-center gap-2">
+        {steps && step > 0 ? (
+          <Button type="button" variant="outline" size="lg" onClick={() => setStep((s) => s - 1)}>
+            <ArrowLeftIcon data-icon="inline-start" />
+            Back
+          </Button>
+        ) : null}
+        <Button type="submit" size="lg" disabled={busy} className={steps ? "ml-auto" : undefined}>
+          {busy ? (
+            "Sending…"
+          ) : last ? (
+            form.submitLabel
+          ) : (
+            <>
+              Next
+              <ArrowRightIcon data-icon="inline-end" />
+            </>
+          )}
+        </Button>
+      </div>
     </form>
   );
 }
 
 const isEmpty = (v: FieldValue | undefined) =>
   v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0);
+
+/** A visitor's answer as text for the review step. */
+function summaryText(
+  field: PublicField,
+  value: FieldValue | undefined,
+  choices?: { id: string; title: string }[],
+) {
+  if (isEmpty(value)) return "";
+  if (isTimeRange(value ?? null)) {
+    const range = value as { start: string; end: string };
+    return field.range === "dates"
+      ? formatRange(range)
+      : `${formatDate(range.start)} · ${formatRange(range)}`;
+  }
+  if (Array.isArray(value))
+    return value.map((v) => field.options?.find((o) => o.id === v)?.label ?? v).join(", ");
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  const text = String(value);
+  return (
+    field.options?.find((o) => o.id === text)?.label ?? choices?.find((c) => c.id === text)?.title ?? text
+  );
+}
 
 function PublicInput({
   id,
