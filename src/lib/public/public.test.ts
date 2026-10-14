@@ -3,7 +3,6 @@ import type { Blueprint, FormView, LandingView } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { applyOps } from "@/lib/engine/changes";
-import { mergeRecords } from "@/lib/store/workspace-model";
 import { at, todayKey } from "@/lib/time";
 import { publicForm, resolvePage, siteOf, submitButton } from "./resolve";
 import { slotsFor } from "./slots";
@@ -107,24 +106,5 @@ describe("public pages", () => {
     expect(slots.find((s) => s.start === slot.start)?.free).toBe(false);
     expect(slots.some((s) => s.free)).toBe(true);
     expect(slots.every((s) => Date.parse(s.start) >= Date.parse(at(day, "00:00")))).toBe(true);
-  });
-});
-
-describe("saving next to public bookings", () => {
-  const rec = (id: string, createdAt: string) => ({
-    id,
-    entityId: "booking",
-    data: {},
-    createdAt,
-    updatedAt: createdAt,
-  });
-  it("keeps bookings made after the browser last synced, and drops ones it deleted", () => {
-    const stored = [
-      rec("a", "2026-10-13T01:00:00Z"),
-      rec("deleted", "2026-10-13T01:00:00Z"),
-      rec("public", "2026-10-13T03:00:00Z"),
-    ];
-    const incoming = [rec("a", "2026-10-13T01:00:00Z")];
-    expect(mergeRecords(stored, incoming, "2026-10-13T02:00:00Z").map((r) => r.id)).toEqual(["a", "public"]);
   });
 });

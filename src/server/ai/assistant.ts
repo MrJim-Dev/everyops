@@ -42,7 +42,9 @@ import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer } from "./assis
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
 import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
 import { view } from "./design-prompt";
+import { dataDigest } from "./digest";
 import { generateJsonHedged } from "./gemini";
+import { lookupData } from "./lookup";
 
 export type AssistantMessage = { role: "user" | "assistant"; text: string; attachments?: AttachmentRef[] };
 export type AssistantResult =
@@ -58,38 +60,6 @@ export type AssistantResult =
       sources?: Navigation[];
     }
   | { ok: false; message: string };
-
-const MAX_RECORD_CHARS = 120_000;
-
-/**
- * Records as compact JSON lines per record type, cut off if the workspace is very large. What the person is
- * looking at goes first, so it's never the part that gets cut.
- */
-function recordContext(bp: Blueprint, records: DataRecord[], focus: { ids: string[]; entityId?: string }) {
-  const lines: string[] = [];
-  let size = 0;
-  let cut = false;
-  const rank = new Map(focus.ids.map((id, i) => [id, i]));
-  const first = (r: DataRecord) => rank.get(r.id) ?? Number.MAX_SAFE_INTEGER;
-  const entities = [...bp.entities].sort(
-    (a, b) => Number(b.id === focus.entityId) - Number(a.id === focus.entityId),
-  );
-  for (const e of entities) {
-    const own = records.filter((r) => r.entityId === e.id).sort((a, b) => first(a) - first(b));
-    lines.push(`## ${e.pluralName} (${e.id}): ${own.length} records`);
-    for (const r of own) {
-      const line = JSON.stringify({ id: r.id, ...r.data });
-      if (size + line.length > MAX_RECORD_CHARS) {
-        cut = true;
-        break;
-      }
-      size += line.length;
-      lines.push(line);
-    }
-  }
-  if (cut) lines.push("(Data cut off here: the workspace has more records than fit.)");
-  return lines.join("\n");
-}
 
 type RawPlan = AssistantAnswer["plan"];
 
@@ -868,7 +838,7 @@ export async function assistantTurn(input: {
   const where = bp.systems.find((s) => s.id === input.screen.systemId);
   if (where) status(`Looking at ${where.name}`);
   status(
-    `Reading ${records.length} ${records.length === 1 ? "record" : "records"} across ${bp.entities.length} record types`,
+    `Summarising ${records.length} ${records.length === 1 ? "record" : "records"} across ${bp.entities.length} record types`,
   );
   const team =
     input.canDesign && input.team
@@ -883,6 +853,17 @@ export async function assistantTurn(input: {
   const weekday = new Date(`${today}T12:00:00+08:00`).toLocaleDateString("en-PH", {
     weekday: "long",
     timeZone: "Asia/Manila",
+  });
+  // A digest of the records instead of every record, plus exact lookups (SQL) for what this message needs.
+  const digest = dataDigest(bp, records, { ids: screen.focusIds, entityId: screen.entityId });
+  const looked = await lookupData({
+    workspaceId: input.workspaceId,
+    blueprint: bp,
+    digest,
+    screen: screen.text,
+    today: `${weekday}, ${today}`,
+    messages: input.messages,
+    onStatus: status,
   });
   const context = `Today in Manila: ${weekday}, ${today}
 ${permissions}${team}
@@ -922,8 +903,15 @@ ${bp.systems
 Blueprint:
 ${JSON.stringify(bp)}
 
-Records:
-${recordContext(bp, records, { ids: screen.focusIds, entityId: screen.entityId })}
+Data (a digest: counts and totals per record type, then records on screen and small record types in full):
+${digest}${
+  looked
+    ? `
+
+Looked up just now for this message (exact, from the database):
+${looked}`
+    : ""
+}
 
 Conversation:
 ${input.messages

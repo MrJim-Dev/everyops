@@ -1,7 +1,9 @@
 import "server-only";
 import { sql } from "kysely";
 import { DEMO_ACCOUNT } from "@/lib/auth/demo";
+import type { WorkspaceDoc } from "@/lib/store/workspace-model";
 import { db } from "./db";
+import { clearContent, metaFrom, readWorkspace, writeContent } from "./workspace-data";
 
 async function demoUserId(): Promise<string | undefined> {
   const { rows } = await sql<{
@@ -10,17 +12,26 @@ async function demoUserId(): Promise<string | undefined> {
   return rows[0]?.id;
 }
 
-/** Saves the demo account's current workspaces as the state the nightly reset returns to. */
+/**
+ * Saves the demo account's current workspaces as the state the nightly reset returns to. The snapshot keeps each
+ * workspace as one whole document (settings, versions, records, history, page text): it's only read by the reset.
+ */
 export async function snapshotDemoAccount() {
   const id = await demoUserId();
   if (!id) return { ok: false as const, message: "Demo account not found." };
   return db.transaction().execute(async (trx) => {
+    const { rows } = await sql<{ id: string }>`select id from workspace where owner_id = ${id}`.execute(trx);
     await sql`delete from demo_snapshot`.execute(trx);
-    const saved =
-      await sql`insert into demo_snapshot (workspace_id, doc) select id, doc from workspace where owner_id = ${id}`.execute(
+    let saved = 0;
+    for (const w of rows) {
+      const found = await readWorkspace(trx, w.id);
+      if (!found) continue;
+      await sql`insert into demo_snapshot (workspace_id, doc) values (${w.id}, ${JSON.stringify(found.doc)}::jsonb)`.execute(
         trx,
       );
-    return { ok: true as const, workspaces: Number(saved.numAffectedRows ?? 0) };
+      saved++;
+    }
+    return { ok: true as const, workspaces: saved };
   });
 }
 
@@ -34,18 +45,23 @@ export async function resetDemoAccount() {
   if (!id) return { ok: false as const, message: "Demo account not found." };
   return db.transaction().execute(async (trx) => {
     const run = async (q: ReturnType<typeof sql>) => Number((await q.execute(trx)).numAffectedRows ?? 0);
-    const snapshot = Number(
-      (await sql<{ n: number }>`select count(*)::int as n from demo_snapshot`.execute(trx)).rows[0]?.n ?? 0,
-    );
+    const { rows: snapshots } = await sql<{ workspace_id: string; doc: WorkspaceDoc }>`
+      select workspace_id, doc from demo_snapshot`.execute(trx);
     let removed: number;
     let restored = 0;
-    if (snapshot) {
+    if (snapshots.length) {
       removed = await run(
         sql`delete from workspace where owner_id = ${id} and id not in (select workspace_id from demo_snapshot)`,
       );
-      restored = await run(sql`insert into workspace (id, owner_id, doc)
-        select workspace_id, ${id}, doc from demo_snapshot
-        on conflict (id) do update set doc = excluded.doc, updated_at = now() where workspace.owner_id = ${id}`);
+      for (const s of snapshots) {
+        const ok = await run(sql`insert into workspace (id, owner_id, doc)
+          values (${s.workspace_id}, ${id}, ${JSON.stringify(metaFrom(s.doc))}::jsonb)
+          on conflict (id) do update set doc = excluded.doc, updated_at = now() where workspace.owner_id = ${id}`);
+        if (!ok) continue;
+        await clearContent(trx, s.workspace_id);
+        await writeContent(trx, s.workspace_id, s.doc);
+        restored++;
+      }
       await run(
         sql`delete from workspace_member where workspace_id in (select id from workspace where owner_id = ${id})`,
       );
@@ -59,7 +75,7 @@ export async function resetDemoAccount() {
     }
     const result = {
       ok: true as const,
-      mode: snapshot ? ("snapshot" as const) : ("defaults" as const),
+      mode: snapshots.length ? ("snapshot" as const) : ("defaults" as const),
       removed,
       restored,
       publications: await run(sql`delete from published_system where author_id = ${id}`),

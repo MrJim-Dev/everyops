@@ -1,32 +1,42 @@
 import "server-only";
-import { sql, type Transaction } from "kysely";
-import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
+import { sql } from "kysely";
+import type { Blueprint, WorkspaceData } from "@/lib/blueprint/types";
 import { freshSample } from "@/lib/catalog/shift";
 import { htmlDocKeys } from "@/lib/public/html-page";
 import {
-  blueprintOf,
   type ChangeEntry,
   type Invite,
   type Member,
   type MemberRole,
-  mergeRecords,
   mergeStaffChanges,
   newWorkspaceId,
   type Role,
   toDoc,
   type Workspace,
-  type WorkspaceDoc,
   workspaceFrom,
 } from "@/lib/store/workspace-model";
-
-import { type Database, db } from "./db";
+import type { PatchResult, WorkspaceMeta, WorkspacePatch } from "@/lib/store/workspace-sync";
+import { db } from "./db";
 import { inviteEmail } from "./emails";
 import { appUrl, sendMail } from "./mail";
+import {
+  currentBlueprint,
+  deleteRecords,
+  metaFrom,
+  putRecords,
+  readWorkspace,
+  writeChanges,
+  writeContent,
+  writePages,
+} from "./workspace-data";
 
 const ID = /^[a-z0-9][a-z0-9-]{1,79}$/;
-export const MAX_DOC_BYTES = 4_000_000;
+/** Largest save accepted. Saves are patches now; only creating a big workspace comes close. */
+export const MAX_PATCH_BYTES = 4_000_000;
 
-type Row = { id: string; owner_id: string; doc: WorkspaceDoc; owner_name: string; owner_email: string };
+export type SaveResult = { ok: true } | { ok: false; status: number; message: string };
+
+type Row = { id: string; owner_id: string; doc: WorkspaceMeta; owner_name: string; owner_email: string };
 
 /** The caller's role in a workspace, or null if they have no access. */
 export async function roleIn(
@@ -43,11 +53,13 @@ export async function roleIn(
   return row.role ? { role: row.role, ownerId: row.owner_id } : null;
 }
 
-/** Creates the demo workspaces from the starter templates, once per account. */
+/**
+ * Creates the demo workspaces from the starter templates, once per account. The marker and the workspaces commit
+ * together, so a failed seed is tried again on the next load instead of leaving the account empty.
+ */
 async function seedIfNew(userId: string) {
-  const inserted =
-    await sql`insert into account_seed (user_id) values (${userId}) on conflict do nothing`.execute(db);
-  if (!Number(inserted.numAffectedRows ?? 0)) return;
+  const seeded = await sql`select 1 from account_seed where user_id = ${userId}`.execute(db);
+  if (seeded.rows.length) return;
   const { rows } = await sql<{
     id: string;
     name: string;
@@ -56,23 +68,30 @@ async function seedIfNew(userId: string) {
     doc: WorkspaceData & { builtOn: string };
   }>`select * from workspace_template order by sort`.execute(db);
   const now = new Date();
-  for (const [i, t] of rows.entries()) {
-    const data = freshSample(t.doc.blueprint, t.doc.records, t.doc.builtOn, t.name, now);
-    const ws = workspaceFrom(
-      {
-        name: t.name,
-        summary: t.summary,
-        data,
-        source: t.source_system_id ? { systemId: t.source_system_id, version: "1.2" } : undefined,
-      },
-      newWorkspaceId(t.id),
-      now.toISOString(),
-    );
-    ws.openedAt = new Date(now.getTime() - i * 60_000).toISOString();
-    await sql`insert into workspace (id, owner_id, doc) values (${ws.slug}, ${userId}, ${JSON.stringify(toDoc(ws))}::jsonb)`.execute(
-      db,
-    );
-  }
+  await db.transaction().execute(async (trx) => {
+    const inserted =
+      await sql`insert into account_seed (user_id) values (${userId}) on conflict do nothing`.execute(trx);
+    if (!Number(inserted.numAffectedRows ?? 0)) return;
+    for (const [i, t] of rows.entries()) {
+      const data = freshSample(t.doc.blueprint, t.doc.records, t.doc.builtOn, t.name, now);
+      const ws = workspaceFrom(
+        {
+          name: t.name,
+          summary: t.summary,
+          data,
+          source: t.source_system_id ? { systemId: t.source_system_id, version: "1.2" } : undefined,
+        },
+        newWorkspaceId(t.id),
+        now.toISOString(),
+      );
+      ws.openedAt = new Date(now.getTime() - i * 60_000).toISOString();
+      const doc = toDoc(ws);
+      await sql`insert into workspace (id, owner_id, doc) values (${ws.slug}, ${userId}, ${JSON.stringify(metaFrom(doc))}::jsonb)`.execute(
+        trx,
+      );
+      await writeContent(trx, ws.slug, doc);
+    }
+  });
 }
 
 /** One workspace's team and pending invites, for owners and admins (the assistant uses it for team changes). */
@@ -116,10 +135,12 @@ export async function loadTeam(workspaceId: string): Promise<{ members: Member[]
   };
 }
 
-/** Everything the account can open: its own workspaces and the ones it was invited to. */
+/**
+ * Everything the account can open: its own workspaces and the ones it was invited to, as summaries (settings,
+ * current blueprint, team, record counts, latest change). Records and history load when a workspace opens.
+ */
 export async function listWorkspaces(userId: string): Promise<Workspace[]> {
   await seedIfNew(userId);
-  const syncedAt = new Date().toISOString();
   const { rows } = await sql<Row>`
     select w.id, w.owner_id, w.doc, u.name as owner_name, u.email as owner_email
     from workspace w join "user" u on u.id = w.owner_id
@@ -129,28 +150,48 @@ export async function listWorkspaces(userId: string): Promise<Workspace[]> {
   );
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
-  const members = await sql<{
-    workspace_id: string;
-    user_id: string;
-    role: MemberRole;
-    joined_at: Date;
-    name: string;
-    email: string;
-  }>`
-    select m.workspace_id, m.user_id, m.role, m.joined_at, u.name, u.email
-    from workspace_member m join "user" u on u.id = m.user_id
-    where m.workspace_id = any(${ids})`.execute(db);
-  const invites = await sql<{
-    workspace_id: string;
-    token: string;
-    email: string;
-    role: MemberRole;
-    invited_by: string;
-    invited_at: Date;
-  }>`
-    select * from workspace_invite where workspace_id = any(${ids})`.execute(db);
+  const [members, invites, blueprints, counts, latest] = await Promise.all([
+    sql<{
+      workspace_id: string;
+      user_id: string;
+      role: MemberRole;
+      joined_at: Date;
+      name: string;
+      email: string;
+    }>`
+      select m.workspace_id, m.user_id, m.role, m.joined_at, u.name, u.email
+      from workspace_member m join "user" u on u.id = m.user_id
+      where m.workspace_id = any(${ids})`.execute(db),
+    sql<{
+      workspace_id: string;
+      token: string;
+      email: string;
+      role: MemberRole;
+      invited_by: string;
+      invited_at: Date;
+    }>`select * from workspace_invite where workspace_id = any(${ids})`.execute(db),
+    sql<{ workspace_id: string; blueprint: Blueprint }>`
+      select v.workspace_id, v.blueprint from workspace w
+      join workspace_version v on v.workspace_id = w.id and v.version = (w.doc->>'currentVersion')::int
+      where w.id = any(${ids})`.execute(db),
+    sql<{ workspace_id: string; records: number; this_week: number }>`
+      select workspace_id, count(*)::int as records,
+        (count(*) filter (where created_at > now() - interval '7 days'))::int as this_week
+      from workspace_record where workspace_id = any(${ids}) group by workspace_id`.execute(db),
+    // The latest change that wasn't undone, without the records and page text it keeps for undo.
+    sql<{ workspace_id: string; entry: ChangeEntry }>`
+      select distinct on (workspace_id) workspace_id,
+        entry - 'recordChanges' - 'replacedRecords' - 'removedRecords' - 'replacedDocs' - 'teamBefore' - 'createdRecordIds' as entry
+      from workspace_change where workspace_id = any(${ids}) and not entry ? 'undoneAt'
+      order by workspace_id, applied_at desc`.execute(db),
+  ]);
+  const bp = new Map(blueprints.rows.map((b) => [b.workspace_id, b.blueprint]));
+  const count = new Map(counts.rows.map((c) => [c.workspace_id, c]));
+  const last = new Map(latest.rows.map((c) => [c.workspace_id, { ...c.entry, recordChanges: [] }]));
 
-  return rows.map((r) => {
+  return rows.flatMap((r) => {
+    const current = bp.get(r.id);
+    if (!current) return [];
     const team: Member[] = members.rows
       .filter((m) => m.workspace_id === r.id)
       .map((m) => ({
@@ -162,150 +203,234 @@ export async function listWorkspaces(userId: string): Promise<Workspace[]> {
       }));
     const mine = r.owner_id === userId ? "owner" : team.find((m) => m.accountId === userId)?.role;
     const manager = mine === "owner" || mine === "admin";
-    return {
-      ...r.doc,
-      slug: r.id,
-      syncedAt,
-      ownerId: r.owner_id,
-      owner: { name: r.owner_name, email: r.owner_email },
-      members: team,
-      invites: manager
-        ? invites.rows
-            .filter((i) => i.workspace_id === r.id)
-            .map((i) => ({
-              token: i.token,
-              email: i.email,
-              role: i.role,
-              invitedBy: i.invited_by,
-              invitedAt: i.invited_at.toISOString(),
-            }))
-        : [],
-    };
+    const lastChange = last.get(r.id);
+    return [
+      {
+        ...metaFrom(r.doc),
+        slug: r.id,
+        loaded: false,
+        versions: [],
+        current,
+        records: [],
+        changes: lastChange ? [lastChange] : [],
+        stats: { records: count.get(r.id)?.records ?? 0, recordsThisWeek: count.get(r.id)?.this_week ?? 0 },
+        ownerId: r.owner_id,
+        owner: { name: r.owner_name, email: r.owner_email },
+        members: team,
+        invites: manager
+          ? invites.rows
+              .filter((i) => i.workspace_id === r.id)
+              .map((i) => ({
+                token: i.token,
+                email: i.email,
+                role: i.role,
+                invitedBy: i.invited_by,
+                invitedAt: i.invited_at.toISOString(),
+              }))
+          : [],
+      } satisfies Workspace,
+    ];
   });
 }
 
-export type SaveResult = { ok: true } | { ok: false; status: number; message: string };
-
-/** One workspace the caller can open, with their role in it. */
+/** One workspace the caller can open, whole, with their role and each record's rev. */
 export async function loadWorkspace(
   id: string,
   userId: string,
-): Promise<{ workspace: Workspace; role: Role } | null> {
+): Promise<{ workspace: Workspace; role: Role; revs: Record<string, number> } | null> {
+  if (!ID.test(id)) return null;
   const access = await roleIn(id, userId);
   if (!access) return null;
-  const syncedAt = new Date().toISOString();
-  const { rows } = await sql<{ doc: WorkspaceDoc }>`select doc from workspace where id = ${id}`.execute(db);
-  if (!rows[0]) return null;
-  return { workspace: { ...rows[0].doc, slug: id, syncedAt, ownerId: access.ownerId }, role: access.role };
+  const found = await readWorkspace(db, id);
+  if (!found) return null;
+  return {
+    workspace: { ...found.doc, slug: id, syncedAt: found.syncedAt, ownerId: access.ownerId, loaded: true },
+    role: access.role,
+    revs: found.revs,
+  };
+}
+
+class Conflict extends Error {
+  constructor(readonly result: Extract<PatchResult, { ok: false }>) {
+    super(result.message);
+  }
 }
 
 /**
- * Saves a workspace from the browser. Owners and admins save the whole document and the team;
- * staff only save records; viewers can't save. New ids create a workspace owned by the caller.
+ * Saves what changed in a workspace (see workspace-sync.ts). Owners and admins save everything; staff save records,
+ * page text (not custom HTML, which is shown to the public) and data-only history; viewers can't save. A patch
+ * marked create for an id nobody has makes a new workspace owned by the caller. Records are checked by rev: if
+ * anyone saved one since the browser read it, nothing is saved and the conflicting ids come back to be merged.
  */
-export async function saveWorkspace(
+export async function patchWorkspace(
   userId: string,
-  ws: Workspace,
+  slug: string,
+  patch: WorkspacePatch,
   options: { demo?: boolean } = {},
-): Promise<SaveResult> {
-  if (!ID.test(ws.slug)) return { ok: false, status: 400, message: "Invalid workspace id." };
-  const access = await roleIn(ws.slug, userId);
-  const doc = toDoc(ws);
-
+): Promise<PatchResult> {
+  if (!ID.test(slug)) return { ok: false, status: 400, message: "Invalid workspace id." };
+  let access = await roleIn(slug, userId);
   if (!access) {
-    const created =
-      await sql`insert into workspace (id, owner_id, doc) values (${ws.slug}, ${userId}, ${JSON.stringify(doc)}::jsonb)
-      on conflict (id) do nothing`.execute(db);
-    return Number(created.numAffectedRows ?? 0)
-      ? { ok: true }
-      : { ok: false, status: 403, message: "You don't have access to this workspace." };
+    if (!patch.create || !patch.meta || !patch.versions?.length)
+      return { ok: false, status: 404, message: "Workspace not found." };
+    const created = await sql`insert into workspace (id, owner_id, doc)
+      values (${slug}, ${userId}, ${JSON.stringify(metaFrom(patch.meta))}::jsonb) on conflict (id) do nothing`.execute(
+      db,
+    );
+    if (!Number(created.numAffectedRows ?? 0))
+      return { ok: false, status: 403, message: "You don't have access to this workspace." };
+    access = { role: "owner", ownerId: userId };
   }
   if (access.role === "viewer") return { ok: false, status: 403, message: "Viewers can't make changes." };
-
-  if (access.role === "staff") {
-    // Staff edit records and page text only; the blueprint and settings stay as the owner left them. History
-    // takes their data-only changes (an assistant plan that deletes a record), so those can be undone later.
-    // Custom HTML (pages and HTML blocks) is code shown to the public, so it stays as owners and admins left it.
-    const incoming = doc.docs && typeof doc.docs === "object" ? doc.docs : {};
-    await db.transaction().execute(async (trx) => {
-      const records = mergeRecords(await lockedRecords(trx, ws.slug), doc.records, ws.syncedAt);
-      const docs = await withStoredHtml(trx, ws.slug, incoming);
-      const stored = (
-        await sql<{
-          changes: ChangeEntry[] | null;
-          version: number;
-        }>`select doc->'changes' as changes, (doc->>'currentVersion')::int as version
-          from workspace where id = ${ws.slug}`.execute(trx)
-      ).rows[0];
-      const changes = mergeStaffChanges(
-        stored?.changes ?? [],
-        Array.isArray(doc.changes) ? doc.changes : [],
-        stored?.version ?? 0,
-      );
-      await sql`update workspace set doc = jsonb_set(jsonb_set(jsonb_set(doc, '{records}', ${JSON.stringify(records)}::jsonb), '{docs}', ${JSON.stringify(docs)}::jsonb), '{changes}', ${JSON.stringify(changes)}::jsonb), updated_at = now()
-        where id = ${ws.slug}`.execute(trx);
-    });
-    return { ok: true };
-  }
+  const manager = access.role === "owner" || access.role === "admin";
+  const ownerId = access.ownerId;
 
   const newInvites: Invite[] = [];
-  await db.transaction().execute(async (trx) => {
-    const merged = {
-      ...doc,
-      records: mergeRecords(await lockedRecords(trx, ws.slug), doc.records, ws.syncedAt),
-    };
-    await sql`update workspace set doc = ${JSON.stringify(merged)}::jsonb, updated_at = now() where id = ${ws.slug}`.execute(
-      trx,
-    );
-    // The team: managers can change roles and remove people; joining only happens by accepting an invite.
-    const keep = (ws.members ?? []).filter((m) => m.accountId !== access.ownerId);
-    const keepIds = keep.map((m) => m.accountId);
-    await sql`delete from workspace_member where workspace_id = ${ws.slug} and not (user_id = any(${keepIds}))`.execute(
-      trx,
-    );
-    for (const m of keep)
-      await sql`update workspace_member set role = ${m.role} where workspace_id = ${ws.slug} and user_id = ${m.accountId}`.execute(
-        trx,
-      );
-    const invites: Invite[] = ws.invites ?? [];
-    const tokens = invites.map((i) => i.token);
-    await sql`delete from workspace_invite where workspace_id = ${ws.slug} and not (token = any(${tokens}))`.execute(
-      trx,
-    );
-    for (const i of invites) {
-      // The shared demo account can't invite anyone, so nobody can use it to send email.
-      if (options.demo) continue;
-      // xmax = 0 only for a freshly inserted row, so each invite is emailed once, not on every save.
+  let revs: Record<string, number> = {};
+  try {
+    await db.transaction().execute(async (trx) => {
+      // One save at a time per workspace (public bookings take the same lock); each is a few rows now.
       const { rows } = await sql<{
-        inserted: boolean;
-      }>`insert into workspace_invite (token, workspace_id, email, role, invited_by, invited_at)
-        values (${i.token}, ${ws.slug}, ${i.email.toLowerCase()}, ${i.role}, ${i.invitedBy}, ${i.invitedAt})
-        on conflict (token) do update set role = excluded.role
-        returning (xmax = 0) as inserted`.execute(trx);
-      if (rows[0]?.inserted) newInvites.push(i);
-    }
-  });
+        doc: WorkspaceMeta;
+      }>`select doc from workspace where id = ${slug} for update`.execute(trx);
+      const stored = rows[0]?.doc;
+      if (!stored) throw new Conflict({ ok: false, status: 404, message: "Workspace not found." });
+
+      if (manager && patch.versions?.length) {
+        for (const v of patch.versions) {
+          const added = await sql`insert into workspace_version (workspace_id, version, blueprint)
+            values (${slug}, ${v.version}, ${JSON.stringify(v.blueprint)}::jsonb) on conflict do nothing`.execute(
+            trx,
+          );
+          if (Number(added.numAffectedRows ?? 0)) continue;
+          const same = await sql<{
+            same: boolean;
+          }>`select blueprint = ${JSON.stringify(v.blueprint)}::jsonb as same
+            from workspace_version where workspace_id = ${slug} and version = ${v.version}`.execute(trx);
+          if (!same.rows[0]?.same)
+            throw new Conflict({
+              ok: false,
+              status: 409,
+              message: "Someone else changed this workspace's design. Reload to see their version.",
+              reload: true,
+            });
+        }
+      }
+      let currentVersion = stored.currentVersion;
+      if (manager && patch.meta) {
+        const known = await sql<{ n: number }>`select count(*)::int as n from workspace_version
+          where workspace_id = ${slug} and version = ${patch.meta.currentVersion}`.execute(trx);
+        if (!known.rows[0]?.n)
+          throw new Conflict({
+            ok: false,
+            status: 400,
+            message: "That version of the workspace doesn't exist.",
+          });
+        currentVersion = patch.meta.currentVersion;
+        await sql`update workspace set doc = ${JSON.stringify(metaFrom(patch.meta))}::jsonb where id = ${slug}`.execute(
+          trx,
+        );
+      }
+
+      if (patch.records) {
+        const put = await putRecords(trx, slug, patch.records.put);
+        const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, patch.records.delete))];
+        if (conflicts.length)
+          throw new Conflict({
+            ok: false,
+            status: 409,
+            message: "Someone else changed these records. Merging their changes.",
+            conflicts,
+          });
+        revs = put.revs;
+      }
+
+      if (patch.pages && Object.keys(patch.pages).length) {
+        const pages = { ...patch.pages };
+        if (!manager) {
+          // Custom HTML (pages and HTML blocks) is code shown to the public: owners and admins only.
+          const bp = await currentBlueprint(trx, slug);
+          for (const key of bp ? htmlDocKeys(bp) : []) delete pages[key];
+        }
+        await writePages(trx, slug, pages);
+      }
+
+      if (patch.changes?.length) {
+        if (manager) await writeChanges(trx, slug, patch.changes);
+        else {
+          // Staff add data-only entries at the current version and mark such entries undone; nothing else.
+          const ids = patch.changes.map((c) => c.id);
+          const known = await sql<{ entry: ChangeEntry }>`select entry from workspace_change
+            where workspace_id = ${slug} and id = any(${ids}::text[])`.execute(trx);
+          const before = known.rows.map((k) => k.entry);
+          const merged = mergeStaffChanges(before, patch.changes, currentVersion);
+          const was = new Map(before.map((c) => [c.id, JSON.stringify(c)]));
+          await writeChanges(
+            trx,
+            slug,
+            merged.filter((c) => was.get(c.id) !== JSON.stringify(c)),
+          );
+        }
+      }
+
+      if (manager && patch.team) {
+        // The team: managers can change roles and remove people; joining only happens by accepting an invite.
+        const keep = patch.team.members.filter((m) => m.accountId !== ownerId);
+        const keepIds = keep.map((m) => m.accountId);
+        await sql`delete from workspace_member where workspace_id = ${slug} and not (user_id = any(${keepIds}))`.execute(
+          trx,
+        );
+        for (const m of keep)
+          await sql`update workspace_member set role = ${m.role} where workspace_id = ${slug} and user_id = ${m.accountId}`.execute(
+            trx,
+          );
+        const tokens = patch.team.invites.map((i) => i.token);
+        await sql`delete from workspace_invite where workspace_id = ${slug} and not (token = any(${tokens}))`.execute(
+          trx,
+        );
+        for (const i of patch.team.invites) {
+          // The shared demo account can't invite anyone, so nobody can use it to send email.
+          if (options.demo) continue;
+          // xmax = 0 only for a freshly inserted row, so each invite is emailed once, not on every save.
+          const { rows: ins } = await sql<{
+            inserted: boolean;
+          }>`insert into workspace_invite (token, workspace_id, email, role, invited_by, invited_at)
+            values (${i.token}, ${slug}, ${i.email.toLowerCase()}, ${i.role}, ${i.invitedBy}, ${i.invitedAt})
+            on conflict (token) do update set role = excluded.role
+            returning (xmax = 0) as inserted`.execute(trx);
+          if (ins[0]?.inserted) newInvites.push(i);
+        }
+      }
+      await sql`update workspace set updated_at = now() where id = ${slug}`.execute(trx);
+    });
+  } catch (e) {
+    if (e instanceof Conflict) return e.result;
+    throw e;
+  }
   // After the commit, so an email never points at an invite that was rolled back. The sender's name
   // comes from their account, not from the browser.
-  const sender = newInvites.length
-    ? (await sql<{ name: string }>`select name from "user" where id = ${userId}`.execute(db)).rows[0]?.name
-    : undefined;
-  await Promise.all(
-    newInvites.map((i) =>
-      sendMail(
-        inviteEmail({
-          to: i.email.toLowerCase(),
-          workspaceName: ws.name,
-          invitedBy: sender ?? i.invitedBy,
-          role: i.role,
-          url: appUrl(
-            `/invite/${encodeURIComponent(i.token)}?email=${encodeURIComponent(i.email.toLowerCase())}`,
-          ),
-        }),
+  if (newInvites.length) {
+    const [sender, name] = await Promise.all([
+      sql<{ name: string }>`select name from "user" where id = ${userId}`.execute(db),
+      sql<{ name: string }>`select doc->>'name' as name from workspace where id = ${slug}`.execute(db),
+    ]);
+    await Promise.all(
+      newInvites.map((i) =>
+        sendMail(
+          inviteEmail({
+            to: i.email.toLowerCase(),
+            workspaceName: name.rows[0]?.name ?? "a workspace",
+            invitedBy: sender.rows[0]?.name ?? i.invitedBy,
+            role: i.role,
+            url: appUrl(
+              `/invite/${encodeURIComponent(i.token)}?email=${encodeURIComponent(i.email.toLowerCase())}`,
+            ),
+          }),
+        ),
       ),
-    ),
-  );
-  return { ok: true };
+    );
+  }
+  return { ok: true, revs };
 }
 
 /** Owners delete the workspace; members leave it. */
@@ -384,29 +509,4 @@ export async function upsertWorkspaceTemplate(t: {
     values (${t.id}, ${t.name}, ${t.summary}, ${t.sourceSystemId ?? null}, ${JSON.stringify({ ...t.data, builtOn: t.builtOn })}::jsonb, ${t.sort})
     on conflict (id) do update set name = excluded.name, summary = excluded.summary, source_system_id = excluded.source_system_id,
       doc = excluded.doc, sort = excluded.sort, updated_at = now()`.execute(db);
-}
-
-/** The stored records, with the row locked until the transaction ends so concurrent writes queue up. */
-export async function lockedRecords(trx: Transaction<Database>, id: string): Promise<DataRecord[]> {
-  const { rows } = await sql<{ records: DataRecord[] | null }>`
-    select doc->'records' as records from workspace where id = ${id} for update`.execute(trx);
-  return rows[0]?.records ?? [];
-}
-
-/** A staff member's docs with every HTML doc (pages and HTML blocks) put back to what's stored. */
-async function withStoredHtml(
-  trx: Transaction<Database>,
-  id: string,
-  incoming: NonNullable<WorkspaceDoc["docs"]>,
-): Promise<NonNullable<WorkspaceDoc["docs"]>> {
-  const { rows } = await sql<{ doc: WorkspaceDoc }>`select doc from workspace where id = ${id}`.execute(trx);
-  const stored = rows[0]?.doc;
-  if (!stored) return incoming;
-  const docs = { ...incoming };
-  for (const key of htmlDocKeys(blueprintOf(stored))) {
-    const kept = stored.docs?.[key];
-    if (kept) docs[key] = kept;
-    else delete docs[key];
-  }
-  return docs;
 }

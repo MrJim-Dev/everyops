@@ -16,15 +16,15 @@ import {
   siteOf,
 } from "@/lib/public/resolve";
 import { type Slot, slotsFor } from "@/lib/public/slots";
-import { blueprintOf, type WorkspaceDoc } from "@/lib/store/workspace-model";
+import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { db } from "./db";
+import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
 
 const ID = /^[a-z0-9][a-z0-9-]{1,79}$/;
 
-async function readDoc(slug: string): Promise<WorkspaceDoc | null> {
+async function readDoc(slug: string) {
   if (!ID.test(slug)) return null;
-  const { rows } = await sql<{ doc: WorkspaceDoc }>`select doc from workspace where id = ${slug}`.execute(db);
-  return rows[0]?.doc ?? null;
+  return readCurrent(db, slug);
 }
 
 /** The public site of a workspace and one of its pages (the first when none is named). Null if nothing is public. */
@@ -33,18 +33,18 @@ export async function publicPage(
   viewId?: string,
 ): Promise<{ site: PublicSite; page: PublicPageData } | null> {
   const doc = await readDoc(slug);
-  if (!doc || doc.setup) return null;
-  const bp = blueprintOf(doc);
-  const site = siteOf(slug, doc.name, bp);
+  if (!doc || doc.meta.setup) return null;
+  const bp = doc.blueprint;
+  const site = siteOf(slug, doc.meta.name, bp);
   if (!site) return null;
   const page = resolvePage(
     bp,
     doc.records,
-    (doc.docs ?? {}) as PageDocs,
+    doc.docs as PageDocs,
     slug,
     viewId ?? site.pages[0].id,
     new Date(),
-    doc.name,
+    doc.meta.name,
   );
   return page ? { site, page } : null;
 }
@@ -58,7 +58,7 @@ export async function publicSlots(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
   const doc = await readDoc(slug);
   if (!doc) return null;
-  const bp = blueprintOf(doc);
+  const bp = doc.blueprint;
   const view = bp.views.find((v) => v.id === viewId);
   if (view?.type !== "form" || !view.public) return null;
   return slotsFor(bp, doc.records, view, resourceId, day);
@@ -85,12 +85,12 @@ export async function submitPublicForm(
 ): Promise<SubmitResult> {
   if (!ID.test(slug)) return { ok: false, status: 404, message: "This page doesn't exist." };
   return db.transaction().execute(async (trx) => {
-    const { rows } = await sql<{
-      doc: WorkspaceDoc;
-    }>`select doc from workspace where id = ${slug} for update`.execute(trx);
-    const doc = rows[0]?.doc;
-    if (!doc) return { ok: false, status: 404, message: "This page doesn't exist." } as const;
-    const bp = blueprintOf(doc);
+    // The same lock browser saves take, so revs stay put while the booking is checked and written.
+    const { rows } = await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
+    const bp = rows.length ? await currentBlueprint(trx, slug) : undefined;
+    if (!bp) return { ok: false, status: 404, message: "This page doesn't exist." } as const;
+    const stored = await readRecords(trx, slug);
+    const doc = { records: stored.map((s) => s.record) };
     const view = bp.views.find((v) => v.id === viewId);
     const entity = bp.entities.find((e) => e.id === view?.entityId);
     if (view?.type !== "form" || !view.public || !entity)
@@ -197,8 +197,18 @@ export async function submitPublicForm(
         picked.push({ title: item.title, quantity });
       }
     }
-    await sql`update workspace set doc = jsonb_set(doc, '{records}', ${JSON.stringify(data.records)}::jsonb), updated_at = now()
-      where id = ${slug}`.execute(trx);
+    // Only the new rows and the ones the engine recalculated (totals, roll-ups) are written, each bumping its rev
+    // so an open tab merges them instead of overwriting.
+    const before = new Map(stored.map((s) => [s.record.id, s]));
+    const writes = data.records.flatMap((r): RecordPut[] => {
+      const was = before.get(r.id);
+      if (!was) return [{ record: r, rev: null }];
+      return sameValue(was.record, r) ? [] : [{ record: r, rev: was.rev }];
+    });
+    const saved = await putRecords(trx, slug, writes);
+    if (saved.conflicts.length)
+      throw new Error(`public submission conflicted on ${saved.conflicts.join(", ")}`);
+    await sql`update workspace set updated_at = now() where id = ${slug}`.execute(trx);
     const record: DataRecord = data.records.find((r) => r.id === result.record.id) ?? result.record;
     const shown = entity.fields.filter(
       (f) =>
