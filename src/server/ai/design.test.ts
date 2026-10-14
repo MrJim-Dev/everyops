@@ -5,6 +5,7 @@ vi.mock("server-only", () => ({}));
 import type { Blueprint } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
+import { leaveBlueprint } from "@/lib/catalog/employee-leave";
 import { computeAll } from "@/lib/engine/compute";
 import {
   cleanCopy,
@@ -12,6 +13,7 @@ import {
   flattenLinks,
   givenIn,
   mergeDateAndSlot,
+  pendingOnly,
   repairStructure,
   shrunk,
   tidy,
@@ -335,6 +337,38 @@ describe("givenIn", () => {
     expect(givenIn(brief, "Mon-Sun: 8:00 AM - 6:00 PM")).toBe(false);
     expect(givenIn(brief, "hello@kapeilaya.ph")).toBe(false);
     expect(givenIn(brief, "0918 555 1234")).toBe(false);
+  });
+});
+
+describe("pending approval cards", () => {
+  const board = () => {
+    const bp = leaveBlueprint();
+    bp.widgets = [
+      { ...bp.widgets[0], id: "a", title: "Pending approvals", filter: undefined },
+      { ...bp.widgets[0], id: "b", title: "Leave requests waiting", type: "stat", filter: "" },
+      { ...bp.widgets[0], id: "c", title: "Pending sick leave", filter: "kind == 'sick'" },
+      { ...bp.widgets[0], id: "d", title: "Recent requests", filter: undefined },
+    ];
+    return bp;
+  };
+
+  it("show only what's waiting when the designer left out the filter", () => {
+    const bp = board();
+    pendingOnly(bp);
+    expect(bp.widgets.map((w) => w.filter)).toEqual([
+      "status == 'pending'",
+      "status == 'pending'",
+      "kind == 'sick'",
+      undefined,
+    ]);
+    expect(validateBlueprint(bp)).toEqual([]);
+  });
+
+  it("stay as they are without an approval queue for that record type", () => {
+    const bp = board();
+    bp.views = bp.views.filter((v) => v.type !== "approval_queue");
+    pendingOnly(bp);
+    expect(bp.widgets[0].filter).toBeUndefined();
   });
 });
 

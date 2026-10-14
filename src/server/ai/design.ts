@@ -436,7 +436,30 @@ export function tidy(bp: Blueprint): Blueprint {
     bp.widgets.push(...extra);
     board.widgetIds.push(...extra.map((w) => w.id));
   }
+  pendingOnly(bp);
   return bp;
+}
+
+/**
+ * A card titled "Pending approvals" should hold only what's waiting, but the designer often leaves out its filter, so
+ * it listed approved and declined requests too. A list or count with such a title and no filter of its own, on a
+ * record type with an approval queue, gets the queue's filter: status is the pending stage.
+ */
+export function pendingOnly(bp: Blueprint): void {
+  const waiting = /\b(pending|waiting|awaiting|for approval|to approve|needs? approval)\b/i;
+  for (const w of bp.widgets) {
+    if ((w.type !== "list" && w.type !== "stat") || w.calc || w.filter?.trim() || !waiting.test(w.title))
+      continue;
+    const queue = bp.views.find(
+      (v): v is Extract<View, { type: "approval_queue" }> =>
+        v.type === "approval_queue" && v.entityId === w.entityId && !!v.pending,
+    );
+    const status = bp.entities
+      .find((e) => e.id === queue?.entityId)
+      ?.fields.find((f) => f.id === queue?.statusFieldId);
+    if (queue && status?.options?.some((o) => o.id === queue.pending))
+      w.filter = `${queue.statusFieldId} == '${queue.pending}'`;
+  }
 }
 
 /** Problems the generic validator doesn't catch but would break a screen. */
