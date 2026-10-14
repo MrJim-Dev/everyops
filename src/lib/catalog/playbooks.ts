@@ -32,9 +32,23 @@ export const COMMON_NEEDS = `- Payment methods (GCash, Maya, bank transfer, cash
   shop taking orders): a public booking (or order) form AND a website. EveryOps builds the website as a custom HTML
   page in its own polished design (Emil Kowalski's design rules: clear, fast, purposeful motion) from the words in
   site and the data, with buttons that open the form; write strong site words (headline, intro, button, three
-  highlights, three steps). The booking form's calendar suits the business: courts or rooms side by side for a few
-  resources, a month calendar for one, whole-day check-in/check-out for stays and rentals. Add FAQs if customers
-  ask the same questions often. Public forms with more than 5 questions, or with add-ons, are forms in steps.
+  highlights, three steps). Add FAQs if customers ask the same questions often. Public forms with more than 5
+  questions, or with add-ons, are forms in steps.
+- A booking system with a public HTML website also gets a public HTML booking page: the page customers book on,
+  in the same design system as the website (same palette, type, nav and footer, linked from the website's buttons),
+  with the live booking form embedded in it so the calendar, add-ons and payment step still work. That public
+  booking form (public true) exists for the booking page to embed; customers reach it through the booking page,
+  never its bare link. Staff get their own private form (not public) inside the workspace to add walk-in, phone and
+  chat bookings.
+- Choose the booking calendar on purpose, from what is booked and how many of it there are:
+  - grid (resources side by side for one day): 2 to 8 things booked by the hour at the same place (courts, rooms,
+    bays, lanes, studios, tables).
+  - month (a month calendar, then that day's times): one thing to book (a single studio, venue, room or
+    photographer), or bookings made weeks ahead (events, packages, shoots).
+  - days (a strip of days with each day's times): appointments with a service or staff member, many resources, or
+    no resource to choose.
+  - Whole days (stays, rentals, equipment out for days): the booking's period is a date range, picked as check-in
+    and check-out on a month calendar; never an hourly grid.
 - An Overview dashboard: today's bookings or orders, revenue this week and month, unpaid or pending items, and a chart.
 - Anything sold or rented on top of the main service (rentals, extras, items for sale) is an add-on: a record type of
   items with a price, line items under the booking or order (item link, quantity, line total = price × quantity),
