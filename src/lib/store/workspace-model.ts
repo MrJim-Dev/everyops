@@ -32,6 +32,8 @@ export type ChatTurn = {
   workspaceName?: string;
 };
 export type ProfileLine = { label: string; value: string };
+/** One question on Ask EveryOps's setup checklist. Required ones are asked again until the owner answers them. */
+export type SetupQuestion = { id: string; question: string; required: boolean; answer: string };
 /** A workspace Gemini designed, waiting for the owner to create it. */
 export type SetupDraft = {
   name: string;
@@ -45,6 +47,8 @@ export type SetupProgress = {
   profile: ProfileLine[];
   /** What Ask EveryOps plans to set up, shown beside the conversation. */
   plan?: string[];
+  /** The setup checklist: what has been asked, what was answered, and what is still needed. */
+  questions?: SetupQuestion[];
   draft?: SetupDraft;
 };
 

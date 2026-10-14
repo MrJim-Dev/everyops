@@ -1,6 +1,13 @@
 "use client";
 
-import { ArrowClockwiseIcon, ArrowUpIcon, CheckIcon, SparkleIcon } from "@phosphor-icons/react";
+import {
+  ArrowClockwiseIcon,
+  ArrowUpIcon,
+  CheckCircleIcon,
+  CheckIcon,
+  CircleDashedIcon,
+  SparkleIcon,
+} from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -27,6 +34,7 @@ import {
   type ProfileLine,
   type SetupDraft,
   type SetupProgress,
+  type SetupQuestion,
   useWorkspaces,
 } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
@@ -34,6 +42,71 @@ import { AssistantMessage, UserMessage } from "./messages";
 
 type Phase = "idle" | "thinking" | "designing";
 type Failure = { message: string; retry: () => void };
+
+/**
+ * The setup checklist beside the conversation: answered questions with the answer, then the ones still open.
+ * Required ones are marked so the owner sees why EveryOps keeps asking them.
+ */
+function QuestionList({ questions }: { questions: SetupQuestion[] }) {
+  const required = questions.filter((q) => q.required);
+  const answered = required.filter((q) => q.answer.trim()).length;
+  const open = questions.filter((q) => !q.answer.trim());
+  const done = questions.filter((q) => q.answer.trim());
+  return (
+    <section aria-labelledby="setup-questions">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 id="setup-questions" className="text-[13px] font-semibold">
+          Questions
+        </h2>
+        {required.length ? (
+          <span
+            className={cn(
+              "text-[12px] tabular-nums",
+              answered === required.length ? "text-primary" : "text-muted-foreground",
+            )}
+          >
+            {answered} of {required.length} required answered
+          </span>
+        ) : null}
+      </div>
+      <ul className="flex flex-col gap-2.5 text-[13px]">
+        {[...open, ...done].map((q) => {
+          const answer = q.answer.trim();
+          return (
+            <li key={q.id} className="flex gap-2">
+              {answer ? (
+                <CheckCircleIcon weight="fill" className="mt-0.5 size-3.5 shrink-0 text-primary" />
+              ) : (
+                <CircleDashedIcon
+                  className={cn(
+                    "mt-0.5 size-3.5 shrink-0",
+                    q.required ? "text-warning" : "text-muted-foreground",
+                  )}
+                />
+              )}
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <span className={cn(answer && "text-muted-foreground")}>
+                  {q.question}
+                  {!answer ? (
+                    <span
+                      className={cn(
+                        "ml-1.5 inline-flex rounded-full px-1.5 py-px align-[1px] text-[10.5px] font-medium",
+                        q.required ? "bg-warning/12 text-warning" : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {q.required ? "Required" : "Optional"}
+                    </span>
+                  ) : null}
+                </span>
+                {answer ? <span className="text-foreground">{answer}</span> : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 async function post<T>(
   url: string,
@@ -58,6 +131,7 @@ type InterviewReply = {
     action: "ask" | "design";
     message: string;
     suggestions: string[];
+    questions?: SetupQuestion[];
     profile: ProfileLine[];
     plan?: string[];
     workspaceName: string;
@@ -93,6 +167,7 @@ export function SetupInterview({
   );
   const [profile, setProfile] = useState<ProfileLine[]>(progress?.profile ?? []);
   const [plan, setPlan] = useState<string[]>(progress?.plan ?? []);
+  const [questions, setQuestions] = useState<SetupQuestion[]>(progress?.questions ?? []);
   const [draft, setDraft] = useState<SetupDraft | undefined>(progress?.draft);
   const [phase, setPhase] = useState<Phase>("idle");
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -112,8 +187,8 @@ export function SetupInterview({
   const busy = phase !== "idle";
 
   useEffect(() => {
-    saveSetup(ws.id, { messages, profile, plan, draft });
-  }, [saveSetup, ws.id, messages, profile, plan, draft]);
+    saveSetup(ws.id, { messages, profile, plan, questions, draft });
+  }, [saveSetup, ws.id, messages, profile, plan, questions, draft]);
 
   // Keep the latest message in view as the conversation grows.
   const turns = messages.length;
@@ -145,19 +220,21 @@ export function SetupInterview({
   }, []);
 
   const ask = useCallback(
-    async (history: ChatTurn[]) => {
+    async (history: ChatTurn[], checklist: SetupQuestion[]) => {
       setPhase("thinking");
       setFailure(null);
       const result = await post<InterviewReply>("/api/ai/interview", {
         messages: history.map(({ role, text, attachments }) => ({ role, text, attachments })),
+        questions: checklist,
       });
       if (!result.ok) {
         setPhase("idle");
-        return setFailure({ message: result.message, retry: () => void ask(history) });
+        return setFailure({ message: result.message, retry: () => void ask(history, checklist) });
       }
       const { turn } = result.data;
       if (turn.profile.length) setProfile(turn.profile);
       if (turn.plan?.length) setPlan(turn.plan);
+      if (turn.questions?.length) setQuestions(turn.questions);
       const reply: ChatTurn = {
         role: "assistant",
         text: turn.message,
@@ -178,9 +255,9 @@ export function SetupInterview({
     if (started.current) return;
     started.current = true;
     const last = messages.at(-1);
-    if (last?.role === "user") void ask(messages);
+    if (last?.role === "user") void ask(messages, questions);
     else if (last?.brief && !draft) void design(messages, last.brief, last.workspaceName ?? "");
-  }, [ask, design, messages, draft]);
+  }, [ask, design, messages, draft, questions]);
 
   const send = (text: string, withFiles = true) => {
     const clean = text.trim();
@@ -193,7 +270,7 @@ export function SetupInterview({
     setMessages(next);
     setInput("");
     if (withFiles) files.clear();
-    void ask(next);
+    void ask(next, questions);
   };
 
   const create = () => {
@@ -411,6 +488,7 @@ export function SetupInterview({
             <p className="text-[13px] text-muted-foreground">Details appear here as you chat.</p>
           )}
         </section>
+        {questions.length ? <QuestionList questions={questions} /> : null}
         {plan.length ? (
           <section>
             <h2 className="mb-3 text-[13px] font-semibold">What EveryOps will set up</h2>
