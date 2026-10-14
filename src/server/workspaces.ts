@@ -2,7 +2,9 @@ import "server-only";
 import { sql, type Transaction } from "kysely";
 import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { freshSample } from "@/lib/catalog/shift";
+import { htmlDocKeys } from "@/lib/public/html-page";
 import {
+  blueprintOf,
   type ChangeEntry,
   type Invite,
   type Member,
@@ -223,9 +225,11 @@ export async function saveWorkspace(
   if (access.role === "staff") {
     // Staff edit records and page text only; the blueprint and settings stay as the owner left them. History
     // takes their data-only changes (an assistant plan that deletes a record), so those can be undone later.
-    const docs = doc.docs && typeof doc.docs === "object" ? doc.docs : {};
+    // Custom HTML (pages and HTML blocks) is code shown to the public, so it stays as owners and admins left it.
+    const incoming = doc.docs && typeof doc.docs === "object" ? doc.docs : {};
     await db.transaction().execute(async (trx) => {
       const records = mergeRecords(await lockedRecords(trx, ws.slug), doc.records, ws.syncedAt);
+      const docs = await withStoredHtml(trx, ws.slug, incoming);
       const stored = (
         await sql<{
           changes: ChangeEntry[] | null;
@@ -387,4 +391,22 @@ export async function lockedRecords(trx: Transaction<Database>, id: string): Pro
   const { rows } = await sql<{ records: DataRecord[] | null }>`
     select doc->'records' as records from workspace where id = ${id} for update`.execute(trx);
   return rows[0]?.records ?? [];
+}
+
+/** A staff member's docs with every HTML doc (pages and HTML blocks) put back to what's stored. */
+async function withStoredHtml(
+  trx: Transaction<Database>,
+  id: string,
+  incoming: NonNullable<WorkspaceDoc["docs"]>,
+): Promise<NonNullable<WorkspaceDoc["docs"]>> {
+  const { rows } = await sql<{ doc: WorkspaceDoc }>`select doc from workspace where id = ${id}`.execute(trx);
+  const stored = rows[0]?.doc;
+  if (!stored) return incoming;
+  const docs = { ...incoming };
+  for (const key of htmlDocKeys(blueprintOf(stored))) {
+    const kept = stored.docs?.[key];
+    if (kept) docs[key] = kept;
+    else delete docs[key];
+  }
+  return docs;
 }

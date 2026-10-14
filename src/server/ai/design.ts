@@ -20,6 +20,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { computeAll } from "@/lib/engine/compute";
 import { isImagePath } from "@/lib/engine/records";
+import { MAX_HTML_BYTES } from "@/lib/public/html-page";
 import { hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
 import { DESIGN_SYSTEM, type Design, designRequest } from "./design-prompt";
@@ -107,6 +108,14 @@ export function toView(v: Design["views"][number]): View {
       return { ...base, entityId: "", type: "document", ...(v.starter ? { starter: v.starter } : {}) };
     case "canvas":
       return { ...base, entityId: "", type: "canvas" };
+    case "html":
+      return {
+        ...base,
+        entityId: "",
+        type: "html",
+        ...(v.public ? { public: true } : {}),
+        ...(v.html ? { html: v.html.slice(0, MAX_HTML_BYTES) } : {}),
+      };
     case "landing":
       return {
         ...base,
@@ -280,11 +289,13 @@ export function tidy(bp: Blueprint): Blueprint {
   const fieldsOf = (entityId: string) =>
     new Set(bp.entities.find((e) => e.id === entityId)?.fields.map((x) => x.id) ?? []);
   bp.views = bp.views.filter((v) =>
-    v.type === "document" || v.type === "canvas" || v.type === "landing" ? true : entityIds.has(v.entityId),
+    v.type === "document" || v.type === "canvas" || v.type === "html" || v.type === "landing"
+      ? true
+      : entityIds.has(v.entityId),
   );
   const formIds = new Set(bp.views.filter((v) => v.type === "form").map((v) => v.id));
   for (const v of bp.views) {
-    if (v.type === "document" || v.type === "canvas" || v.type === "landing") {
+    if (v.type === "document" || v.type === "canvas" || v.type === "html" || v.type === "landing") {
       v.entityId = "";
       if (v.type === "landing") v.blocks = tidyBlocks(v.blocks, resolve, fieldsOf, formIds);
       continue;
@@ -842,7 +853,11 @@ export function ensurePages(bp: Blueprint): Blueprint {
   for (const v of bp.views) {
     if (
       listed.has(v.id) ||
-      (v.type !== "landing" && v.type !== "form" && v.type !== "document" && v.type !== "canvas")
+      (v.type !== "landing" &&
+        v.type !== "form" &&
+        v.type !== "document" &&
+        v.type !== "canvas" &&
+        v.type !== "html")
     )
       continue;
     bp.systems.push({

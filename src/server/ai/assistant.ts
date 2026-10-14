@@ -39,6 +39,7 @@ import { todayKey } from "@/lib/time";
 import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer } from "./assistant-prompt";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
 import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
+import { view } from "./design-prompt";
 import { generateJsonHedged } from "./gemini";
 
 export type AssistantMessage = { role: "user" | "assistant"; text: string; attachments?: AttachmentRef[] };
@@ -91,6 +92,8 @@ function recordContext(bp: Blueprint, records: DataRecord[], focus: { ids: strin
 type RawPlan = AssistantAnswer["plan"];
 
 const DATE_TYPES = new Set(["date", "datetime", "time_range"]);
+/** Every view type; the answer schema lets free pages name theirs as text, so it's checked here. */
+const VIEW_TYPES = new Set<string>(view.options.map((o) => (o.shape.type as { value: string }).value));
 
 /** Fills the parts of a new view that Gemini often leaves out, from the record type's own fields. */
 function fillView(view: View, entity: Entity) {
@@ -234,8 +237,12 @@ function toDesignOps(
         else errors.push(`${at}: needs entity`);
         break;
       case "add_view":
-        if (o.view && systemId) {
-          const view = toView(o.view);
+        if (o.view && !VIEW_TYPES.has(o.view.type))
+          errors.push(`${at}: "${o.view.type}" isn't a view type (${[...VIEW_TYPES].join(", ")})`);
+        else if (o.view && systemId) {
+          // A custom HTML page's draft arrives as starter (free pages share one shape in the answer schema).
+          const raw = o.view as typeof o.view & { starter?: string };
+          const view = toView(raw.type === "html" && raw.starter ? { ...raw, html: raw.starter } : raw);
           // A multi-step form arrives as "# Step title" markers among its fields.
           if (view.type === "form") {
             const { fieldIds, steps } = stepsFromMarkers(view.fieldIds);
@@ -416,6 +423,7 @@ function toDesignOps(
       op.op === "add_view" &&
       op.view.type !== "document" &&
       op.view.type !== "canvas" &&
+      op.view.type !== "html" &&
       op.view.type !== "landing"
     )
       op.view.entityId = resolveEntity(op.view.entityId);
@@ -448,7 +456,12 @@ function toDesignOps(
       continue;
     }
     if (op.op !== "add_view") continue;
-    if (op.view.type === "document" || op.view.type === "canvas" || op.view.type === "landing") {
+    if (
+      op.view.type === "document" ||
+      op.view.type === "canvas" ||
+      op.view.type === "html" ||
+      op.view.type === "landing"
+    ) {
       op.view.entityId = "";
       continue;
     }
@@ -768,7 +781,11 @@ ${bp.systems
                       ? `, blocks: ${v.blocks.map((b) => `${b.type} ${b.id}`).join(" / ")}`
                       : ""
                   }`
-                : "";
+                : v.type === "html"
+                  ? isPublic(v)
+                    ? ", public"
+                    : ", team only"
+                  : "";
             return `${v.name} (${v.id}, ${v.type}${v.entityId ? ` of ${v.entityId}` : ""}${extra})`;
           }),
           ...(s.widgetIds.length ? [`${s.widgetIds.length} dashboard widgets`] : []),

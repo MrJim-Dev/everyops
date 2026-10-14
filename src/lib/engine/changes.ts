@@ -388,7 +388,8 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
             delete view.steps;
             delete view.review;
           }
-        } else if (view.type === "landing" && settings.public !== undefined) view.public = settings.public;
+        } else if ((view.type === "landing" || view.type === "html") && settings.public !== undefined)
+          view.public = settings.public;
         if (fieldIds) setViewFields(view, findEntity(next, view.entityId), fieldIds);
         break;
       }
