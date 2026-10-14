@@ -16,7 +16,7 @@ import { formSteps, missingInStep, placeExtras, stepOfField } from "@/lib/bluepr
 import { findRecord, getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
 import type { FormView as FormViewConfig, RecordData } from "@/lib/blueprint/types";
 import type { FieldError } from "@/lib/engine/records";
-import { publicExtras, resolveBlocks } from "@/lib/public/resolve";
+import { publicExtras, publicFieldsOf, resolveBlocks, submitButton } from "@/lib/public/resolve";
 import { canEdit } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 import { PublicBar } from "./public-bar";
@@ -55,6 +55,16 @@ export function FormView({ view }: { view: FormViewConfig }) {
   const titles = [...steps.map((s) => s.title), ...(wizard && view.review ? ["Review"] : [])];
   const reviewing = wizard && step === steps.length;
   const last = step === titles.length - 1;
+  const button = submitButton(view.submitLabel, `Save ${noun}`);
+  // On a public form, say which fields the team fills in that visitors never see.
+  const hiddenFromVisitors = useMemo(() => {
+    if (!view.public) return [];
+    const shown = new Set(publicFieldsOf(ws.blueprint, view).map((f) => f.id));
+    return view.fieldIds.flatMap((id) => {
+      const f = entity.fields.find((x) => x.id === id);
+      return f && !shown.has(f.id) ? [f.name] : [];
+    });
+  }, [view, ws.blueprint, entity]);
   // Blocks shown with the form (payment methods, FAQs), previewed as visitors see them.
   const blocks = useMemo(
     () => (view.blocks?.length ? resolveBlocks(ws.blueprint, ws.records, ws.docs, ws.id, view) : []),
@@ -129,12 +139,21 @@ export function FormView({ view }: { view: FormViewConfig }) {
               </div>
             </div>
           ) : (
-            <form onSubmit={submit} noValidate className="flex flex-col gap-5 rounded-lg border p-5 md:p-6">
+            <form
+              onSubmit={submit}
+              noValidate
+              className="flex min-w-0 flex-col gap-5 rounded-lg border p-5 [overflow-wrap:anywhere] md:p-6"
+            >
               <div className="flex flex-col gap-1">
                 <h2 className="text-[16px] font-semibold">{view.name}</h2>
                 <p className="text-[13px] text-muted-foreground">
                   {view.intro ?? `Fill in the details to add a ${noun}. Fields marked * are required.`}
                 </p>
+                {hiddenFromVisitors.length ? (
+                  <p className="mt-1 text-[12px] text-muted-foreground/80">
+                    Visitors don't see {hiddenFromVisitors.join(", ")}. Your team fills those in.
+                  </p>
+                ) : null}
               </div>
               {wizard ? (
                 <StepIndicator steps={titles} current={step} onSelect={(i) => i < step && setStep(i)} />
@@ -211,24 +230,37 @@ export function FormView({ view }: { view: FormViewConfig }) {
                 </p>
               ) : null}
               {canEdit(ws.role) ? (
-                <div className="flex items-center gap-2">
-                  {wizard && step > 0 ? (
-                    <Button type="button" variant="outline" onClick={() => setStep((s) => s - 1)}>
-                      <ArrowLeftIcon data-icon="inline-start" />
-                      Back
-                    </Button>
+                <>
+                  {button.note && (!wizard || last) ? (
+                    <p className="rounded-lg border bg-muted/40 px-3.5 py-2.5 text-[13px] text-muted-foreground">
+                      {button.note}
+                    </p>
                   ) : null}
-                  <Button type="submit" className={wizard ? "ml-auto" : "self-start"}>
-                    {wizard && !last ? (
-                      <>
-                        Next
-                        <ArrowRightIcon data-icon="inline-end" />
-                      </>
-                    ) : (
-                      (view.submitLabel ?? `Save ${noun}`)
-                    )}
-                  </Button>
-                </div>
+                  <div className="flex items-center gap-2">
+                    {wizard && step > 0 ? (
+                      <Button type="button" variant="outline" onClick={() => setStep((s) => s - 1)}>
+                        <ArrowLeftIcon data-icon="inline-start" />
+                        Back
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="submit"
+                      className={cn(
+                        "h-auto min-h-8 max-w-full py-1.5 text-left whitespace-normal",
+                        wizard ? "ml-auto" : "self-start",
+                      )}
+                    >
+                      {wizard && !last ? (
+                        <>
+                          Next
+                          <ArrowRightIcon data-icon="inline-end" />
+                        </>
+                      ) : (
+                        button.label
+                      )}
+                    </Button>
+                  </div>
+                </>
               ) : (
                 <p className="text-[13px] text-muted-foreground">
                   You have view-only access to this workspace.

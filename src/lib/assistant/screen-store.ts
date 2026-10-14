@@ -13,11 +13,24 @@ export type ViewScreen = {
   selectedId?: string;
 };
 
+/** A section of a website picked in the preview, so the assistant knows exactly what "this" means. */
+export type BlockRef = {
+  viewId: string;
+  blockId: string;
+  /** What it's called on screen, e.g. Hero or Our courts. */
+  label: string;
+  /** The block's type, for tailored suggestions. */
+  kind: string;
+};
+
 type State = {
   /** The record open in the side panel. The assistant can open one too. */
   recordId: string | null;
   view: ViewScreen | null;
+  /** The website section the person picked to edit with the assistant. */
+  block: BlockRef | null;
   openRecord: (id: string | null) => void;
+  selectBlock: (block: BlockRef | null) => void;
   report: (view: ViewScreen) => void;
   forget: (viewId: string) => void;
 };
@@ -26,7 +39,9 @@ type State = {
 export const useScreen = create<State>()((set) => ({
   recordId: null,
   view: null,
+  block: null,
   openRecord: (recordId) => set({ recordId }),
+  selectBlock: (block) => set({ block }),
   report: (view) => set({ view }),
   forget: (viewId) => set((s) => (s.view?.viewId === viewId ? { view: null } : s)),
 }));

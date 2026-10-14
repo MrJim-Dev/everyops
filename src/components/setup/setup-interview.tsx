@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AttachmentTray, ComposerTools, DropOverlay, MessageFiles } from "@/components/ai/composer-tools";
 import { useAttachments } from "@/components/ai/use-attachments";
 import { useVoiceInput } from "@/components/ai/use-voice-input";
-import { TypingIndicator } from "@/components/motion/typing-indicator";
+import { Thinking } from "@/components/assistant/thinking";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
@@ -237,13 +237,16 @@ export function SetupInterview({
             ) : null}
 
             {phase === "thinking" ? (
-              <AssistantMessage>
-                <TypingIndicator label="EveryOps is thinking" />
-              </AssistantMessage>
+              <Thinking key="thinking" label="Thinking" avatar="round" />
             ) : phase === "designing" ? (
-              <AssistantMessage>
-                <TypingIndicator label="Designing your workspace. This takes about 20 seconds" />
-              </AssistantMessage>
+              <Thinking
+                key="designing"
+                label="Designing your workspace"
+                slowLabel="Designing your workspace"
+                slowAfter={3}
+                hint="usually about 20 seconds"
+                avatar="round"
+              />
             ) : null}
 
             {failure ? (

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowsOutSimpleIcon,
   CaretDownIcon,
   CaretRightIcon,
   CaretUpIcon,
@@ -183,7 +184,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
       onClick={() => openRecord(row.id)}
       onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && openRecord(row.id)}
       className={cn(
-        "h-10 cursor-default outline-none focus-visible:bg-muted",
+        "group/row h-10 cursor-default outline-none focus-visible:bg-muted",
         fresh[row.id] && "animate-flash",
       )}
     >
@@ -208,7 +209,26 @@ export function TableView({ view }: { view: TableViewConfig }) {
         >
           {field.type === "status" ? (
             <StatusMenu record={row} field={field} />
-          ) : inlineEdit && i > 0 && canEditInline(field) ? (
+          ) : inlineEdit && canEditInline(field) && i === 0 ? (
+            // The first cell is editable too, so the row gets its own button to open the record.
+            <span className="flex items-center gap-1">
+              <span className="min-w-0 flex-1">
+                <EditableCell record={row} field={field} />
+              </span>
+              <button
+                type="button"
+                aria-label={`Open ${recordTitle(entity, row)}`}
+                title="Open"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openRecord(row.id);
+                }}
+                className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-[opacity,background-color] duration-150 group-hover/row:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <ArrowsOutSimpleIcon className="size-3.5" />
+              </button>
+            </span>
+          ) : inlineEdit && canEditInline(field) ? (
             <EditableCell record={row} field={field} />
           ) : (
             <FieldValue field={field} value={row.data[field.id]} />
@@ -296,6 +316,11 @@ export function TableView({ view }: { view: TableViewConfig }) {
               </Select>
             ) : null}
             {editable ? <ViewPrefToggle pref="inlineEdit" label="Edit in cells" /> : null}
+            {inlineEdit ? (
+              <span className="hidden text-[12px] text-muted-foreground/70 xl:inline">
+                Double-click a cell to edit
+              </span>
+            ) : null}
             <Button variant="ghost" size="sm" onClick={() => exportCsv(rows)} disabled={!rows.length}>
               <DownloadSimpleIcon data-icon="inline-start" />
               Export

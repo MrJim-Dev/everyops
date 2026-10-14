@@ -59,6 +59,7 @@ export async function POST(request: Request) {
           userId: user.id,
           workspaceId: parsed.data.workspaceId,
           team,
+          workspaceName: found.workspace.name,
           onStatus: (text) => send({ type: "status", text }),
         });
         send({ type: "result", ...result });

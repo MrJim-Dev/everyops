@@ -324,6 +324,11 @@ function checkBlocks(bp: Blueprint, blocks: Block[], path: string, errors: Valid
         if (block.ctaViewId && !isForm(block.ctaViewId))
           errors.push({ path: at, message: "The button points at a missing form" });
         break;
+      case "highlights":
+      case "steps":
+        if (!block.items.length)
+          errors.push({ path: at, message: `The ${block.type} section has nothing in it` });
+        break;
     }
   });
 }

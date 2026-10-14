@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { findEntity, recordTitle } from "@/lib/blueprint/lookup";
-import type { Blueprint, DataRecord, Entity, FieldValue, System, View } from "@/lib/blueprint/types";
+import type { Block, Blueprint, DataRecord, Entity, FieldValue, System, View } from "@/lib/blueprint/types";
 import { applyFilter } from "@/lib/engine/query";
 import { formatDate } from "@/lib/format";
 import { dateKey } from "@/lib/time";
@@ -24,6 +24,8 @@ export const screenSchema = z.object({
   to: z.string().regex(DAY).optional(),
   /** Calendar status filter: "active" hides cancelled, "all", or one option id. */
   status: z.string().max(60).optional(),
+  /** A website section the person picked in the preview: the landing or form view and the block's id. */
+  block: z.object({ viewId: z.string().max(80), blockId: z.string().max(80) }).optional(),
 });
 export type Screen = z.infer<typeof screenSchema>;
 
@@ -141,8 +143,25 @@ export function describeScreen(
         const body = (docs[view.id]?.body ?? view.starter ?? "").slice(0, MAX_DOC_CHARS);
         lines.push(body.trim() ? `- The page's text:\n${body}` : "- The page is empty.");
       }
+      if ((view.type === "landing" || view.type === "form") && view.blocks?.length)
+        lines.push(
+          `- The page's sections (blocks), top to bottom:\n${view.blocks
+            .map((b) => `  - ${JSON.stringify(blockWords(b, docs, view.id))}`)
+            .join("\n")}`,
+        );
     }
   }
+  const picked = screen.block && bp.views.find((v) => v.id === screen.block?.viewId);
+  const pickedBlock =
+    picked && (picked.type === "landing" || picked.type === "form")
+      ? picked.blocks?.find((b) => b.id === screen.block?.blockId)
+      : undefined;
+  if (picked && pickedBlock)
+    lines.push(
+      `- The person clicked one section of ${picked.name} (view ${picked.id}) to edit it: ${JSON.stringify(
+        blockWords(pickedBlock, docs, picked.id),
+      )}. "This", "it", "here" and "the section" mean that block. Change its words with a renames entry (kind section, id ${pickedBlock.id}); change only what they ask and keep the rest of its words.`,
+    );
   const open = screen.recordId ? records.find((r) => r.id === screen.recordId) : undefined;
   const openEntity = open && findEntity(bp, open.entityId);
   if (open && openEntity) {
@@ -152,6 +171,49 @@ export function describeScreen(
     );
   }
   return { text: lines.join("\n"), focusIds: [...new Set(focusIds)], entityId: entityId ?? openEntity?.id };
+}
+
+/** A block as the assistant should read it: its current words, including any the team edited in the app. */
+function blockWords(
+  b: Block,
+  docs: Record<string, { body: string }>,
+  viewId: string,
+): Record<string, unknown> {
+  const edited = docs[`${viewId}:${b.id}`]?.body || undefined;
+  switch (b.type) {
+    case "hero": {
+      let mine: Record<string, string> = {};
+      try {
+        mine = edited ? JSON.parse(edited) : {};
+      } catch {}
+      return {
+        blockId: b.id,
+        type: "hero",
+        title: mine.heading || b.heading,
+        text: mine.subheading || b.subheading,
+        button: b.ctaViewId ? mine.ctaLabel || b.ctaLabel : undefined,
+      };
+    }
+    case "text":
+      return { blockId: b.id, type: "text", text: (edited ?? b.markdown).slice(0, 2000) };
+    case "html":
+      return { blockId: b.id, type: "html" };
+    case "records":
+      return { blockId: b.id, type: "records", title: b.title, shows: b.entityId, layout: b.layout };
+    case "form":
+      return { blockId: b.id, type: "form", title: b.title, form: b.viewId };
+    case "contact": {
+      const items = [
+        b.phone && { title: "Phone", body: b.phone },
+        b.email && { title: "Email", body: b.email },
+        b.address && { title: "Address", body: b.address },
+        b.hours && { title: "Hours", body: b.hours },
+      ].filter(Boolean);
+      return { blockId: b.id, type: "contact", title: b.title, items };
+    }
+    default:
+      return { blockId: b.id, type: b.type, title: b.title, items: b.items };
+  }
 }
 
 /** Where the assistant can take someone. Flat, because Gemini fills flat shapes reliably. */

@@ -2,8 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { type ReactNode, use, useEffect } from "react";
+import { AskChat } from "@/components/assistant/ask-chat";
 import { RequireAuth } from "@/components/auth/auth-guards";
-import { ChangePlanner } from "@/components/changes/change-planner";
 import { HistoryList } from "@/components/changes/history-list";
 import { SetupInterview } from "@/components/setup/setup-interview";
 import { PageHeader } from "@/components/shell/page-header";
@@ -72,8 +72,6 @@ export function SystemRoute({ params }: { params: Params<{ system: string; view?
 export function AskRoute() {
   const ws = useWorkspace();
   const workspace = useWorkspaces((s) => s.workspaces[ws.id]);
-  const changes = workspace?.changes ?? [];
-
   if (!canManage(ws.role)) {
     return (
       <ViewEmpty
@@ -96,32 +94,7 @@ export function AskRoute() {
     );
   }
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <PageHeader
-        title="Ask EveryOps"
-        description={`Change ${ws.name} in your own words.`}
-        className="border-b pb-3"
-      />
-      <div className="mx-auto flex w-full max-w-[680px] flex-col gap-10 px-5 py-8">
-        <ChangePlanner />
-        {changes.length ? (
-          <section className="flex flex-col gap-2">
-            <h2 className="text-[13px] font-semibold">Recent changes</h2>
-            <ul className="divide-y rounded-lg border text-[13px]">
-              {changes.slice(0, 3).map((c) => (
-                <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <span className="min-w-0 flex-1 truncate">{c.title}</span>
-                  <span className="font-mono text-[12px] text-muted-foreground">v{c.toVersion}</span>
-                  {c.undoneAt ? <span className="text-[12px] text-muted-foreground">Undone</span> : null}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-      </div>
-    </div>
-  );
+  return <AskChat />;
 }
 
 export function HistoryRoute() {
