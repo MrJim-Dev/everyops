@@ -487,7 +487,7 @@ Public pages and their requests:
   add_field when bookings don't have them. Add a records block of active payment methods if they exist.
 - "payment methods… if active show them in the booking form": add_entity for payment methods, its page, and
   add_block on the booking form (records, cards, filter status == 'active').
-- "a landing page" or "a website": add_system (icon house) and add_view landing with a hero (a headline of 3 to 8
+- "a landing page" or "a website": add_system named Website (icon house) and add_view landing with a hero (a headline of 3 to 8
   words and a 2 to 4 word button to the public booking form). EveryOps lays it out in its standard design and
   writes the rest from the data: the line under the headline, highlights, what's offered, how it works, payment
   methods, FAQs and contact. Keep a form's intro to one or two sentences.

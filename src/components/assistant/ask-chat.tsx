@@ -1,9 +1,16 @@
 "use client";
 
-import { ChatsCircleIcon, ClockCounterClockwiseIcon, ListIcon } from "@phosphor-icons/react";
+import {
+  ArrowsInSimpleIcon,
+  ChatsCircleIcon,
+  ClockCounterClockwiseIcon,
+  ListIcon,
+} from "@phosphor-icons/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
+import { useAssistant } from "@/lib/assistant/panel-store";
 import { ChatComposer, SendHint } from "./chat-composer";
 import { ChatThread, Suggestions } from "./chat-thread";
 import { ThreadList } from "./reply-extras";
@@ -17,11 +24,23 @@ export function AskChat() {
   const chat = useAssistantChat();
   const { ws } = chat;
   const started = chat.turns.length > 0 || !!chat.pending;
+  const router = useRouter();
+  /** Back to the page this was opened from, with the same conversation in the side panel. */
+  const toPanel = () => {
+    const { returnTo, setReturnTo, setOpenAfterAsk } = useAssistant.getState();
+    setOpenAfterAsk(true);
+    setReturnTo(null);
+    router.push(returnTo ?? ws.basePath);
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-5">
         <h1 className="flex-1 text-[15px] font-semibold">Ask EveryOps</h1>
+        <Button size="sm" variant="ghost" className="hidden md:inline-flex" onClick={toPanel}>
+          <ArrowsInSimpleIcon data-icon="inline-start" />
+          Side panel
+        </Button>
         <Button
           size="sm"
           variant="ghost"

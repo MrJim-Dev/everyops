@@ -1,6 +1,7 @@
 "use client";
 
 import { ListIcon, SparkleIcon } from "@phosphor-icons/react";
+import { usePathname } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { AssistantPanel } from "@/components/assistant/assistant-panel";
 import { RecordPanelsProvider } from "@/components/records/record-panels";
@@ -22,6 +23,17 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   const assistantInstant = useAssistant((s) => s.instant);
   const setAssistantOpen = useAssistant((s) => s.setOpen);
   const toggleAssistant = useAssistant((s) => s.toggle);
+  // The full Ask EveryOps page is the same conversation: the panel never opens beside it.
+  const pathname = usePathname();
+  const onAsk = pathname === `${ws.basePath}/ask`;
+  useEffect(() => {
+    const state = useAssistant.getState();
+    if (onAsk && state.open) setAssistantOpen(false);
+    if (!onAsk && state.openAfterAsk) {
+      state.setOpenAfterAsk(false);
+      setAssistantOpen(true);
+    }
+  }, [onAsk, setAssistantOpen]);
   // The panel stays mounted while it slides out, then unmounts.
   const [assistantMounted, setAssistantMounted] = useState(assistantOpen);
   useEffect(() => {
@@ -47,7 +59,10 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   useHotkey(
     "j",
     // ⌘J is used constantly, so like ⌘B it opens and closes instantly.
-    useCallback(() => toggleAssistant(true), [toggleAssistant]),
+    // On the Ask EveryOps page ⌘J is still caught (Chrome would open Downloads) but has nothing to open.
+    useCallback(() => {
+      if (!onAsk) toggleAssistant(true);
+    }, [toggleAssistant, onAsk]),
     live,
   );
 
@@ -79,11 +94,11 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
               <ListIcon />
             </Button>
             <span className="flex-1 truncate text-[13px] font-medium">{ws.name}</span>
-            {live ? (
+            {live && !onAsk ? (
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Open assistant"
+                aria-label="Ask EveryOps"
                 onClick={() => toggleAssistant()}
               >
                 <SparkleIcon />
@@ -157,7 +172,7 @@ function MobileAssistant() {
   return (
     <Sheet open={open && small} onOpenChange={setOpen}>
       <SheetContent side="right" className="w-full p-0 sm:max-w-[420px]" showCloseButton={false}>
-        <SheetTitle className="sr-only">Assistant</SheetTitle>
+        <SheetTitle className="sr-only">Ask EveryOps</SheetTitle>
         <AssistantPanel onClose={() => setOpen(false)} className="h-full" />
       </SheetContent>
     </Sheet>

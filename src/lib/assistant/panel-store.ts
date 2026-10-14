@@ -41,6 +41,12 @@ type State = {
   instant: boolean;
   setOpen: (open: boolean) => void;
   toggle: (instant?: boolean) => void;
+  /** The page someone was on when they expanded the panel to the full Ask EveryOps page; "Side panel" goes back. */
+  returnTo: string | null;
+  setReturnTo: (path: string | null) => void;
+  /** Open the panel once the person has left the full Ask EveryOps page (its "Side panel" button). */
+  openAfterAsk: boolean;
+  setOpenAfterAsk: (open: boolean) => void;
   /** Requests in flight per workspace, shared by the panel and the Ask EveryOps page. */
   pending: Record<string, Pending | undefined>;
   setPending: (workspaceId: string, pending: Pending | undefined) => void;
@@ -125,6 +131,10 @@ export const useAssistant = create<State>()((set, get) => {
     instant: false,
     setOpen: (open) => set({ open, instant: false }),
     toggle: (instant = false) => set((s) => ({ open: !s.open, instant })),
+    returnTo: null,
+    setReturnTo: (returnTo) => set({ returnTo }),
+    openAfterAsk: false,
+    setOpenAfterAsk: (openAfterAsk) => set({ openAfterAsk }),
     pending: {},
     setPending: (workspaceId, pending) => set((s) => ({ pending: { ...s.pending, [workspaceId]: pending } })),
     truncate: (workspaceId, length) => {
