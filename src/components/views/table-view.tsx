@@ -1,18 +1,54 @@
 "use client";
 
-import { CaretDownIcon, CaretUpIcon } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+  CaretUpIcon,
+  DownloadSimpleIcon,
+  TrashIcon,
+  XIcon,
+} from "@phosphor-icons/react";
+import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { FieldValue } from "@/components/records/field-value";
 import { useRecordPanels } from "@/components/records/record-panels";
 import { StatusMenu } from "@/components/records/status-menu";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useRecordActions } from "@/components/workspace/use-record-actions";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useReportView } from "@/lib/assistant/screen-store";
-import { displayKind, isNumericKind } from "@/lib/blueprint/field-kind";
+import { displayKind, isNumericKind, statusField } from "@/lib/blueprint/field-kind";
 import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
-import type { Sort, TableView as TableViewConfig } from "@/lib/blueprint/types";
+import type { DataRecord, Field, Sort, TableView as TableViewConfig } from "@/lib/blueprint/types";
+import { downloadText, fileSlug } from "@/lib/download";
 import { applyFilter, searchRecords, sortRecords } from "@/lib/engine/query";
+import { toCsv, valueText } from "@/lib/engine/value-text";
+import { formatMoney, formatNumber } from "@/lib/format";
 import { useFreshStore } from "@/lib/motion/fresh";
 import { useViewPref } from "@/lib/store/view-prefs";
 import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
@@ -23,20 +59,36 @@ import { ViewEmpty } from "./view-empty";
 import { ViewPrefToggle } from "./view-pref-toggle";
 import { ToolbarSummary, ViewToolbar } from "./view-toolbar";
 
+const GROUPABLE = new Set(["choice", "status", "relation", "person", "checkbox"]);
+const NO_GROUP = "__none";
+
+type Group = { key: string; label: string; rows: DataRecord[] };
+
 export function TableView({ view }: { view: TableViewConfig }) {
   const ws = useWorkspace();
   const { blueprint, records } = ws;
   const { openRecord, openCreate } = useRecordPanels();
+  const actions = useRecordActions();
   const applyChange = useWorkspaces((s) => s.applyChange);
   const entity = getEntity(blueprint, view.entityId);
   const fields = view.fieldIds.map((id) => getField(entity, id));
   const fresh = useFreshStore((s) => s.ids);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort[] | undefined>(view.sort);
+  const [groupBy, setGroupBy] = useState<string>(view.groupByFieldId ?? NO_GROUP);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
   // Owners and admins can reorder columns by hand: drag a header, or Alt+←/→ on it. Saved as a change in History.
   const reorderable = ws.mode === "live" && canManage(ws.role);
+  const editable = canEdit(ws.role);
+  const inlineEdit = useViewPref("inlineEdit") && editable;
+  const status = statusField(entity);
+  const groupable = entity.fields.filter((f) => GROUPABLE.has(displayKind(blueprint, f)));
+  const groupField = groupable.find((f) => f.id === groupBy);
+  const numeric = (f: Field) => isNumericKind(displayKind(blueprint, f));
+  const summable = (f: Field) => ["money", "number"].includes(displayKind(blueprint, f));
 
   const moveColumn = (fieldId: string, to: number) => {
     const from = view.fieldIds.indexOf(fieldId);
@@ -54,8 +106,6 @@ export function TableView({ view }: { view: TableViewConfig }) {
     if (entry)
       toast.success("Columns reordered", { description: "Saved to History, where you can undo it." });
   };
-  const editable = canEdit(ws.role);
-  const inlineEdit = useViewPref("inlineEdit") && editable;
 
   const rows = useMemo(() => {
     const filtered = applyFilter(blueprint, entity, records, view.filter);
@@ -66,6 +116,57 @@ export function TableView({ view }: { view: TableViewConfig }) {
   }, [blueprint, entity, records, view.filter, query, sort, fields]);
   useReportView({ viewId: view.id, search: query.trim() || undefined });
 
+  // Groups follow the field's option order; other values sort by name, and empty values go last.
+  const groups = useMemo((): Group[] | null => {
+    if (!groupField) return null;
+    const map = new Map<string, Group>();
+    for (const o of groupField.options ?? []) map.set(o.id, { key: o.id, label: o.label, rows: [] });
+    for (const row of rows) {
+      const raw = row.data[groupField.id];
+      const key = raw === undefined || raw === null || raw === "" ? "" : String(raw);
+      let group = map.get(key);
+      if (!group) {
+        const label = key
+          ? valueText(blueprint, records, groupField, raw) || key
+          : `No ${groupField.name.toLowerCase()}`;
+        group = { key, label, rows: [] };
+        map.set(key, group);
+      }
+      group.rows.push(row);
+    }
+    const list = [...map.values()].filter((g) => g.rows.length);
+    if (!groupField.options) list.sort((a, b) => (a.key ? (b.key ? a.label.localeCompare(b.label) : -1) : 1));
+    return list;
+  }, [groupField, rows, blueprint, records]);
+
+  const visibleIds = rows.map((r) => r.id);
+  const picked = visibleIds.filter((id) => selected.has(id));
+  const allPicked = picked.length > 0 && picked.length === visibleIds.length;
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const clear = () => setSelected(new Set());
+  const plural = entity.pluralName.toLowerCase();
+
+  const exportCsv = (list: DataRecord[]) => {
+    downloadText(`${fileSlug(view.name)}.csv`, toCsv(blueprint, records, fields, list), "text/csv");
+    toast.success(`Exported ${list.length} ${list.length === 1 ? entity.name.toLowerCase() : plural}`);
+  };
+  const setStatus = (optionId: string) => {
+    if (!status) return;
+    const result = actions.updateMany(picked, { [status.id]: optionId });
+    if (result.ok) clear();
+    else toast.error("Couldn't update all of them", { description: result.message });
+  };
+
+  const total = (f: Field, list: DataRecord[]) =>
+    list.reduce((sum, r) => sum + (Number(r.data[f.id]) || 0), 0);
+  const formatTotal = (f: Field, value: number) =>
+    displayKind(blueprint, f) === "money" ? formatMoney(value) : formatNumber(value);
+
   const toggleSort = (fieldId: string) =>
     setSort((s) =>
       s?.[0]?.fieldId === fieldId && s[0].dir === "asc"
@@ -73,22 +174,141 @@ export function TableView({ view }: { view: TableViewConfig }) {
         : [{ fieldId, dir: "asc" }],
     );
 
+  const pad = (i: number) => cn(i === 0 && !editable && "pl-5", i === fields.length - 1 && "pr-5");
+  const renderRow = (row: DataRecord) => (
+    <TableRow
+      key={row.id}
+      tabIndex={0}
+      data-state={selected.has(row.id) ? "selected" : undefined}
+      onClick={() => openRecord(row.id)}
+      onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && openRecord(row.id)}
+      className={cn(
+        "h-10 cursor-default outline-none focus-visible:bg-muted",
+        fresh[row.id] && "animate-flash",
+      )}
+    >
+      {editable ? (
+        <TableCell className="w-10 pl-5" onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            checked={selected.has(row.id)}
+            onCheckedChange={() => toggle(row.id)}
+            aria-label={`Select ${recordTitle(entity, row)}`}
+          />
+        </TableCell>
+      ) : null}
+      {fields.map((field, i) => (
+        <TableCell
+          key={field.id}
+          className={cn(
+            "max-w-[280px] truncate py-2",
+            pad(i),
+            i === 0 && "font-medium",
+            numeric(field) && "text-right",
+          )}
+        >
+          {field.type === "status" ? (
+            <StatusMenu record={row} field={field} />
+          ) : inlineEdit && i > 0 && canEditInline(field) ? (
+            <EditableCell record={row} field={field} />
+          ) : (
+            <FieldValue field={field} value={row.data[field.id]} />
+          )}
+        </TableCell>
+      ))}
+    </TableRow>
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ViewToolbar>
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder={`Search ${entity.pluralName.toLowerCase()}`}
-        />
-        {editable ? <ViewPrefToggle pref="inlineEdit" label="Edit in cells" /> : null}
-        <ToolbarSummary>
-          {rows.length} {rows.length === 1 ? entity.name.toLowerCase() : entity.pluralName.toLowerCase()}
-        </ToolbarSummary>
+        {picked.length ? (
+          <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Selected rows">
+            <span className="text-[13px] font-medium tabular">{picked.length} selected</span>
+            {status?.options?.length ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+                  Set {status.name.toLowerCase()}
+                  <CaretDownIcon data-icon="inline-end" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuGroup>
+                    {status.options.map((o) => (
+                      <DropdownMenuItem key={o.id} onClick={() => setStatus(o.id)}>
+                        {o.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => exportCsv(rows.filter((r) => selected.has(r.id)))}
+            >
+              <DownloadSimpleIcon data-icon="inline-start" />
+              Export CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive"
+              onClick={() => {
+                actions.removeMany(picked, picked.length === 1 ? entity.name.toLowerCase() : plural);
+                clear();
+              }}
+            >
+              <TrashIcon data-icon="inline-start" />
+              Delete
+            </Button>
+            <Button variant="ghost" size="sm" onClick={clear} aria-label="Clear selection">
+              <XIcon />
+            </Button>
+          </div>
+        ) : (
+          <>
+            <SearchInput value={query} onChange={setQuery} placeholder={`Search ${plural}`} />
+            {groupable.length ? (
+              <Select
+                value={groupBy}
+                onValueChange={(v) => {
+                  setGroupBy(String(v));
+                  setCollapsed(new Set());
+                }}
+                items={{
+                  [NO_GROUP]: "No grouping",
+                  ...Object.fromEntries(groupable.map((f) => [f.id, `Group by ${f.name.toLowerCase()}`])),
+                }}
+              >
+                <SelectTrigger size="sm" className="w-[176px]" aria-label="Group rows">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectGroup>
+                    <SelectItem value={NO_GROUP}>No grouping</SelectItem>
+                    {groupable.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>
+                        Group by {f.name.toLowerCase()}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            ) : null}
+            {editable ? <ViewPrefToggle pref="inlineEdit" label="Edit in cells" /> : null}
+            <Button variant="ghost" size="sm" onClick={() => exportCsv(rows)} disabled={!rows.length}>
+              <DownloadSimpleIcon data-icon="inline-start" />
+              Export
+            </Button>
+            <ToolbarSummary>
+              {rows.length} {rows.length === 1 ? entity.name.toLowerCase() : plural}
+            </ToolbarSummary>
+          </>
+        )}
       </ViewToolbar>
       {rows.length === 0 ? (
         <ViewEmpty
-          title={query ? "No matches" : `No ${entity.pluralName.toLowerCase()} yet`}
+          title={query ? "No matches" : `No ${plural} yet`}
           description={
             query ? "Try a different search." : `Add the first ${entity.name.toLowerCase()} to get started.`
           }
@@ -100,8 +320,17 @@ export function TableView({ view }: { view: TableViewConfig }) {
           <Table className="text-[13px]">
             <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow className="hover:bg-transparent">
+                {editable ? (
+                  <TableHead className="w-10 pl-5">
+                    <Checkbox
+                      checked={allPicked}
+                      indeterminate={picked.length > 0 && !allPicked}
+                      onCheckedChange={() => (allPicked ? clear() : setSelected(new Set(visibleIds)))}
+                      aria-label={allPicked ? "Clear selection" : `Select all ${rows.length}`}
+                    />
+                  </TableHead>
+                ) : null}
                 {fields.map((field, i) => {
-                  const numeric = isNumericKind(displayKind(blueprint, field));
                   const active = sort?.[0]?.fieldId === field.id ? sort[0].dir : null;
                   return (
                     <TableHead
@@ -131,9 +360,8 @@ export function TableView({ view }: { view: TableViewConfig }) {
                       }}
                       className={cn(
                         "h-9 text-[12px] font-normal text-muted-foreground",
-                        i === 0 && "pl-5",
-                        i === fields.length - 1 && "pr-5",
-                        numeric && "text-right",
+                        pad(i),
+                        numeric(field) && "text-right",
                         reorderable && "cursor-grab",
                         dragging === field.id && "opacity-50",
                         dropOn === field.id && dragging !== field.id && "bg-muted",
@@ -151,7 +379,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
                         title={reorderable ? "Sort. Drag or Alt+←/→ to move the column" : undefined}
                         className={cn(
                           "inline-flex items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
-                          numeric && "flex-row-reverse",
+                          numeric(field) && "flex-row-reverse",
                         )}
                       >
                         {field.name}
@@ -167,42 +395,80 @@ export function TableView({ view }: { view: TableViewConfig }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  tabIndex={0}
-                  onClick={() => openRecord(row.id)}
-                  onKeyDown={(e) => e.key === "Enter" && openRecord(row.id)}
-                  className={cn(
-                    "h-10 cursor-default outline-none focus-visible:bg-muted",
-                    fresh[row.id] && "animate-flash",
-                  )}
-                >
-                  {fields.map((field, i) => {
-                    const numeric = isNumericKind(displayKind(blueprint, field));
+              {groups
+                ? groups.map((group) => {
+                    const open = !collapsed.has(group.key);
                     return (
-                      <TableCell
-                        key={field.id}
-                        className={cn(
-                          "max-w-[280px] truncate py-2",
-                          i === 0 && "pl-5 font-medium",
-                          i === fields.length - 1 && "pr-5",
-                          numeric && "text-right",
-                        )}
-                      >
-                        {field.type === "status" ? (
-                          <StatusMenu record={row} field={field} />
-                        ) : inlineEdit && i > 0 && canEditInline(field) ? (
-                          <EditableCell record={row} field={field} />
-                        ) : (
-                          <FieldValue field={field} value={row.data[field.id]} />
-                        )}
-                      </TableCell>
+                      <Fragment key={group.key || "__empty"}>
+                        <TableRow className="h-9 bg-muted/30 hover:bg-muted/50">
+                          <TableCell
+                            colSpan={editable ? 2 : 1}
+                            className={cn("py-1.5", editable ? "pl-5" : "pl-5")}
+                          >
+                            <button
+                              type="button"
+                              aria-expanded={open}
+                              onClick={() =>
+                                setCollapsed((s) => {
+                                  const next = new Set(s);
+                                  next.has(group.key) ? next.delete(group.key) : next.add(group.key);
+                                  return next;
+                                })
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-sm text-[12.5px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                            >
+                              {open ? (
+                                <CaretDownIcon className="size-3" />
+                              ) : (
+                                <CaretRightIcon className="size-3" />
+                              )}
+                              {group.label}
+                              <span className="font-normal text-muted-foreground tabular">
+                                {group.rows.length}
+                              </span>
+                            </button>
+                          </TableCell>
+                          {fields.slice(1).map((field, i) => (
+                            <TableCell
+                              key={field.id}
+                              className={cn(
+                                "py-1.5 font-mono text-[12px] text-muted-foreground tabular",
+                                numeric(field) && "text-right",
+                                i === fields.length - 2 && "pr-5",
+                              )}
+                            >
+                              {view.totals && summable(field)
+                                ? formatTotal(field, total(field, group.rows))
+                                : null}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                        {open ? group.rows.map(renderRow) : null}
+                      </Fragment>
                     );
-                  })}
-                </TableRow>
-              ))}
+                  })
+                : rows.map(renderRow)}
             </TableBody>
+            {view.totals && fields.some(summable) ? (
+              <TableFooter className="sticky bottom-0 bg-background">
+                <TableRow className="h-10 hover:bg-transparent">
+                  {editable ? <TableCell className="pl-5" /> : null}
+                  {fields.map((field, i) => (
+                    <TableCell
+                      key={field.id}
+                      className={cn(
+                        "py-2",
+                        pad(i),
+                        i === 0 && "font-medium",
+                        numeric(field) && "text-right font-mono text-[12.5px] font-medium tabular",
+                      )}
+                    >
+                      {i === 0 ? "Total" : summable(field) ? formatTotal(field, total(field, rows)) : null}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableFooter>
+            ) : null}
           </Table>
         </div>
       )}

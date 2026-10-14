@@ -14,6 +14,7 @@ export function RecordFieldsForm({
   onChange,
   idPrefix,
   fieldIds,
+  exact,
 }: {
   entity: Entity;
   values: RecordData;
@@ -22,12 +23,14 @@ export function RecordFieldsForm({
   idPrefix: string;
   /** Which fields to ask, in order. Required fields are always included. Defaults to every editable field. */
   fieldIds?: string[];
+  /** Ask only fieldIds, e.g. one step of a multi-step form, without adding the other required fields. */
+  exact?: boolean;
 }) {
   const editable = editableFields(entity);
   const fields = fieldIds?.length
     ? [
         ...fieldIds.flatMap((id) => editable.filter((f) => f.id === id)),
-        ...editable.filter((f) => f.required && !fieldIds.includes(f.id)),
+        ...(exact ? [] : editable.filter((f) => f.required && !fieldIds.includes(f.id))),
       ]
     : editable;
   return (

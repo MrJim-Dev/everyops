@@ -54,7 +54,19 @@ const metric = z.object({
 });
 
 const assistantWidget = z.union([
-  z.object({ ...widgetBase, type: z.literal("stat"), metric }),
+  z.object({
+    ...widgetBase,
+    type: z.literal("stat"),
+    metric,
+    compare: z
+      .object({
+        dateFieldId: z.string().describe("A date, datetime or time_range field"),
+        period: z.enum(["day", "week", "month"]),
+      })
+      .optional()
+      .describe("Show the change from the previous day, 7 days or 30 days"),
+    sparkline: z.boolean().optional().describe("With compare: a small trend line"),
+  }),
   z.object({
     ...widgetBase,
     type: z.literal("chart"),
@@ -79,6 +91,25 @@ const assistantWidget = z.union([
     list: z.object({ fieldIds: z.array(z.string()), limit: z.number() }),
   }),
   z.object({ ...widgetBase, type: z.literal("progress"), metric, target: z.number() }),
+  z.object({
+    ...widgetBase,
+    type: z.literal("agenda"),
+    metric,
+    agenda: z.object({
+      dateFieldId: z.string().describe("A date, datetime or time_range field"),
+      days: z.number().optional().describe("Days ahead, today included; default 1"),
+      fieldIds: z.array(z.string()).optional().describe("Up to 3 details per item"),
+    }),
+  }),
+  z.object({
+    ...widgetBase,
+    type: z.literal("heatmap"),
+    metric,
+    heatmap: z.object({
+      dateFieldId: z.string().describe("A datetime or time_range field with times"),
+      weeks: z.number().optional(),
+    }),
+  }),
 ]);
 
 // One small shape per operation. A single object with every part optional made Gemini fill all of them for every

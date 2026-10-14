@@ -148,6 +148,16 @@ export const view = z.union([
     fieldIds: z.array(z.string()).describe("Columns"),
     filter,
     sort: z.array(sort).optional(),
+    groupByFieldId: z
+      .string()
+      .optional()
+      .describe(
+        "Rows grouped by this select, status, relation, person or checkbox field, e.g. payment status",
+      ),
+    totals: z
+      .boolean()
+      .optional()
+      .describe("A totals row for money and number columns, with group subtotals"),
   }),
   z.object({
     ...viewBase,
@@ -186,6 +196,18 @@ export const view = z.union([
     ...viewBase,
     type: z.literal("form"),
     fieldIds: z.array(z.string()).describe("The fields asked, in order"),
+    steps: z
+      .array(
+        z.object({
+          id: z.string(),
+          title: z.string().describe("Short, e.g. Court and time, Your details"),
+          description: z.string().optional(),
+          fieldIds: z.array(z.string()).describe("This step's fields; each field in one step"),
+        }),
+      )
+      .optional()
+      .describe("A multi-step form: 2 to 4 steps asking a few fields each"),
+    review: z.boolean().optional().describe("With steps: a summary to check before submitting"),
     intro: z.string().optional(),
     submitLabel: z.string().optional().describe("e.g. Book court"),
     public: z.boolean().optional().describe("Anyone with the link can submit it (a public booking page)"),
@@ -236,7 +258,7 @@ export const widget = z.object({
   title: z.string(),
   entityId: z.string(),
   filter: z.string().optional(),
-  type: z.enum(["stat", "chart", "progress", "list"]),
+  type: z.enum(["stat", "chart", "progress", "list", "agenda", "heatmap"]),
   metric: z.object({ op: z.enum(["count", "sum", "avg"]), fieldId: z.string().optional() }),
   chart: z
     .object({
@@ -260,6 +282,35 @@ export const widget = z.object({
       sort: z.array(sort).optional(),
     })
     .optional(),
+  compare: z
+    .object({
+      dateFieldId: z.string().describe("A date, datetime or time_range field of the record type"),
+      period: z
+        .enum(["day", "week", "month"])
+        .describe("today vs yesterday, last 7 or last 30 days vs the ones before"),
+    })
+    .optional()
+    .describe("stat only (not with calc): the current period's value and the change from the period before"),
+  sparkline: z.boolean().optional().describe("stat with compare: a small trend line of daily values"),
+  agenda: z
+    .object({
+      dateFieldId: z.string().describe("A date, datetime or time_range field"),
+      days: z.number().optional().describe("How many days ahead, today included; default 1"),
+      fieldIds: z.array(z.string()).optional().describe("Up to 3 details shown per item"),
+    })
+    .optional()
+    .describe("agenda only: today's schedule as a timeline"),
+  heatmap: z
+    .object({
+      dateFieldId: z.string().describe("A datetime or time_range field with times"),
+      weeks: z.number().optional().describe("Weeks to look back; default 8"),
+    })
+    .optional()
+    .describe("heatmap only: weekday by hour, e.g. when courts or the shop are busiest"),
+  width: z
+    .enum(["third", "half", "two_thirds", "full"])
+    .optional()
+    .describe("Width on a dashboard with a layout; usually leave it to the layout"),
   span: z.enum(["main", "side"]).optional(),
 });
 
@@ -292,6 +343,12 @@ export const system = z.object({
   icon: z.enum(ICONS),
   viewIds: z.array(z.string()),
   widgetIds: z.array(z.string()),
+  layout: z
+    .enum(["overview", "operations", "reports"])
+    .optional()
+    .describe(
+      "Dashboard arrangement: overview (numbers, a wide trend, lists beside it), operations (today's agenda and queues first), reports (charts two to a row)",
+    ),
 });
 
 export const design = z.object({
@@ -391,6 +448,16 @@ Rules for a valid blueprint:
 - A stat that combines record types or needs arithmetic (total income = bookings + other income, profit,
   collection rate) uses calc: named terms (count/sum/avg of one record type with its own filter) and expr over
   their ids, e.g. "bookings + other_income"; format percent for rates.
+- Dashboards: give every system that holds widgets a layout: overview for the Overview page, operations for a
+  front desk or daily-work page, reports for a page of charts. Stats on an Overview usually compare periods
+  (compare with the record's date field, period day for daily work, week or month otherwise) with sparkline true;
+  their filter then leaves out the date, e.g. status == 'paid' rather than is_today(slot) && status == 'paid'.
+  Businesses with a schedule (bookings, shifts, appointments, posts) get an agenda widget of today, and businesses
+  with times of day (bookings, sales, orders) get a heatmap of busy hours.
+- Tables of money (bookings, orders, expenses) set totals true; a list that people sort into states (payment,
+  approval, stage) can set groupByFieldId to that field.
+- Forms that ask more than 5 fields, and every public booking form, use steps (e.g. Court and time, Your details,
+  Payment) with review true. Each field goes in exactly one step.
 - Systems are the sidebar pages. Put an Overview system first with 3 to 6 widgets, then one page per area the
   owner manages day to day, usually 3 to 6 pages: each main record type (bookings, courts, players, clients,
   products, tasks…) gets its own page with its own views, e.g. "Bookings" (schedule and list), "Courts" (all

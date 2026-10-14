@@ -99,6 +99,10 @@ export type TableView = ViewBase & {
   fieldIds: string[];
   filter?: string;
   sort?: Sort[];
+  /** Rows grouped under collapsible headers by this select, status, relation, person or checkbox field. */
+  groupByFieldId?: string;
+  /** A totals row for number and money columns (and subtotals on each group). */
+  totals?: boolean;
 };
 export type KanbanView = ViewBase & {
   type: "kanban";
@@ -130,11 +134,18 @@ export type ApprovalQueueView = ViewBase & {
   rejectLabel: string;
   detailFieldIds: string[];
 };
+/** One page of a multi-step form: a title and the fields it asks. */
+export type FormStep = { id: string; title: string; description?: string; fieldIds: string[] };
+
 /** A page that is just the form for adding one record type, e.g. a booking form for the front desk. */
 export type FormView = ViewBase & {
   type: "form";
   /** Fields in the order they're asked; empty means every editable field. */
   fieldIds: string[];
+  /** Ask the fields a few at a time, with Back and Next. Each field belongs to one step. */
+  steps?: FormStep[];
+  /** With steps: show a summary to check before submitting. */
+  review?: boolean;
   intro?: string;
   submitLabel?: string;
   /** Anyone with the link can submit it (a public booking page), at /s/[workspace]/[view]. */
@@ -233,7 +244,7 @@ export type Widget = {
   title: string;
   entityId: string;
   filter?: string;
-  type: "stat" | "chart" | "progress" | "list";
+  type: "stat" | "chart" | "progress" | "list" | "agenda" | "heatmap";
   metric: { op: "count" | "sum" | "avg"; fieldId?: string };
   /** Stat and progress only. When set, it replaces entityId, filter and metric for the value. */
   calc?: WidgetCalc;
@@ -250,9 +261,30 @@ export type Widget = {
   target?: number;
   /** For list widgets: which fields to show, their order, and where "View all" goes. */
   list?: { fieldIds: string[]; limit: number; viewId?: string; sort?: Sort[] };
+  /**
+   * Stats only: show the value for the current period (today, the last 7 or 30 days) next to the period before,
+   * by the records' date field, e.g. "₱12,400, up 18% vs the previous 7 days".
+   */
+  compare?: { dateFieldId: string; period: "day" | "week" | "month" };
+  /** Stats with compare only: a small line of the daily values behind the number. */
+  sparkline?: boolean;
+  /** Agenda widgets: what's coming up, grouped by day and sorted by time. */
+  agenda?: { dateFieldId: string; days?: number; fieldIds?: string[] };
+  /** Heatmap widgets: weekday by hour of the day, e.g. when courts are busiest, over the last few weeks. */
+  heatmap?: { dateFieldId: string; weeks?: number };
   /** Layout hint for dashboards. Defaults: charts in the main column, lists and progress at the side. */
   span?: "main" | "side";
+  /** Width in a dashboard with a layout. Defaults come from the layout. */
+  width?: WidgetWidth;
 };
+
+export type WidgetWidth = "third" | "half" | "two_thirds" | "full";
+
+/**
+ * Premade dashboard arrangements. overview: key numbers, a wide trend, lists beside it. operations: today's agenda
+ * first, then queues and lists. reports: charts two to a row.
+ */
+export type DashboardLayout = "overview" | "operations" | "reports";
 
 export type Target = { kind: "self" } | { kind: "relation"; fieldId: string };
 
@@ -280,6 +312,8 @@ export type System = {
   icon: IconName;
   viewIds: string[];
   widgetIds: string[];
+  /** How the dashboard arranges its widgets. Without one, charts go left and lists right. */
+  layout?: DashboardLayout;
 };
 
 export type Blueprint = {
