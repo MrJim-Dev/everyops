@@ -1,7 +1,7 @@
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
 import { displayKind } from "./field-kind";
-import type { Block, Blueprint, Entity, Field } from "./types";
+import type { Block, Blueprint, Entity, Field, FormExtras } from "./types";
 
 export type ValidationError = { path: string; message: string };
 
@@ -138,7 +138,8 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
         if (view.steps) {
           const seen = new Set<string>();
           for (const step of view.steps) {
-            if (!step.fieldIds.length)
+            // A step may ask nothing but the add-ons.
+            if (!step.fieldIds.length && !(step.extras && view.extras))
               errors.push({ path, message: `${view.name}: step "${step.title}" asks nothing` });
             missing(step.fieldIds);
             for (const id of step.fieldIds) {
@@ -147,6 +148,7 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
             }
           }
         }
+        if (view.extras) checkExtras(bp, entity, view.extras, path, errors);
         break;
       case "notes":
         missing([view.titleFieldId, view.bodyFieldId, ...(view.metaFieldIds ?? [])]);
@@ -259,6 +261,39 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
 }
 
 /** Blocks on public pages: live data must point at real fields, and links at real forms. */
+/** Add-ons on a form: line items under the form's record type, linking to the items offered. */
+function checkExtras(
+  bp: Blueprint,
+  entity: Entity,
+  extras: FormExtras,
+  path: string,
+  errors: ValidationError[],
+) {
+  const line = bp.entities.find((e) => e.id === extras.lineEntityId);
+  if (!line) {
+    errors.push({ path, message: `Add-ons use a missing line-item record type "${extras.lineEntityId}"` });
+    return;
+  }
+  if (line.parent?.entityId !== entity.id)
+    errors.push({
+      path,
+      message: `Add-on line items (${line.name}) must have ${entity.name} as their parent`,
+    });
+  const item = line.fields.find((f) => f.id === extras.itemFieldId);
+  const items = bp.entities.find((e) => e.id === item?.relation?.entityId);
+  if (!item || item.type !== "relation" || !items)
+    errors.push({
+      path,
+      message: `Add-ons need "${extras.itemFieldId}" to be a link on ${line.name} to the items offered`,
+    });
+  else if (extras.filter) checkExpr(bp, items, extras.filter, path, errors);
+  if (extras.quantityFieldId && line.fields.find((f) => f.id === extras.quantityFieldId)?.type !== "number")
+    errors.push({
+      path,
+      message: `Add-on quantity "${extras.quantityFieldId}" must be a number field on ${line.name}`,
+    });
+}
+
 function checkBlocks(bp: Blueprint, blocks: Block[], path: string, errors: ValidationError[]) {
   const ids = new Set<string>();
   const isForm = (id: string | undefined) => !!id && bp.views.some((v) => v.id === id && v.type === "form");

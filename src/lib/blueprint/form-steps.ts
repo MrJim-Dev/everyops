@@ -19,7 +19,7 @@ export function formSteps(
   );
   const steps = (view.steps ?? [])
     .map((s) => ({ ...s, fieldIds: s.fieldIds.filter((id) => can.has(id)) }))
-    .filter((s) => s.fieldIds.length);
+    .filter((s) => s.fieldIds.length || (s.extras && view.extras));
   if (!steps.length) return [{ id: "all", title: view.name, fieldIds: [...new Set(asked)] }];
   const placed = new Set(steps.flatMap((s) => s.fieldIds));
   const left = [...new Set(asked)].filter((id) => !placed.has(id));
@@ -29,6 +29,19 @@ export function formSteps(
       fieldIds: [...steps[steps.length - 1].fieldIds, ...left],
     };
   return steps;
+}
+
+/**
+ * Where a form's add-ons go: on the step marked for them, else on a step of their own before the last one (the only
+ * step when there's one). With nothing to offer (no extras, or no active items), a step that held only them goes.
+ */
+export function placeExtras(steps: FormStep[], title: string | undefined): FormStep[] {
+  if (!title) return steps.filter((s) => s.fieldIds.length).map(({ extras: _, ...s }) => s);
+  if (steps.some((s) => s.extras)) return steps;
+  if (steps.length === 1) return [{ ...steps[0], extras: true }];
+  const out = [...steps];
+  out.splice(Math.max(0, out.length - 1), 0, { id: "extras", title, fieldIds: [], extras: true });
+  return out;
 }
 
 const isEmpty = (v: FieldValue | undefined) =>

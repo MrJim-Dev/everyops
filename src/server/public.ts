@@ -9,6 +9,7 @@ import {
   type PageDocs,
   type PublicPageData,
   type PublicSite,
+  publicExtras,
   publicFieldsOf,
   publicForm,
   resolvePage,
@@ -71,6 +72,8 @@ export async function submitPublicForm(
   viewId: string,
   raw: Record<string, unknown>,
   now = new Date(),
+  /** Add-ons picked: item id → how many. Only items the form offers are accepted. */
+  rawExtras: Record<string, unknown> = {},
 ): Promise<SubmitResult> {
   if (!ID.test(slug)) return { ok: false, status: 404, message: "This page doesn't exist." };
   return db.transaction().execute(async (trx) => {
@@ -154,9 +157,37 @@ export async function submitPublicForm(
         message: result.errors[0]?.message ?? "Check the form and try again.",
         fieldErrors: result.errors,
       } as const;
-    await sql`update workspace set doc = jsonb_set(doc, '{records}', ${JSON.stringify(result.data.records)}::jsonb), updated_at = now()
+    // Add-ons become line items under the new record, through the same engine (rules, totals, roll-ups).
+    let data = result.data;
+    const picked: { title: string; quantity: number }[] = [];
+    const offered = publicExtras(bp, doc.records, view, now);
+    const extras = view.extras;
+    const line = extras && bp.entities.find((e) => e.id === extras.lineEntityId);
+    if (offered && extras && line?.parent) {
+      const parentField = line.parent.fieldId;
+      for (const [itemId, n] of Object.entries(rawExtras).slice(0, 20)) {
+        const item = offered.items.find((i) => i.id === itemId);
+        const quantity = typeof n === "number" && Number.isInteger(n) ? Math.min(n, 50) : 0;
+        if (!item || quantity < 1) continue;
+        const lineData: RecordData = { [parentField]: result.record.id, [extras.itemFieldId]: item.id };
+        if (extras.quantityFieldId) lineData[extras.quantityFieldId] = quantity;
+        // Other counts the line asks for (hours, nights) start at 1; the business can change them.
+        for (const f of line.fields)
+          if (f.required && f.type === "number" && lineData[f.id] === undefined) lineData[f.id] = 1;
+        const added = createRecord(data, line.id, lineData, now);
+        if (!added.ok)
+          return {
+            ok: false,
+            status: 422,
+            message: `${item.title}: ${added.errors[0]?.message ?? "couldn't be added"}`,
+          } as const;
+        data = added.data;
+        picked.push({ title: item.title, quantity });
+      }
+    }
+    await sql`update workspace set doc = jsonb_set(doc, '{records}', ${JSON.stringify(data.records)}::jsonb), updated_at = now()
       where id = ${slug}`.execute(trx);
-    const record: DataRecord = result.record;
+    const record: DataRecord = data.records.find((r) => r.id === result.record.id) ?? result.record;
     const shown = entity.fields.filter(
       (f) =>
         (f.id === booking?.resourceFieldId ||
@@ -169,10 +200,22 @@ export async function submitPublicForm(
       ok: true,
       reference: record.id.slice(-6).toUpperCase(),
       title: recordTitle(entity, record),
-      summary: shown.map((f) => ({
-        name: f.name,
-        text: formatCell(bp, result.data.records, f, record.data[f.id]).text,
-      })),
+      summary: [
+        ...shown
+          .filter((f) => f.type !== "money" && !(f.type === "formula" && f.formula?.resultType === "money"))
+          .map((f) => ({ name: f.name, text: formatCell(bp, data.records, f, record.data[f.id]).text })),
+        ...(picked.length
+          ? [
+              {
+                name: offered?.title ?? "Add-ons",
+                text: picked.map((p) => `${p.title} × ${p.quantity}`).join(", "),
+              },
+            ]
+          : []),
+        ...shown
+          .filter((f) => f.type === "money" || (f.type === "formula" && f.formula?.resultType === "money"))
+          .map((f) => ({ name: f.name, text: formatCell(bp, data.records, f, record.data[f.id]).text })),
+      ],
     } as const;
   });
 }

@@ -193,7 +193,20 @@ function removeField(bp: Blueprint, entityId: string, fieldId: string) {
       v.fieldIds = keep(v.fieldIds);
       v.sort = v.sort?.filter((s) => s.fieldId !== fieldId);
     }
-    if (v.type === "form") v.fieldIds = keep(v.fieldIds);
+    if (v.type === "form") {
+      v.fieldIds = keep(v.fieldIds);
+      // Its steps lose the field too; a step left asking nothing (and not holding the add-ons) goes.
+      if (v.steps) {
+        v.steps = v.steps
+          .map((s) => ({ ...s, fieldIds: keep(s.fieldIds) }))
+          .filter((s) => s.fieldIds.length || (s.extras && v.extras));
+        if (!v.steps.length) delete v.steps;
+      }
+      if (v.extras?.lineEntityId === entityId) {
+        if (v.extras.itemFieldId === fieldId) delete v.extras;
+        else if (v.extras.quantityFieldId === fieldId) delete v.extras.quantityFieldId;
+      }
+    }
     if (v.type === "kanban") v.cardFieldIds = keep(v.cardFieldIds);
     if (v.type === "approval_queue") v.detailFieldIds = keep(v.detailFieldIds);
     if (v.type === "notes" && v.metaFieldIds) v.metaFieldIds = keep(v.metaFieldIds);
@@ -232,6 +245,8 @@ function removeEntity(bp: Blueprint, entityId: string) {
   for (const v of bp.views)
     if ((v.type === "form" || v.type === "landing") && v.blocks)
       v.blocks = v.blocks.filter((b) => !(b.type === "records" && b.entityId === entityId));
+  // A form whose add-ons lived in it offers none now.
+  for (const v of bp.views) if (v.type === "form" && v.extras?.lineEntityId === entityId) delete v.extras;
   dropEmptySystems(bp);
 }
 
