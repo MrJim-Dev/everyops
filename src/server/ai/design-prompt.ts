@@ -327,6 +327,46 @@ export const design = z.object({
 });
 export type Design = z.infer<typeof design>;
 
+/*
+ * What the designer is actually asked for: the same design without the optional decoration Gemini kept running away
+ * in (a hero subheading, a form's button text, approval button labels and details, a target on a chart). It wrote
+ * them as endless filler until the call timed out. The app fills them in when it tidies the design, and people can
+ * change them afterwards.
+ */
+type Shape = z.ZodObject<z.ZodRawShape>;
+const typeOf = (o: unknown) => ((o as Shape).shape.type as z.ZodLiteral<string>).value;
+const lean = (
+  options: readonly unknown[],
+  drop: Record<string, Record<string, true>>,
+  extend?: (t: string, o: Shape) => Shape,
+) =>
+  z.union(
+    options.map((o) => {
+      const t = typeOf(o);
+      const slim = drop[t] ? (o as Shape).omit(drop[t]) : (o as Shape);
+      return extend ? extend(t, slim) : slim;
+    }) as unknown as [Shape, Shape, ...Shape[]],
+  );
+const designBlock = lean(block.options, { hero: { subheading: true } });
+const designView = lean(
+  view.options,
+  {
+    approval_queue: { approveLabel: true, rejectLabel: true, detailFieldIds: true },
+    form: { submitLabel: true },
+  },
+  (t, o) =>
+    t === "form"
+      ? o.extend({ blocks: z.array(designBlock).optional() })
+      : t === "landing"
+        ? o.extend({ blocks: z.array(designBlock).describe("The public page, top to bottom") })
+        : o,
+);
+const designWidget = (widget as unknown as Shape).omit({ target: true });
+export const designRequest = (design as unknown as Shape).extend({
+  views: z.array(designView),
+  widgets: z.array(designWidget),
+}) as unknown as typeof design;
+
 /** How public pages, payments and FAQs are built. Shared by the designer and the workspace assistant. */
 export const PUBLIC_PAGES_GUIDE = `Public pages (customers use them without an account, at /s/<workspace>/<view>):
 - A public form is a form view with public true, e.g. a public booking page. Visitors see only its fields; statuses
@@ -381,7 +421,7 @@ Rules for a valid blueprint:
 - "A calendar page" means a page with a calendar view (people switch it between month, week and day); a booking
   schedule (slot_grid) is the day-by-court grid. Booking businesses usually want both.
 - checkout needs product, order and line-item types (line items have parent set to the order). Only for selling.
-- form views are a page that is just the form to add one record type (fieldIds, intro, submitLabel). notes views
+- form views are a page that is just the form to add one record type (fieldIds, intro). notes views
   are a notebook over a record type with a text title and a long_text body (titleFieldId, bodyFieldId).
   document views are one free markdown page with entityId "" and a starter outline. canvas views are a free
   whiteboard (shapes, text, sticky notes, arrows, pictures) with entityId "", for a floor plan, mood board,
@@ -399,6 +439,8 @@ Rules for a valid blueprint:
   the view as a tab elsewhere. Line-item record types stay inside their parent's page.
   Every system lists at least one view or widget, and page names are short nouns.
 - Money is PHP. Use realistic Filipino business details in samples, dated around today.
+- Keep every text short: names and labels a few words, intros one sentence, text blocks and starter pages under
+  120 words. Never repeat yourself.
 - Booking businesses: every amount on a booking is a money formula, never a field people type: the court fee is
   the rate times duration_hours(time) (e.g. hour(time.start) >= 17 ? court.evening_rate : court.day_rate), add-ons
   come from the add-on records, and the total adds them up. Public visitors never see or enter prices. Overview stats for a booking business: booked value (sum of amount, not cancelled),

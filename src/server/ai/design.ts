@@ -21,7 +21,7 @@ import { computeAll } from "@/lib/engine/compute";
 import { isImagePath } from "@/lib/engine/records";
 import { hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
-import { DESIGN_SYSTEM, type Design, design } from "./design-prompt";
+import { DESIGN_SYSTEM, type Design, designRequest } from "./design-prompt";
 import { generateJsonHedged } from "./gemini";
 
 const SLOT_MINUTES = [15, 30, 60, 90, 120] as const;
@@ -291,9 +291,37 @@ export function tidy(bp: Blueprint): Blueprint {
       v.sort = v.sort?.filter((x) => has.has(x.fieldId));
     }
     if (v.type === "kanban") v.cardFieldIds = v.cardFieldIds.filter((id) => has.has(id));
-    if (v.type === "approval_queue") v.detailFieldIds = v.detailFieldIds.filter((id) => has.has(id));
+    if (v.type === "approval_queue") {
+      // The designer isn't asked for these (they were where Gemini ran away), so they come from the record type:
+      // button labels from its status options, details from its first plain fields.
+      const entity = bp.entities.find((e) => e.id === v.entityId);
+      const status = entity?.fields.find((f) => f.id === v.statusFieldId);
+      const label = (id: string, fallback: string) => {
+        const name =
+          status?.options
+            ?.find((o) => o.id === id)
+            ?.label.toLowerCase()
+            .trim() ?? "";
+        return BUTTON_VERBS[name] ?? fallback;
+      };
+      if (v.approveLabel === "Approve") v.approveLabel = label(v.approve, "Approve");
+      if (v.rejectLabel === "Decline") v.rejectLabel = label(v.reject, "Decline");
+      v.detailFieldIds = v.detailFieldIds.filter((id) => has.has(id));
+      if (!v.detailFieldIds.length && entity)
+        v.detailFieldIds = entity.fields
+          .filter(
+            (f) =>
+              f.id !== entity.primaryFieldId &&
+              f.id !== v.statusFieldId &&
+              !["long_text", "rollup"].includes(f.type),
+          )
+          .slice(0, 4)
+          .map((f) => f.id);
+    }
   }
   bp.widgets = bp.widgets.filter((w) => {
+    // A progress bar needs a target, which the designer isn't asked for: it shows as a total instead.
+    if (w.type === "progress" && !w.target) w.type = "stat";
     if (w.calc) {
       // A formula card keeps only totals that point at real record types and fields.
       w.calc.terms = w.calc.terms.filter(
@@ -482,11 +510,20 @@ export async function designWorkspace(
     : context;
   let repairs = 0;
   for (let attempt = 0; attempt < 4; attempt++) {
-    // Designs take 8–30 s; a stalled call gets a parallel twin after 35 s instead of a minute's wait.
+    // Designs take 8–30 s; a stalled call gets a parallel twin after 35 s instead of a minute's wait, and a call
+    // that runs away (see runawayWatcher) is stopped within seconds and replaced. Real designs are 2–7k tokens.
     const result = await generateJsonHedged(
-      design,
-      { system: DESIGN_SYSTEM, prompt, task: "design", timeoutMs: 75_000, thinking: "LOW" },
-      { hedgeMs: 35_000 },
+      designRequest,
+      {
+        system: DESIGN_SYSTEM,
+        prompt,
+        task: "design",
+        timeoutMs: 75_000,
+        thinking: "LOW",
+        maxOutputTokens: 16_000,
+        enumLiterals: true,
+      },
+      { hedgeMs: 35_000, attempts: 4 },
     );
     if (!result.ok) return { ok: false, message: result.error };
     const raw = toBlueprint(result.data);
@@ -511,6 +548,21 @@ export async function designWorkspace(
     message: "I couldn't design a valid workspace for that yet. Add a detail or two and try again.",
   };
 }
+
+/** Approval buttons say what they do: a status called "Confirmed" gets a "Confirm" button. */
+const BUTTON_VERBS: Record<string, string> = {
+  confirmed: "Confirm",
+  approved: "Approve",
+  accepted: "Accept",
+  verified: "Verify",
+  paid: "Mark as paid",
+  completed: "Complete",
+  cancelled: "Cancel",
+  canceled: "Cancel",
+  rejected: "Reject",
+  declined: "Decline",
+  denied: "Deny",
+};
 
 const PAGE_ICONS: [RegExp, IconName][] = [
   [/court|room|venue|table|space|resource/, "court"],

@@ -60,6 +60,7 @@ Use pnpm only. `pnpm build` matters: `cacheComponents` errors (below) only show 
 - Every AI feature returns structured JSON through `generateJson` with a Zod schema, and its output must pass the same validation the app already uses (`validateBlueprint`, op checks) before the user sees it. Nothing is applied without the owner's approval.
 - AI routes check the session and `takeAiToken`. Keep prompts in a `*-prompt.ts` module next to the feature so they can be tested directly.
 - Don't lower temperature on Gemini 3 models (they loop), and don't use the `global` location (it stalls). Only the designer and the assistant set `thinking: "LOW"`.
+- Gemini sometimes runs away inside a value: a string or number it never closes, repeating filler until the token limit (a minute or more). `generateJson` streams every call through `runawayWatcher` and stops it within seconds so the hedged retry starts. Vertex enforces `enum` but not `const`, `maxLength` or `maximum`; optional decorative text in a big schema is where runaways start. The designer asks for `designRequest` (no hero subheading, form button, approval labels or chart target; `tidy` fills them in) with `enumLiterals`. Test designer changes with several runs of a real brief, not one.
 
 
 - `cacheComponents` is on: anything reading `headers()`, `cookies()` or awaited `params` on the server must sit inside `<Suspense>`.
