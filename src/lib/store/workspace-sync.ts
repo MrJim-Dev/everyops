@@ -39,7 +39,12 @@ export type WorkspacePatch = {
 };
 
 export type PatchResult =
-  | { ok: true; revs: Record<string, number> }
+  | {
+      ok: true;
+      revs: Record<string, number>;
+      /** New records the server changed while saving (a sequence number another device took first). */
+      updated?: DataRecord[];
+    }
   | {
       ok: false;
       status: number;

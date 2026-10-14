@@ -114,6 +114,29 @@ describe("bookings", () => {
   });
 });
 
+describe("required fields a form doesn't ask", () => {
+  it("stay empty for staff to fill in later, and are still required everywhere else", () => {
+    const data = structuredClone(courtBookingsSample(new Date("2026-10-13T09:30:00+08:00")));
+    const booking = data.blueprint.entities.find((e) => e.id === "booking");
+    const player = booking?.fields.find((f) => f.type === "relation" && f.relation?.entityId === "player");
+    const court = data.records.find((r) => r.entityId === "court");
+    if (!booking?.booking || !player || !court) throw new Error("fixture changed");
+    player.required = true;
+    const input = {
+      [booking.booking.resourceFieldId]: court.id,
+      [booking.booking.timeFieldId]: { start: "2026-10-20T10:00:00.000Z", end: "2026-10-20T11:00:00.000Z" },
+      [booking.booking.statusFieldId]: "unpaid",
+    };
+    const strict = createRecord(data, "booking", input);
+    expect(strict.ok).toBe(false);
+    if (!strict.ok) expect(strict.errors.map((e) => e.fieldId)).toContain(player.id);
+    const visitor = createRecord(data, "booking", input, new Date(), undefined, {
+      notYet: new Set([player.id]),
+    });
+    expect(visitor.ok).toBe(true);
+  });
+});
+
 describe("rules", () => {
   it("a sale deducts stock and totals the order", () => {
     const ws = posSample(NOW);

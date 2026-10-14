@@ -293,6 +293,60 @@ export async function submitPublicForm(
     if (!drafted.ok) return drafted;
     const { data, record, picked, offered } = drafted;
     const booking = entity.booking;
+    const time = booking ? input[booking.timeFieldId] : undefined;
+    if (
+      booking &&
+      isTimeRange(time ?? null) &&
+      Date.parse((time as { start: string }).start) <= now.getTime()
+    )
+      return { ok: false, status: 422, message: "Pick a time that hasn't started yet." } as const;
+
+    // A visitor can only answer what the form asks. Required fields it doesn't show (a player record, an assigned
+    // staff member) stay empty for staff to fill in, instead of refusing every submission.
+    const asked = new Set(publicFieldsOf(bp, view).map((f) => f.id));
+    const notYet = new Set(entity.fields.filter((f) => !asked.has(f.id)).map((f) => f.id));
+    const result = createRecord({ blueprint: bp, records: doc.records }, entity.id, input, now, undefined, {
+      notYet,
+    });
+    if (!result.ok)
+      return {
+        ok: false,
+        status: 422,
+        message: result.errors[0]?.message ?? "Check the form and try again.",
+        fieldErrors: result.errors,
+      } as const;
+    // Add-ons become line items under the new record, through the same engine (rules, totals, roll-ups).
+    let data = result.data;
+    const picked: { title: string; quantity: number }[] = [];
+    const offered = publicExtras(bp, doc.records, view, now);
+    const extras = view.extras;
+    const line = extras && bp.entities.find((e) => e.id === extras.lineEntityId);
+    if (offered && extras && line?.parent) {
+      const parentField = line.parent.fieldId;
+      for (const [itemId, n] of Object.entries(rawExtras).slice(0, 20)) {
+        const item = offered.items.find((i) => i.id === itemId);
+        const quantity = typeof n === "number" && Number.isInteger(n) ? Math.min(n, 50) : 0;
+        if (!item || quantity < 1) continue;
+        const lineData: RecordData = { [parentField]: result.record.id, [extras.itemFieldId]: item.id };
+        if (extras.quantityFieldId) lineData[extras.quantityFieldId] = quantity;
+        // Other counts the line asks for (hours, nights) start at 1, and its own name (a Title field) is the item's;
+        // the business can change them.
+        for (const f of line.fields) {
+          if (lineData[f.id] !== undefined) continue;
+          if (f.required && f.type === "number") lineData[f.id] = 1;
+          if ((f.required || f.id === line.primaryFieldId) && f.type === "text") lineData[f.id] = item.title;
+        }
+        const added = createRecord(data, line.id, lineData, now);
+        if (!added.ok)
+          return {
+            ok: false,
+            status: 422,
+            message: `${item.title}: ${added.errors[0]?.message ?? "couldn't be added"}`,
+          } as const;
+        data = added.data;
+        picked.push({ title: item.title, quantity });
+      }
+    }
     // Only the new rows and the ones the engine recalculated (totals, roll-ups) are written, each bumping its rev
     // so an open tab merges them instead of overwriting.
     const before = new Map(stored.map((s) => [s.record.id, s]));
