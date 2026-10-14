@@ -47,6 +47,19 @@ const SPAN: Record<WidgetWidth, string> = {
   two_thirds: "lg:col-span-4",
   full: "lg:col-span-6",
 };
+const COLS: Record<WidgetWidth, number> = { third: 2, half: 3, two_thirds: 4, full: 6 };
+const BY_COLS: Record<number, WidgetWidth> = { 2: "third", 3: "half", 4: "two_thirds", 6: "full" };
+
+/** Widens the last card so the grid's final row ends flush instead of leaving an empty cell. */
+function fillLastRow<T extends { width: WidgetWidth }>(placed: T[]): T[] {
+  let used = 0;
+  for (const p of placed) used = (used % 6) + COLS[p.width] > 6 ? COLS[p.width] : (used % 6) + COLS[p.width];
+  const left = (6 - (used % 6)) % 6;
+  const last = placed.at(-1);
+  if (!left || !last) return placed;
+  const wider = BY_COLS[COLS[last.width] + left];
+  return wider ? [...placed.slice(0, -1), { ...last, width: wider }] : placed;
+}
 
 /**
  * Stats across the top, then the other widgets. With a layout (or widths), a six-column grid separated by
@@ -85,9 +98,11 @@ export function Dashboard({ system }: { system: System }) {
   const layout = system.layout ?? (rest.some((w) => w.width) ? "overview" : undefined);
   if (layout) {
     const plan = LAYOUTS[layout];
-    const placed = rest
-      .map((w, i) => ({ w, i, ...plan[w.type], width: w.width ?? plan[w.type].width }))
-      .sort((a, b) => a.order - b.order || a.i - b.i);
+    const placed = fillLastRow(
+      rest
+        .map((w, i) => ({ w, i, ...plan[w.type], width: w.width ?? plan[w.type].width }))
+        .sort((a, b) => a.order - b.order || a.i - b.i),
+    );
     return (
       <div className="min-h-0 flex-1 overflow-y-auto">
         <DashboardSuggestions system={system} />
