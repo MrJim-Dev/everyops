@@ -1,8 +1,7 @@
 "use client";
 
-import { ArrowUpRightIcon, UsersIcon } from "@phosphor-icons/react";
+import { ArrowUpRightIcon, SealCheckIcon } from "@phosphor-icons/react";
 import Link from "next/link";
-import { formatUses } from "@/components/community/system-card";
 import { SystemShot } from "@/components/community/system-shot";
 import { SystemIcon } from "@/components/system-icon";
 import { CATALOG, CATEGORIES, type CatalogSystem } from "@/lib/catalog";
@@ -81,8 +80,8 @@ function GalleryCard({ system }: { system: CatalogSystem }) {
             {system.summary}
           </p>
           <p className="mt-3 flex items-center gap-1.5 text-[12px] text-muted-foreground tabular">
-            <UsersIcon className="size-3.5" />
-            {formatUses(system.uses)} businesses use it
+            <SealCheckIcon className="size-3.5" />
+            Official template, free to copy
           </p>
         </div>
         <ArrowUpRightIcon className="size-4 shrink-0 text-muted-foreground transition-[color,transform] duration-150 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-foreground" />
