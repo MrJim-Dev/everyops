@@ -72,6 +72,12 @@ type Input = {
   /** Longest text value the answer may hold before it counts as a runaway (default 3,000 characters). */
   maxStringChars?: number;
   /**
+   * Longest text, in characters, for values under these property names (e.g. { submitLabel: 40 }). Sent to Gemini
+   * as maxLength, and a value that runs well past it is stopped as a runaway within a second or two. Gemini's loops
+   * start in short text it fails to close: a two-word button label that turns into "Request Delivery Request…".
+   */
+  textLimits?: Record<string, number>;
+  /**
    * Sends literals as one-value enums, which Vertex enforces (it ignores const). It makes the schema count for more
    * against Gemini's structural limit, so it's on only where it was needed and fits: the designer.
    */
@@ -84,12 +90,36 @@ type Input = {
  * enums: Vertex enforces enum but not const, and without it Gemini wrote view types that don't exist
  * ("approval" for approval_queue) and lost the shape of the answer from there.
  */
-function responseSchema(schema: z.ZodType, enumLiterals = false) {
+function responseSchema(schema: z.ZodType, enumLiterals = false, textLimits?: Record<string, number>) {
   const { $schema: _drop, ...rest } = z.toJSONSchema(schema, {
     target: "draft-2020-12",
     io: "output",
   }) as Record<string, unknown>;
-  return enumLiterals ? (constToEnum(rest) as Record<string, unknown>) : rest;
+  const out = enumLiterals ? (constToEnum(rest) as Record<string, unknown>) : rest;
+  return textLimits ? (withTextLimits(out, textLimits) as Record<string, unknown>) : out;
+}
+
+/** Adds maxLength to the string properties (and lists of strings) named in `limits`. */
+export function withTextLimits(node: unknown, limits: Record<string, number>): unknown {
+  if (Array.isArray(node)) return node.map((n) => withTextLimits(n, limits));
+  if (!node || typeof node !== "object") return node;
+  const out = Object.fromEntries(
+    Object.entries(node as Record<string, unknown>).map(([key, value]) => [
+      key,
+      withTextLimits(value, limits),
+    ]),
+  ) as Record<string, unknown>;
+  const props = out.properties as Record<string, Record<string, unknown>> | undefined;
+  if (props && typeof props === "object")
+    for (const [name, prop] of Object.entries(props)) {
+      const max = limits[name];
+      if (!max || !prop || typeof prop !== "object") continue;
+      const items = prop.items as Record<string, unknown> | undefined;
+      if (prop.type === "string" && !prop.enum) props[name] = { ...prop, maxLength: max };
+      else if (prop.type === "array" && items?.type === "string" && !items.enum)
+        props[name] = { ...prop, items: { ...items, maxLength: max } };
+    }
+  return out;
 }
 
 function constToEnum(node: unknown): unknown {
@@ -131,7 +161,7 @@ function circling(window: string): boolean {
   return words.length >= 200 && new Set(words).size / words.length < 0.08;
 }
 
-export function runawayWatcher(maxStringChars = 3000) {
+export function runawayWatcher(maxStringChars = 3000, textLimits: Record<string, number> = {}) {
   let inString = false;
   let escaped = false;
   let length = 0;
@@ -139,6 +169,11 @@ export function runawayWatcher(maxStringChars = 3000) {
   let digits = 0;
   let tail = "";
   let window = "";
+  // The property a value belongs to: the last string closed before a colon. A short field gets 3× its limit.
+  let current = "";
+  let lastString = "";
+  let key = "";
+  let limit = maxStringChars;
   return (chunk: string): string | null => {
     for (const ch of chunk) {
       if (inString) {
@@ -155,11 +190,13 @@ export function runawayWatcher(maxStringChars = 3000) {
           continue;
         } else if (ch === '"') {
           inString = false;
+          lastString = current;
           continue;
         }
         length++;
         tail = (tail + ch).slice(-400);
         window = (window + ch).slice(-2000);
+        if (length <= 64) current += ch;
         // Checked every 20 characters: a short phrase repeating for 400 characters is a loop, however long it is.
         if (length % 20 === 0 && repeating(tail)) return "text that repeats itself";
         if (length % 200 === 0 && circling(window)) return "text that goes round in circles";
@@ -167,6 +204,7 @@ export function runawayWatcher(maxStringChars = 3000) {
         // Filler that never ends ("…_done_now_perfectly_setup_…") has none of it.
         unbroken = BREAKS.has(ch) ? 0 : unbroken + 1;
         if (length > maxStringChars) return "a text value that never ends";
+        if (length > limit) return `a ${key} that never ends`;
         if (unbroken > 160) return "text with no spaces that never ends";
       } else if (ch === '"') {
         inString = true;
@@ -175,6 +213,11 @@ export function runawayWatcher(maxStringChars = 3000) {
         digits = 0;
         tail = "";
         window = "";
+        current = "";
+        limit = textLimits[key] ? textLimits[key] * 3 + 30 : maxStringChars;
+      } else if (ch === ":") {
+        key = lastString;
+        digits = 0;
       } else if (/[0-9.eE+-]/.test(ch)) {
         if (++digits > 40) return "a number that never ends";
       } else digits = 0;
@@ -222,7 +265,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           systemInstruction: input.system,
           ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
           responseMimeType: "application/json",
-          responseJsonSchema: responseSchema(schema, input.enumLiterals),
+          responseJsonSchema: responseSchema(schema, input.enumLiterals, input.textLimits),
           ...(input.maxOutputTokens ? { maxOutputTokens: input.maxOutputTokens } : {}),
           ...(input.thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel[input.thinking] } } : {}),
           ...(input.tools
@@ -236,7 +279,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           abortSignal: AbortSignal.any(signals),
         },
       });
-      const watch = runawayWatcher(input.maxStringChars);
+      const watch = runawayWatcher(input.maxStringChars, input.textLimits);
       // Parts are kept as Gemini sent them: calls carry thought signatures it needs back on the next round.
       const parts: Part[] = [];
       let roundUsage:
@@ -388,12 +431,30 @@ function withoutNulls(value: unknown): unknown {
 export function generateJsonHedged<T>(
   schema: z.ZodType<T>,
   input: Input,
-  options: { hedgeMs: number; attempts?: number; afterSilence?: boolean },
+  options: {
+    hedgeMs: number;
+    attempts?: number;
+    afterSilence?: boolean;
+    /** Added to the prompt from the second attempt on, so a retry isn't the same call that just looped. */
+    retryNote?: string;
+  },
 ): Promise<GenerateResult<T>> {
-  return hedged((signal, progress) => generateJson(schema, { ...input, signal, onProgress: progress }), {
-    ...options,
-    onHedge: (attempt) => console.info(JSON.stringify({ event: "gemini_hedge", task: input.task, attempt })),
-  });
+  const { retryNote, ...rest } = options;
+  const promptFor = (attempt: number): Input["prompt"] =>
+    attempt === 0 || !retryNote
+      ? input.prompt
+      : typeof input.prompt === "string"
+        ? `${input.prompt}\n\n${retryNote}`
+        : [...input.prompt, { text: retryNote }];
+  return hedged(
+    (signal, progress, attempt) =>
+      generateJson(schema, { ...input, prompt: promptFor(attempt), signal, onProgress: progress }),
+    {
+      ...rest,
+      onHedge: (attempt) =>
+        console.info(JSON.stringify({ event: "gemini_hedge", task: input.task, attempt })),
+    },
+  );
 }
 
 type Outcome = { ok: true } | { ok: false; retryable: boolean };
@@ -403,7 +464,7 @@ type Outcome = { ok: true } | { ok: false; retryable: boolean };
  * With afterSilence, a call's hedgeMs starts over each time it reports progress, and each call starts at most one twin.
  */
 export function hedged<R extends Outcome>(
-  run: (signal: AbortSignal, progress: () => void) => Promise<R>,
+  run: (signal: AbortSignal, progress: () => void, attempt: number) => Promise<R>,
   {
     hedgeMs,
     attempts = 3,
@@ -424,6 +485,7 @@ export function hedged<R extends Outcome>(
     };
     const launch = () => {
       if (done || started >= attempts) return;
+      const attempt = started;
       started++;
       running++;
       const controller = new AbortController();
@@ -443,7 +505,7 @@ export function hedged<R extends Outcome>(
       const progress = () => {
         if (afterSilence && !fired && !done) wait();
       };
-      void run(controller.signal, progress).then((result) => {
+      void run(controller.signal, progress, attempt).then((result) => {
         running--;
         clearTimeout(hedge);
         if (done) return;

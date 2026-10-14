@@ -19,6 +19,16 @@ import {
  * are added with add_block, and formula cards live in one plan-level list.
  */
 type AnyObject = z.ZodObject<z.ZodRawShape>;
+// A new hero gets its line from the standard site template; changing it is a section edit (renames, "Text: …").
+// Writing it here, deep inside the ops list, is where Gemini looped: every attempt for "a booking form with a
+// landing page" ran on in the subheading until it was stopped.
+const assistantBlock = z.union(
+  block.options.map((o) =>
+    ((o as AnyObject).shape.type as z.ZodLiteral<string>).value === "hero"
+      ? (o as AnyObject).omit({ subheading: true })
+      : o,
+  ) as unknown as [AnyObject, AnyObject, ...AnyObject[]],
+);
 // Free pages (a markdown document, a canvas, a custom HTML page) share one shape: one union branch instead of three.
 const freePage = z.object({
   id: z.string(),
@@ -43,14 +53,17 @@ const assistantView = z.union(
     // this schema under Gemini's budget.
     if (type === "form")
       // Steps and add-ons don't fit Gemini's schema budget as their own fields: steps are "# Step title" entries
-      // among the fields (the app splits them), and add-ons are set up by the designer.
-      return (o as AnyObject).omit({ blocks: true, extras: true, review: true, steps: true }).extend({
-        fieldIds: z
-          .array(z.string())
-          .describe(
-            "The fields asked, in order. A multi-step form puts '# Step title' before each step's fields, e.g. ['# Court and time', 'court', 'slot', '# Your details', 'guest_name', 'phone']. '@block_id' in a step shows one of the form's blocks (payment methods, FAQs) in that step",
-          ),
-      });
+      // among the fields (the app splits them), and add-ons are set up by the designer. The button's words are a
+      // renames entry (kind button): written inside ops, Gemini looped on them ("Request Delivery Request…").
+      return (o as AnyObject)
+        .omit({ blocks: true, extras: true, review: true, steps: true, submitLabel: true })
+        .extend({
+          fieldIds: z
+            .array(z.string())
+            .describe(
+              "The fields asked, in order. A multi-step form puts '# Step title' before each step's fields, e.g. ['# Court and time', 'court', 'slot', '# Your details', 'guest_name', 'phone']. '@block_id' in a step shows one of the form's blocks (payment methods, FAQs) in that step",
+            ),
+        });
     if (type === "landing") return (o as AnyObject).omit({ blocks: true });
     if (type === "table") return (o as AnyObject).omit({ groupByFieldId: true, totals: true });
     return o;
@@ -185,7 +198,6 @@ export const designOp = z.union([
     viewId: z.string().describe("A table, kanban, approval_queue, form or landing view"),
     public: z.boolean().optional().describe("Make it a public page anyone with the link can use"),
     intro: z.string().optional(),
-    submitLabel: z.string().optional(),
     fieldIds: z
       .array(z.string())
       .optional()
@@ -196,7 +208,7 @@ export const designOp = z.union([
   z.object({
     op: z.literal("add_block"),
     viewId: z.string().describe("A form or landing view, existing or added in this plan"),
-    block,
+    block: assistantBlock,
     beforeBlockId: z.string().optional(),
   }),
   z.object({
@@ -266,10 +278,12 @@ export const assistantAnswer = z.object({
     renames: z
       .array(
         z.object({
-          kind: z.enum(["page", "tab", "section"]),
+          kind: z.enum(["page", "tab", "section", "button"]),
           id: z
             .string()
-            .describe("The page's (system) or tab's (view) id; for a section of a website, its blockId"),
+            .describe(
+              "The page's (system) or tab's (view) id; for a section of a website, its blockId; for a button, the form view's id",
+            ),
           newName: z
             .string()
             .describe(
@@ -277,7 +291,7 @@ export const assistantAnswer = z.object({
             ),
         }),
       )
-      .describe("Pages and tabs to rename, and new words for website sections"),
+      .describe("Pages and tabs to rename, new words for website sections, and a form's button words"),
     recordOps: z.array(recordOp).describe("Data changes, applied after the design changes"),
     formulas: z
       .array(
@@ -301,6 +315,27 @@ export const assistantAnswer = z.object({
   }),
 });
 export type AssistantAnswer = z.infer<typeof assistantAnswer>;
+
+/**
+ * Character limits for the short words in an answer, by property name. Gemini gets them as maxLength, and a value
+ * far past its limit is stopped as a loop: they start in short text (a button label, a hero line), never in a reply.
+ */
+export const ASSISTANT_TEXT_LIMITS: Record<string, number> = {
+  ctaLabel: 40,
+  heading: 90,
+  subheading: 240,
+  intro: 400,
+  title: 90,
+  name: 80,
+  label: 90,
+  detail: 300,
+  description: 300,
+  suggestions: 120,
+};
+
+/** Added to a retry, so it isn't the same call that just looped. */
+export const ASSISTANT_RETRY_NOTE =
+  "Your last answer got stuck repeating words inside one text value. This time keep every text value short and plain, close it as soon as it says what it needs to, and never repeat a phrase. Website words: a headline of a few words, one or two sentences under it, buttons of 2 to 4 words.";
 
 export const ASSISTANT_SYSTEM = `You are the EveryOps assistant, a side panel inside one workspace of EveryOps, which runs a small
 business's systems (bookings, sales, projects, HR, finance and more) from a JSON blueprint plus records. You get the
@@ -353,8 +388,9 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   datetime or time_range field), slot_grid (booking schedule; only for a booking record type that already has
   booking settings), approval_queue (statusFieldId), checkout (only for selling), and:
   - form: a page that is just the form for adding one record type ("a page for the booking form"): fieldIds in
-    the order asked, intro (one line, or instructions such as payment details), submitLabel (the button, 2 to 4
-    words: "Book court"; never instructions).
+    the order asked and intro (one line, or instructions such as payment details). The button's words (2 to 4
+    words: "Book court"; never instructions) are a renames entry: kind button, the form view's id, newName the
+    words. Leave it out to keep the standard "Send …" button.
   - notes: a notebook with a list of notes and a markdown editor ("a note taking page"). It needs a record type
     with a text title and a long_text body: add_entity (e.g. Note: title, body long_text, plus tags or a date if
     useful) unless one exists; set titleFieldId, bodyFieldId and optional metaFieldIds.
@@ -447,9 +483,10 @@ Public pages and their requests:
   add_field when bookings don't have them. Add a records block of active payment methods if they exist.
 - "payment methods… if active show them in the booking form": add_entity for payment methods, its page, and
   add_block on the booking form (records, cards, filter status == 'active').
-- "a landing page" or "a website": add_system (icon house) and add_view landing with a hero (title, a short
-  subheading and a button to the public booking form). EveryOps lays it out in its standard design: highlights,
-  what's offered, how it works, payment methods, FAQs and contact are filled in from the data.
+- "a landing page" or "a website": add_system (icon house) and add_view landing with a hero (a headline of 3 to 8
+  words and a 2 to 4 word button to the public booking form). EveryOps lays it out in its standard design and
+  writes the rest from the data: the line under the headline, highlights, what's offered, how it works, payment
+  methods, FAQs and contact. Keep a form's intro to one or two sentences.
 - Moving a form's section into one of its steps ("put the payment methods on step 4", "show the FAQs on the last
   step"): update_view that form with its complete fields (start from the list shown with its tab) and '@block_id'
   in the step that should show it. The section then shows inside that step instead of below the form. Never remove

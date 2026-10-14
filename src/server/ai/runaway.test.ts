@@ -4,11 +4,12 @@ vi.mock("server-only", () => ({}));
 
 import { posSample } from "@/lib/catalog/canteen-pos";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
-import { runawayWatcher } from "./gemini";
+import { ASSISTANT_TEXT_LIMITS } from "./assistant-prompt";
+import { runawayWatcher, withTextLimits } from "./gemini";
 
 /** Feeds text in small pieces, the way a stream arrives, and returns the first reason given (or null). */
-function watch(text: string, maxStringChars?: number) {
-  const check = runawayWatcher(maxStringChars);
+function watch(text: string, maxStringChars?: number, limits?: Record<string, number>) {
+  const check = runawayWatcher(maxStringChars, limits);
   for (let i = 0; i < text.length; i += 37) {
     const why = check(text.slice(i, i + 37));
     if (why) return { why, at: i };
@@ -107,5 +108,48 @@ describe("runaway answers", () => {
   it("isn't fooled by quotes and backslashes inside text", () => {
     const text = JSON.stringify({ a: 'He said "hi" \\ then left', b: "x".repeat(150) });
     expect(watch(text)).toBeNull();
+  });
+
+  // Assistant plans for "a booking form with a clear and decent landing page", Oct 14: every attempt looped.
+  it("stops a short field soon after it passes its limit", () => {
+    const start =
+      '{"ops":[{"op":"add_block","viewId":"home","block":{"type":"hero","heading":"Fresh water","ctaLabel":"';
+    const result = watch(start + "Request Delivery ".repeat(300), undefined, ASSISTANT_TEXT_LIMITS);
+    expect(result?.why).toBe("a ctaLabel that never ends");
+    expect(result?.at).toBeLessThan(start.length + 200);
+  });
+
+  it("leaves a long reply and real plans alone when short fields have limits", () => {
+    const plan = {
+      reply:
+        "Here's the plan for your website. I'll add a Home page with a short headline and a button that opens the booking form, so visitors can reserve a court without calling. The form asks for their name, phone number, the court and a time slot; double bookings are refused automatically. Your active payment methods show under the form with the account names and QR codes, and the FAQs you already wrote appear at the bottom. Prices and statuses stay private. Once it's applied, open Publish to copy the link and share it on your Facebook page or in your group chats.",
+      ops: [{ op: "update_view", viewId: "f", intro: "Pay the 50% deposit by GCash." }],
+      renames: [{ kind: "button", id: "f", newName: "Book court" }],
+    };
+    expect(watch(JSON.stringify(plan), undefined, ASSISTANT_TEXT_LIMITS)).toBeNull();
+    expect(watch(JSON.stringify(courtBookingsSample(NOW)), undefined, ASSISTANT_TEXT_LIMITS)).toBeNull();
+  });
+});
+
+describe("text limits in the answer schema", () => {
+  it("caps the named text properties and lists of strings", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        submitLabel: { type: "string" },
+        suggestions: { type: "array", items: { type: "string" } },
+        kind: { type: "string", enum: ["a", "b"] },
+        reply: { type: "string" },
+      },
+    };
+    expect(withTextLimits(schema, { submitLabel: 40, suggestions: 120, kind: 5 })).toEqual({
+      type: "object",
+      properties: {
+        submitLabel: { type: "string", maxLength: 40 },
+        suggestions: { type: "array", items: { type: "string", maxLength: 120 } },
+        kind: { type: "string", enum: ["a", "b"] },
+        reply: { type: "string" },
+      },
+    });
   });
 });
