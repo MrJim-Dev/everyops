@@ -15,6 +15,7 @@ import {
   publicForm,
   resolvePage,
   siteOf,
+  visitorContactIds,
 } from "@/lib/public/resolve";
 import { type Slot, slotsFor } from "@/lib/public/slots";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
@@ -151,6 +152,16 @@ export async function submitPublicForm(
     }
     for (const f of autoReferenceFields(entity))
       if (input[f.id] === undefined) input[f.id] = nextReference(entity, f, doc.records);
+    const asked = publicFieldsOf(bp, view);
+    const contact = visitorContactIds(asked);
+    const missing = asked.filter((f) => contact.has(f.id) && input[f.id] === undefined);
+    if (missing.length)
+      return {
+        ok: false,
+        status: 422,
+        message: `${missing[0].name} is required`,
+        fieldErrors: missing.map((f) => ({ fieldId: f.id, message: `${f.name} is required` })),
+      } as const;
     const booking = entity.booking;
     const time = booking ? input[booking.timeFieldId] : undefined;
     if (
