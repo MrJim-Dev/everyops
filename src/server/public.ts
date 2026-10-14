@@ -197,7 +197,13 @@ function draftFromVisitor(
     } as const;
   const booking = entity.booking;
   const time = booking ? input[booking.timeFieldId] : undefined;
-  if (booking && isTimeRange(time ?? null) && Date.parse((time as { start: string }).start) <= now.getTime())
+  // Stays check their days below (a stay may start today); bookings of hours must not have started.
+  if (
+    booking &&
+    !booked?.dates &&
+    isTimeRange(time ?? null) &&
+    Date.parse((time as { start: string }).start) <= now.getTime()
+  )
     return { ok: false, status: 422, message: "Pick a time that hasn't started yet." } as const;
   // A picked range is whole slots inside opening hours, and one slot when the form allows only one. A stay is days:
   // check-out after check-in, from today on.
