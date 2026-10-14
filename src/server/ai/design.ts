@@ -815,21 +815,25 @@ export async function designWorkspace(
   /** The last whole design that was rejected: repairs start from it, and one that returns only part of it is caught. */
   let previous: { entities: number; views: number; data: Design; flagged: Set<string> } | null = null;
   for (let attempt = 0; attempt < 4; attempt++) {
-    // Designs take 8–40 s; a stalled call gets a parallel twin after 45 s instead of a minute's wait, and a call
-    // that runs away (see runawayWatcher) is stopped within seconds and replaced. Real designs are 2–8k tokens: with
-    // the playbooks' category and status record types, a rental business is about 7.5k, and a repair 7–8k.
+    // Designs take 8–40 s, longer when Vertex is busy. A call is judged by whether its answer keeps streaming, not by
+    // the clock: one that has said nothing for 45 s gets a parallel twin, one silent for 30 s mid-answer (60 s before
+    // its first part, while it thinks) is stopped and retried, and a slow one that keeps streaming may run to 170 s
+    // (Cloud Run allows 300). A call that runs away (see runawayWatcher) is stopped within seconds and replaced. Real
+    // designs are 2–8k tokens: with the playbooks' category and status record types, a rental business is about 7.5k.
     const result = await generateJsonHedged(
       designRequest,
       {
         system: DESIGN_SYSTEM,
         prompt,
         task: "design",
-        timeoutMs: 110_000,
+        timeoutMs: 170_000,
+        idleMs: 30_000,
+        firstPartMs: 60_000,
         thinking: "LOW",
         maxOutputTokens: 16_000,
         enumLiterals: true,
       },
-      { hedgeMs: 45_000, attempts: 4 },
+      { hedgeMs: 45_000, attempts: 4, afterSilence: true },
     );
     if (!result.ok) return { ok: false, message: result.error };
     const build = (data: Design) => {
