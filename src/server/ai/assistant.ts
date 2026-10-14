@@ -1101,7 +1101,7 @@ ${bp.systems
                     v.type === "form" ? `, fields: ${JSON.stringify(markersOf(v))}` : ""
                   }${v.type === "form" ? visitorView(bp, v) : ""}`
                 : v.type === "layout"
-                  ? `, its layout (rewrite it whole with pageTexts): ${layoutJson(v)}`
+                  ? `${isPublic(v) ? ", public" : ", team only"}, its layout (rewrite it whole with pageTexts): ${layoutJson(v)}`
                   : v.type === "html"
                     ? isPublic(v)
                       ? ", public"

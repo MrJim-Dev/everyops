@@ -510,6 +510,17 @@ export const COMPONENTS: ComponentDef[] = [
   }),
   // The workspace's own screens and dashboard cards, placed inside a layout.
   def({
+    id: "form",
+    group: "blocks",
+    name: "Form",
+    description:
+      "A public form of this workspace (booking, order, sign-up, inquiry) embedded in the page; on a public layout this is how visitors book",
+    props: z.object({ viewId: z.string(), title: optText }),
+    settings: "viewId (a public form view), title?",
+    refs: (p) => [{ kind: "view", viewId: p.viewId }],
+    wide: true,
+  }),
+  def({
     id: "view",
     group: "workspace",
     name: "Workspace view",
@@ -615,7 +626,17 @@ export function parseLayout(raw: unknown): { sections: LayoutSection[]; errors: 
       errors.push(`${at}: tabs can't hold tabs`);
       return null;
     }
-    const { id: _id, component: _c, type: _t, span: _s, props, ...rest } = r;
+    const { id: _id, component: _c, type: _t, span: _s, props: rawProps, ...rest } = r;
+    // Settings may arrive as JSON text (setup's layout step asks for them that way to keep its schema small).
+    let props = rawProps;
+    if (typeof props === "string") {
+      try {
+        props = JSON.parse(props);
+      } catch {
+        errors.push(`${at} (${d.id}): props isn't valid JSON`);
+        return null;
+      }
+    }
     const given = { ...rest, ...(props && typeof props === "object" ? (props as RawItem) : {}) };
     const parsed = d.props.safeParse(given);
     if (!parsed.success) {

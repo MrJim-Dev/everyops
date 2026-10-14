@@ -1,3 +1,4 @@
+import { publicProblems } from "@/lib/components/public-safety";
 import { componentDef, layoutItems, type Ref } from "@/lib/components/registry";
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
@@ -451,6 +452,9 @@ function checkLayout(bp: Blueprint, view: LayoutView, path: string, errors: Vali
       });
       continue;
     }
+    if (view.public)
+      for (const problem of publicProblems(bp, d, parsed.data))
+        errors.push({ path: where, message: `${view.name} is public: ${problem}` });
     for (const ref of d.refs(parsed.data)) {
       if (ref.kind === "view") {
         if (ref.viewId === view.id) errors.push({ path: where, message: `${view.name} can't show itself` });

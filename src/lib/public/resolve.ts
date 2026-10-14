@@ -20,6 +20,7 @@ import type {
   FormView,
   HtmlPageView,
   LandingView,
+  LayoutView,
   Tone,
   View,
 } from "@/lib/blueprint/types";
@@ -36,6 +37,7 @@ import {
 } from "@/lib/format";
 import { type HeroFact, heroFacts } from "./hero-facts";
 import { pageHtml } from "./html-page";
+import { type PublicLayout, resolveLayout } from "./layout";
 import { bookLabel, cleanIntro, defaultCopy, mainForm, offeringOf, standardBlocks } from "./site-template";
 
 export type PageDocs = Record<string, { body: string } | undefined>;
@@ -159,8 +161,10 @@ export type ResolvedBlock =
 export type PublicPageData = {
   id: string;
   name: string;
-  type: "landing" | "form" | "html";
+  type: "landing" | "form" | "html" | "layout";
   blocks: ResolvedBlock[];
+  /** Layout pages: every part worked out on the server (src/lib/public/layout.ts). */
+  layout?: PublicLayout;
   /** Form pages: the form itself, shown before their blocks. */
   form?: PublicForm;
   /** HTML pages: the owner's page, and the public forms it may send to (by view id). */
@@ -171,7 +175,7 @@ export type PublicPageData = {
 export type PublicSite = {
   slug: string;
   name: string;
-  pages: { id: string; name: string; type: "landing" | "form" | "html" }[];
+  pages: { id: string; name: string; type: "landing" | "form" | "html" | "layout" }[];
   /** The header's button: the main public form, named for what it does ("Book a court"). */
   book?: { id: string; label: string };
 };
@@ -182,12 +186,12 @@ export const docKey = (viewId: string, blockId: string) => `${viewId}:${blockId}
 export function isPublic(view: View): boolean {
   return (
     (view.type === "landing" && view.public !== false) ||
-    ((view.type === "form" || view.type === "html") && view.public === true)
+    ((view.type === "form" || view.type === "html" || view.type === "layout") && view.public === true)
   );
 }
 
-export function publicViews(bp: Blueprint): (LandingView | FormView | HtmlPageView)[] {
-  return bp.views.filter((v): v is LandingView | FormView | HtmlPageView => isPublic(v));
+export function publicViews(bp: Blueprint): (LandingView | FormView | HtmlPageView | LayoutView)[] {
+  return bp.views.filter((v): v is LandingView | FormView | HtmlPageView | LayoutView => isPublic(v));
 }
 
 /** The site's pages in sidebar order: landing and custom HTML pages first (the first is the home page), then forms. */
@@ -274,8 +278,9 @@ export function formatCell(
 /** Record types a visitor may pick from: bookable resources, and anything a public block already lists. */
 function publishedEntities(bp: Blueprint): Set<string> {
   const ids = new Set(bp.entities.filter((e) => e.resource).map((e) => e.id));
+  // Layout pages only show what they compute; they never widen what a form offers.
   for (const view of publicViews(bp))
-    if (view.type !== "html") {
+    if (view.type !== "html" && view.type !== "layout") {
       for (const block of view.blocks ?? []) if (block.type === "records") ids.add(block.entityId);
       // The payment methods a public form links to are shown on its page (paymentBlock), so visitors can pick one.
       if (view.type === "form") {
@@ -709,6 +714,14 @@ export function resolvePage(
   }
   if (!view || !isPublic(view)) return null;
   if (view.type === "html") return htmlPage(bp, records, docs, view);
+  if (view.type === "layout")
+    return {
+      id: view.id,
+      name: view.name,
+      type: "layout",
+      blocks: [],
+      layout: resolveLayout(bp, records, docs, slug, view, now),
+    };
   if (view.type !== "landing" && view.type !== "form") return null;
   const blocks = resolveBlocks(bp, records, docs, slug, view, now);
   if (view.type === "landing") return { id: view.id, name: view.name, type: "landing", blocks };

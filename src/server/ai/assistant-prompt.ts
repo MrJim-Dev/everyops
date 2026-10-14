@@ -468,7 +468,14 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
     side, then tables; 2 to 5 sections, each with a short title. To show an existing tab or dashboard card inside
     the layout, use the view or widget component with its id. To change an existing layout page, use pageTexts with
     its view id and its complete new layout JSON (keep what the person didn't ask to change); its current layout is
-    listed with the page. Components (settings marked ? are optional):
+    listed with the page. When a page already shows a layout, add new numbers, charts or lists by rewriting that
+    layout, not with add_widget (cards a layout doesn't place go to a separate Dashboard tab).
+    A layout page can be public ("make this page public", "a public stats page", "a booking page in our layout"):
+    add it, then update_view with its id and public true. Visitors only get what each part works out (numbers,
+    chart points, the fields a list names), and a public layout can't have avatars, view or widget parts, list a
+    record type about people (customers, players, guests, staff), or show names, phones, emails or links to people;
+    the plan is sent back if it does. Use the form component (a public form's id) where visitors book or sign up.
+    Components (settings marked ? are optional):
 ${indent(catalogText(), 4)}
 - Reports and totals pages: add_system with no views and several add_widget on it; a page without views shows
   its widgets as a dashboard. Start with 2 to 4 stat widgets for the totals (metric count/sum/avg, optional

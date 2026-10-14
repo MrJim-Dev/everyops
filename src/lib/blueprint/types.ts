@@ -258,7 +258,15 @@ export type LayoutSection = {
  * workspace's own views and dashboard cards, arranged in sections. entityId is "": each component names its own
  * record type. Validated against the registry like every other part of the blueprint.
  */
-export type LayoutView = ViewBase & { type: "layout"; sections: LayoutSection[] };
+export type LayoutView = ViewBase & {
+  type: "layout";
+  sections: LayoutSection[];
+  /**
+   * Shown to anyone at /s/[workspace]/[view]. Visitors get only what each component works out on the server (numbers,
+   * chart points, the fields a list names), never records; components that would show people are refused.
+   */
+  public?: boolean;
+};
 
 /** A short titled point: a highlight ("Open until 11 PM") or a step ("Pick a court and time"). */
 export type BlockItem = { title: string; body: string };
