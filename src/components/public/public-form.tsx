@@ -66,6 +66,15 @@ export function PublicFormView({
     );
   const stepOf = (fieldId: string) => steps?.findIndex((s) => s.fieldIds.includes(fieldId)) ?? -1;
 
+  // A list with a single choice (the only payment method, the only court) is already chosen.
+  useEffect(() => {
+    const only = form.fields.filter(
+      (f) => f.type === "relation" && form.choices[f.id]?.length === 1 && isEmpty(values[f.id]),
+    );
+    if (only.length)
+      setValues((s) => ({ ...s, ...Object.fromEntries(only.map((f) => [f.id, form.choices[f.id][0].id])) }));
+  }, [form, values]);
+
   // What it comes to, on the payment step and the review (or under a one-page form): worked out by the server from
   // the answers so far, the same way a real booking is, and never saved.
   const priced = !!booking || !!form.extras;
