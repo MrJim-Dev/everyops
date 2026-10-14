@@ -165,6 +165,11 @@ export type FormView = ViewBase & {
   submitLabel?: string;
   /** Anyone with the link can submit it (a public booking page), at /s/[workspace]/[view]. */
   public?: boolean;
+  /**
+   * Booking forms: a visitor may pick several slots in a row (two or three hours) as one booking. On unless set to
+   * false, which limits each booking to one slot.
+   */
+  multipleSlots?: boolean;
   /** Shown with the form, e.g. the active payment methods or FAQs. */
   blocks?: Block[];
   /** Things people add with a quantity (paddle rental, balls): each becomes a line item on the new record. */

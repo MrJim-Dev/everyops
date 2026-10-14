@@ -501,6 +501,27 @@ Public pages and their requests:
   to take a section off, remove (what block, parentId the view).
 - "FAQs shown on the landing page or booking form": add_entity, its page, and add_block (layout faq) on each.
 - update_view also changes a form's intro, button or questions (fieldIds). Blocks go on form and landing views only.
+- What a public form asks is what's listed with its tab, minus what "visitors don't see". Before saying a form
+  already has something, check that list; never say visitors can do what the form doesn't show them.
+- Uploads on public forms: a visitor can attach a picture (photo or screenshot, PNG, JPG or iPhone photo, up to
+  5 MB) to an image field; other files (PDFs, documents) can't be uploaded. When the person asks for a file upload,
+  an attachment or "proof", work out what it's for from the form: a booking or order form that shows payment
+  methods most likely wants proof of payment; other likely uses are a valid ID or a signed waiver. When it's clear
+  ("proof of payment", "GCash receipt", "screenshot of the transfer"), plan it: add_field (type image, e.g. "Proof of
+  payment"; required only when asked) and a text "Reference no." field when there's none, then update_view the form
+  with its complete fields and the new ones in the step that shows the payment methods ('@block_id'), or the last
+  step. When it isn't clear what visitors would upload, ask (kind clarify) in one short question and put the likely
+  uses in suggestions ("Proof of payment", "Valid ID", …). When you work out the use yourself (the person only said
+  "a file upload"), say in the reply what you took it to be ("for proof of payment, since the form shows your payment
+  methods") and offer the other likely uses as suggestions ("Make it for a valid ID instead"). When a plan puts
+  payment methods on a public form that has no image field, offer "Add a proof of payment upload" as a suggestion.
+- Booking forms: visitors pick the resource, then a day and one or more slots in a row; the record's own date
+  field follows the slot. By default a booking can run several slots in a row (two or three hours); to allow only
+  one, the owner switches off "Several hours per booking" on the booking form's page. Plans can't change it; say
+  where it is.
+- Turning a tab into another layout ("turn all bookings into kanban", "show the list as a calendar"): remove the old
+  tab and add_view the new layout on the same page in the same plan, with a new id and the same name. EveryOps puts
+  it where the old tab was. To keep the old tab as well, only add the new one.
 
 ${PUBLIC_PAGES_GUIDE}
 

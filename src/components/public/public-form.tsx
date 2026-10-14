@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftIcon, ArrowRightIcon, CheckCircleIcon } from "@phosphor-icons/react";
+import { ArrowLeftIcon, ArrowRightIcon, CheckCircleIcon, UploadSimpleIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { ExtrasPicker } from "@/components/forms/extras-picker";
 import { StepIndicator } from "@/components/forms/step-indicator";
@@ -10,9 +10,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { FieldValue } from "@/lib/blueprint/types";
 import { formatDate, formatRange, formatTime, isTimeRange } from "@/lib/format";
+import { isHeic, MAX_SOURCE_BYTES, prepareImage } from "@/lib/prepare-image";
 import type { PublicField, PublicForm, ResolvedBlock } from "@/lib/public/resolve";
-import type { Slot } from "@/lib/public/slots";
-import { addDays, at, dateKey, todayKey } from "@/lib/time";
+import { joinSlots, type Slot } from "@/lib/public/slots";
+import { addDays, at, dateKey, hoursBetween, todayKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 type Done = { reference: string; title: string; summary: { name: string; text: string }[] };
@@ -47,6 +48,18 @@ export function PublicFormView({
     setErrors((e) => ({ ...e, [id]: "" }));
   };
   const booking = form.booking;
+  // The booking's own date field follows the picked slot; it isn't asked.
+  const derived = new Set(booking?.dayFieldIds ?? []);
+  const pickSlot = (v: FieldValue) => {
+    if (!booking) return;
+    const day = isTimeRange(v) ? dateKey(new Date((v as { start: string }).start)) : null;
+    setValues((s) => ({
+      ...s,
+      [booking.timeFieldId]: v,
+      ...Object.fromEntries(booking.dayFieldIds.map((id) => [id, day])),
+    }));
+    setErrors((e) => ({ ...e, [booking.timeFieldId]: "" }));
+  };
   const steps = form.steps;
   const titles = steps ? [...steps.map((s) => s.title), ...(form.review ? ["Review"] : [])] : [];
   const reviewing = !!steps && step === steps.length;
@@ -58,7 +71,7 @@ export function PublicFormView({
   const missingOf = (ids?: Set<string>) =>
     Object.fromEntries(
       form.fields
-        .filter((f) => (!ids || ids.has(f.id)) && f.required && isEmpty(values[f.id]))
+        .filter((f) => (!ids || ids.has(f.id)) && !derived.has(f.id) && f.required && isEmpty(values[f.id]))
         .map((f) => [
           f.id,
           booking && f.id === booking.timeFieldId ? "Pick a time" : `${f.name} is required`,
@@ -242,7 +255,7 @@ export function PublicFormView({
       {quote && (reviewing || !steps || !steps[step]?.blocks?.length) ? <AmountDue lines={quote} /> : null}
       {form.fields.map((f) => {
         if (reviewing || (shown && !shown.has(f.id))) return null;
-        if (booking && f.id === booking.timeFieldId) return null;
+        if (booking && (f.id === booking.timeFieldId || derived.has(f.id))) return null;
         const error = errors[f.id];
         const id = `pf-${form.viewId}-${f.id}`;
         return (
@@ -259,6 +272,7 @@ export function PublicFormView({
               value={values[f.id]}
               choices={form.choices[f.id]}
               invalid={!!error}
+              upload={{ slug, viewId: form.viewId, preview }}
               onChange={(v) => set(f.id, v)}
             />
             {f.description ? <p className="text-[12px] text-muted-foreground">{f.description}</p> : null}
@@ -271,7 +285,8 @@ export function PublicFormView({
                 value={values[booking.timeFieldId]}
                 error={errors[booking.timeFieldId]}
                 preview={preview}
-                onChange={(v) => set(booking.timeFieldId, v)}
+                multiple={booking.multiple}
+                onChange={pickSlot}
               />
             ) : null}
           </div>
@@ -369,6 +384,7 @@ function summaryText(
   choices?: { id: string; title: string }[],
 ) {
   if (isEmpty(value)) return "";
+  if (field.type === "image") return "Attached";
   if (isTimeRange(value ?? null)) {
     const range = value as { start: string; end: string };
     return field.range === "dates"
@@ -390,6 +406,7 @@ function PublicInput({
   value,
   choices,
   invalid,
+  upload,
   onChange,
 }: {
   id: string;
@@ -397,6 +414,8 @@ function PublicInput({
   value: FieldValue | undefined;
   choices?: { id: string; title: string }[];
   invalid: boolean;
+  /** Where a picture the field asks for is uploaded; previews don't upload. */
+  upload: { slug: string; viewId: string; preview?: boolean };
   onChange: (v: FieldValue) => void;
 }) {
   const common = { id, "aria-invalid": invalid || undefined, "aria-required": field.required || undefined };
@@ -498,6 +517,16 @@ function PublicInput({
     }
     case "time_range":
       return <RangeFields id={id} field={field} onChange={onChange} />;
+    case "image":
+      return (
+        <PublicImageInput
+          id={id}
+          invalid={invalid}
+          value={typeof value === "string" ? value : ""}
+          upload={upload}
+          onChange={onChange}
+        />
+      );
     default:
       return (
         <Input
@@ -556,7 +585,17 @@ function RangeFields({
   );
 }
 
-/** Pick a day, then a free slot. Taken and past slots are shown but can't be chosen. */
+/** "1 hour", "2 hours", "1.5 hours". */
+function hoursText(range: { start: string; end: string }) {
+  const h = Math.round(hoursBetween(range.start, range.end) * 100) / 100;
+  return h === 1 ? "1 hour" : `${h} hours`;
+}
+
+/**
+ * Pick a day, then a free slot. With multiple, tapping the next (or previous) free slot makes the booking longer,
+ * tapping an end slot shortens it, and tapping elsewhere starts over from that slot. The day strip and the date box
+ * move together, and the day follows a slot that's already picked (e.g. after Back).
+ */
 function SlotPicker({
   slug,
   viewId,
@@ -564,6 +603,7 @@ function SlotPicker({
   value,
   error,
   preview,
+  multiple,
   onChange,
 }: {
   slug: string;
@@ -572,14 +612,16 @@ function SlotPicker({
   value: FieldValue | undefined;
   error?: string;
   preview?: boolean;
+  multiple: boolean;
   onChange: (v: FieldValue) => void;
 }) {
   const today = todayKey();
-  const [day, setDay] = useState(today);
+  const picked = isTimeRange(value ?? null) ? (value as { start: string; end: string }) : null;
+  const pickedDay = picked ? dateKey(new Date(picked.start)) : null;
+  const [day, setDay] = useState(() => pickedDay ?? today);
+  const [from, setFrom] = useState(() => (pickedDay && pickedDay > addDays(today, 13) ? pickedDay : today));
   const [slots, setSlots] = useState<Slot[] | null>(null);
   const [loading, setLoading] = useState(false);
-  const picked =
-    value && typeof value === "object" && !Array.isArray(value) ? (value as { start: string }).start : null;
 
   useEffect(() => {
     if (!resourceId || preview) return setSlots(null);
@@ -597,10 +639,49 @@ function SlotPicker({
     };
   }, [slug, viewId, resourceId, day, preview]);
 
-  const days = Array.from({ length: 14 }, (_, i) => addDays(today, i));
+  const pickDay = (d: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d < today || d === day) return;
+    setDay(d);
+    if (d < from || d > addDays(from, 13)) setFrom(d);
+    onChange(null);
+  };
+  const inPicked = (s: Slot) =>
+    !!picked &&
+    Date.parse(s.start) >= Date.parse(picked.start) &&
+    Date.parse(s.end) <= Date.parse(picked.end);
+  const choose = (s: Slot) => {
+    const one = { start: s.start, end: s.end };
+    if (!multiple || !picked || pickedDay !== day) return onChange(one);
+    const [ps, pe, ss, se] = [picked.start, picked.end, s.start, s.end].map((t) => Date.parse(t));
+    if (ss >= ps && se <= pe) {
+      if (ss === ps && se === pe) return onChange(null);
+      if (ss === ps) return onChange({ start: s.end, end: picked.end });
+      if (se === pe) return onChange({ start: picked.start, end: s.start });
+      return onChange(one);
+    }
+    const list = slots ?? [];
+    const last = list.find((x) => Date.parse(x.end) === pe);
+    const joined =
+      ss < ps
+        ? joinSlots(list, s.start, last?.start ?? picked.start)
+        : joinSlots(list, picked.start, s.start);
+    onChange(joined ?? one);
+  };
+
+  const days = Array.from({ length: 14 }, (_, i) => addDays(from, i));
   return (
     <div className="mt-2 flex flex-col gap-3 rounded-lg border p-3">
-      <span className="text-[13px] font-medium">Day and time *</span>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[13px] font-medium">Day and time *</span>
+        <Input
+          type="date"
+          aria-label="Date"
+          min={today}
+          value={day}
+          onChange={(e) => pickDay(e.target.value)}
+          className="h-8 w-auto text-[13px]"
+        />
+      </div>
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {days.map((d) => {
           const date = new Date(`${d}T12:00:00+08:00`);
@@ -609,10 +690,8 @@ function SlotPicker({
               key={d}
               type="button"
               aria-pressed={d === day}
-              onClick={() => {
-                setDay(d);
-                onChange(null);
-              }}
+              aria-label={date.toLocaleDateString("en-PH", { dateStyle: "full", timeZone: "Asia/Manila" })}
+              onClick={() => pickDay(d)}
               className={cn(
                 "flex w-14 shrink-0 flex-col items-center rounded-md border py-1.5 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
                 d === day
@@ -633,31 +712,139 @@ function SlotPicker({
       ) : loading && !slots ? (
         <p className="text-[12.5px] text-muted-foreground">Checking open times…</p>
       ) : slots?.some((s) => s.free) ? (
-        <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
-          {(slots ?? []).map((s) => (
-            <button
-              key={s.start}
-              type="button"
-              disabled={!s.free}
-              aria-pressed={picked === s.start}
-              onClick={() => onChange({ start: s.start, end: s.end })}
-              className={cn(
-                "rounded-md border px-2 py-2 font-mono text-[12.5px] tabular outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-35 disabled:line-through",
-                picked === s.start
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "hover:border-foreground/30",
-              )}
-            >
-              {formatTime(s.start)}
-            </button>
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
+            {slots.map((s) => {
+              const on = inPicked(s);
+              return (
+                <button
+                  key={s.start}
+                  type="button"
+                  disabled={!s.free}
+                  aria-pressed={on}
+                  onClick={() => choose(s)}
+                  className={cn(
+                    "rounded-md border px-2 py-2 font-mono text-[12.5px] tabular outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-35 disabled:line-through",
+                    on ? "border-primary bg-primary text-primary-foreground" : "hover:border-foreground/30",
+                  )}
+                >
+                  {formatTime(s.start)}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[12.5px] text-muted-foreground" aria-live="polite">
+            {picked && pickedDay === day ? (
+              <>
+                <span className="text-foreground">
+                  {formatDate(picked.start)} · {formatRange(picked)}
+                </span>{" "}
+                · {hoursText(picked)}
+                {multiple ? ". Tap the next time to add more." : ""}
+              </>
+            ) : multiple ? (
+              "Tap a start time. Tap the times after it to book longer."
+            ) : (
+              "Tap a time to book it."
+            )}
+          </p>
+        </>
       ) : (
         <p className="text-[12.5px] text-muted-foreground">
-          No open times on {dateKey(day) === today ? "today" : "this day"}. Try another day.
+          No open times on {day === today ? "today" : "this day"}. Try another day.
         </p>
       )}
       {error ? <p className="text-[12.5px] text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+/** A picture a public form asks for (a proof of payment): picked, shrunk if large, then uploaded right away. */
+function PublicImageInput({
+  id,
+  invalid,
+  value,
+  upload,
+  onChange,
+}: {
+  id: string;
+  invalid: boolean;
+  value: string;
+  upload: { slug: string; viewId: string; preview?: boolean };
+  onChange: (v: FieldValue) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const pick = async (file: File) => {
+    setProblem(null);
+    if (upload.preview) return setProblem("Uploads work on the public page.");
+    if (!file.type.startsWith("image/") && !isHeic(file))
+      return setProblem("Choose a photo or screenshot (PNG, JPG, WebP or GIF).");
+    if (file.size > MAX_SOURCE_BYTES) return setProblem("That photo is over 40 MB.");
+    setBusy(true);
+    try {
+      const body = new FormData();
+      body.set("file", await prepareImage(file));
+      const res = await fetch(`/api/public/${upload.slug}/${upload.viewId}/upload`, { method: "POST", body });
+      const json = (await res.json().catch(() => null)) as {
+        ok: boolean;
+        url?: string;
+        message?: string;
+      } | null;
+      if (!json?.ok || !json.url) throw new Error(json?.message ?? "Couldn't upload that. Try again.");
+      setName(file.name);
+      onChange(json.url);
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : "Couldn't upload that. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-col gap-1.5">
+      {value ? (
+        <div className="flex items-center gap-3 rounded-lg border p-2">
+          {/* biome-ignore lint/performance/noImgElement: a small preview of the upload */}
+          <img src={value} alt="" className="size-14 shrink-0 rounded-md object-cover" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13.5px]">{name || "Picture attached"}</p>
+            <p className="text-[12px] text-muted-foreground">Uploaded</p>
+          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={() => onChange(null)}>
+            Remove
+          </Button>
+        </div>
+      ) : (
+        <label
+          htmlFor={id}
+          className={cn(
+            "flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed px-4 py-5 text-center text-[12.5px] text-muted-foreground transition-colors hover:border-foreground/30 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50",
+            invalid && "border-destructive",
+            busy && "cursor-progress",
+          )}
+        >
+          <UploadSimpleIcon className="size-5" />
+          <span className="text-[13.5px] text-foreground">
+            {busy ? "Uploading…" : "Choose a photo or screenshot"}
+          </span>
+          <span>PNG, JPG or iPhone photo, up to 5 MB</span>
+          <input
+            id={id}
+            type="file"
+            accept="image/*,.heic,.heif"
+            className="sr-only"
+            disabled={busy}
+            aria-invalid={invalid || undefined}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void pick(file);
+            }}
+          />
+        </label>
+      )}
+      {problem ? <p className="text-[12.5px] text-destructive">{problem}</p> : null}
     </div>
   );
 }

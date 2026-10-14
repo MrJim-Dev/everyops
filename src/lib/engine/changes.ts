@@ -60,6 +60,7 @@ export type ChangeOp =
         fieldIds?: string[];
         steps?: FormStep[];
         review?: boolean;
+        multipleSlots?: boolean;
       };
     }
   /** Adds a block (live data, text, a form) to a form or landing page, optionally before another block. */
@@ -71,6 +72,11 @@ export type ChangeOp =
   /** Removes a sidebar page with its tabs and cards. */
   | { op: "remove_system"; systemId: string }
   | { op: "remove_view"; viewId: string }
+  /**
+   * Swaps a tab for a new one in the same place on its page, e.g. a table turned into a board. Links to the old
+   * tab ("View all" on cards) point at the new one.
+   */
+  | { op: "replace_view"; viewId: string; view: View }
   | { op: "remove_widget"; widgetId: string }
   | { op: "remove_rule"; ruleId: string }
   | { op: "remove_block"; viewId: string; blockId: string }
@@ -396,6 +402,25 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "remove_view":
         removeView(next, op.viewId);
         break;
+      case "replace_view": {
+        const at = next.views.findIndex((v) => v.id === op.viewId);
+        if (at < 0) break;
+        if (op.view.id === op.viewId) {
+          next.views[at] = op.view;
+          break;
+        }
+        if (next.views.some((v) => v.id === op.view.id)) break;
+        const places = next.systems.flatMap((s) => {
+          const i = s.viewIds.indexOf(op.viewId);
+          return i < 0 ? [] : [{ s, i }];
+        });
+        const cards = next.widgets.filter((w) => w.list?.viewId === op.viewId);
+        removeView(next, op.viewId);
+        next.views.splice(at, 0, op.view);
+        for (const { s, i } of places) s.viewIds.splice(i, 0, op.view.id);
+        for (const w of cards) if (w.list) w.list.viewId = op.view.id;
+        break;
+      }
       case "remove_widget":
         removeWidget(next, op.widgetId);
         break;

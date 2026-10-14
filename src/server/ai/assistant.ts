@@ -38,7 +38,7 @@ import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
 import { registerFields } from "@/lib/engine/register";
 import { formSnippet } from "@/lib/public/html-page";
-import { isPublic, publicFieldsOf, publicForm } from "@/lib/public/resolve";
+import { bookingDayFieldIds, isPublic, publicFieldsOf, publicForm } from "@/lib/public/resolve";
 import { copyFromBlocks, mainForm, standardBlocks } from "@/lib/public/site-template";
 import { type Invite, type Member, randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
@@ -257,6 +257,77 @@ export function blockPatchFrom(block: Block, o: RawBlockEdit): BlockPatch {
     default:
       return {};
   }
+}
+
+/**
+ * "Turn the bookings list into a board" arrives as remove the tab plus add one. Adds run before removals, so a new
+ * tab reusing the old tab's id was skipped (the id existed) and the removal then took the only copy: the plan said
+ * Applied and the tab was gone. Even with a new id the board landed at the end of the tabs. A removal and an
+ * addition on the same page become one replace_view that keeps the tab's place. An addition that reuses a tab id
+ * nothing removes is an error sent back to Gemini instead of a silent no-op.
+ */
+export function replacedTabs(bp: Blueprint, ops: ChangeOp[], errors: string[]) {
+  const systemOf = (viewId: string) => bp.systems.find((s) => s.viewIds.includes(viewId));
+  const take = (op: ChangeOp) => ops.splice(ops.indexOf(op), 1);
+  for (const add of ops.filter((o): o is Extract<ChangeOp, { op: "add_view" }> => o.op === "add_view")) {
+    const removals = ops.filter((o): o is Extract<ChangeOp, { op: "remove_view" }> => o.op === "remove_view");
+    const sameId = removals.find((r) => r.viewId === add.view.id);
+    if (sameId) {
+      take(sameId);
+      ops.splice(ops.indexOf(add), 1, { op: "replace_view", viewId: sameId.viewId, view: add.view });
+      continue;
+    }
+    if (bp.views.some((v) => v.id === add.view.id)) {
+      errors.push(
+        `add_view: tab "${add.view.id}" already exists. Give the new tab its own id, or remove the old one in the same plan to replace it.`,
+      );
+      continue;
+    }
+    // One tab out and one tab in on the same page is a swap, even with a new id.
+    const here = removals.filter((r) => systemOf(r.viewId)?.id === add.systemId);
+    const added = ops.filter((o) => o.op === "add_view" && o.systemId === add.systemId);
+    if (here.length === 1 && added.length === 1) {
+      take(here[0]);
+      ops.splice(ops.indexOf(add), 1, { op: "replace_view", viewId: here[0].viewId, view: add.view });
+    }
+  }
+}
+
+/**
+ * What a plan adds that isn't in the workspace after applying it. An op that quietly does nothing (an id that
+ * already existed) must never reach the person as "Applied".
+ */
+export function missingAfterApply(ops: ChangeOp[], next: Blueprint): string[] {
+  return ops.flatMap((op) => {
+    if ((op.op === "add_view" || op.op === "replace_view") && !next.views.some((v) => v.id === op.view.id))
+      return [`${op.op}: tab "${op.view.id}" isn't in the workspace after the plan; use a new id`];
+    if (op.op === "add_widget" && !next.widgets.some((w) => w.id === op.widget.id))
+      return [`add_widget: card "${op.widget.id}" isn't in the workspace after the plan; use a new id`];
+    if (op.op === "add_entity" && !next.entities.some((e) => e.id === op.entity.id))
+      return [`add_entity: "${op.entity.id}" isn't in the workspace after the plan; use a new id`];
+    return [];
+  });
+}
+
+/**
+ * What a public form really shows a visitor, for the assistant's context: listed fields visitors never see (the team
+ * fills those in), what the booking slot picker fills, and whether a booking can run several slots. Without it the
+ * assistant read a proof-of-payment field in the form's design and said visitors could upload one when they couldn't.
+ */
+function visitorView(bp: Blueprint, view: FormView): string {
+  if (!isPublic(view)) return "";
+  const entity = bp.entities.find((e) => e.id === view.entityId);
+  if (!entity) return "";
+  const asked = new Set(publicFieldsOf(bp, view).map((f) => f.id));
+  const hidden = view.fieldIds.filter((id) => !asked.has(id) && entity.fields.some((f) => f.id === id));
+  const booking = entity.booking;
+  const day = bookingDayFieldIds(entity).filter((id) => asked.has(id));
+  return [
+    hidden.length ? `, visitors don't see ${hidden.join(", ")} (the team fills them in)` : "",
+    booking && asked.has(booking.timeFieldId)
+      ? `, visitors pick ${booking.timeFieldId}${day.length ? ` (and ${day.join(", ")} follows it)` : ""} with a slot picker, ${view.multipleSlots === false ? "one slot per booking" : "several slots in a row allowed"}`
+      : "",
+  ].join("");
 }
 
 function toDesignOps(
@@ -677,6 +748,7 @@ function toDesignOps(
     "update_field",
     "add_system",
     "add_view",
+    "replace_view",
     "move_view",
     "update_view",
     "add_block",
@@ -704,7 +776,8 @@ function toDesignOps(
   // Existing ids can't be redefined, and every new view or widget must land in a section.
   for (const op of ops) {
     const viewKnown = (id: string) =>
-      bp.views.some((v) => v.id === id) || ops.some((x) => x.op === "add_view" && x.view.id === id);
+      bp.views.some((v) => v.id === id) ||
+      ops.some((x) => (x.op === "add_view" || x.op === "replace_view") && x.view.id === id);
     const systemKnown = (id: string) =>
       bp.systems.some((s) => s.id === id) || ops.some((x) => x.op === "add_system" && x.system.id === id);
     if (
@@ -963,7 +1036,7 @@ ${bp.systems
                   }${
                     // The form's fields as update_view writes them: steps and the blocks each step shows.
                     v.type === "form" ? `, fields: ${JSON.stringify(markersOf(v))}` : ""
-                  }`
+                  }${v.type === "form" ? visitorView(bp, v) : ""}`
                 : v.type === "html"
                   ? isPublic(v)
                     ? ", public"
@@ -1083,7 +1156,9 @@ ${input.messages
         // "A multistep booking form": a form the plan touches gets steps even when Gemini left them out.
         /multi[\s-]?step|in steps|step[\s-]by[\s-]step|wizard/i.test(input.messages.at(-1)?.text ?? ""),
       );
+    replacedTabs(bp, design.ops, errors);
     const next = design.ops.length ? applyOps(bp, design.ops) : bp;
+    errors.push(...missingAfterApply(design.ops, next));
     embedForms(next, records, design.ops, errors);
     errors.push(...unanswerable(next, design.ops));
     const before = new Set(validateBlueprint(bp).map((e) => `${e.path} ${e.message}`));

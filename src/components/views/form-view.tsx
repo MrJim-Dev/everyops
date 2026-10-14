@@ -17,9 +17,10 @@ import { findRecord, getEntity, getField, recordTitle } from "@/lib/blueprint/lo
 import type { FormView as FormViewConfig, RecordData } from "@/lib/blueprint/types";
 import type { FieldError } from "@/lib/engine/records";
 import { publicExtras, publicFieldsOf, resolveBlocks, submitButton } from "@/lib/public/resolve";
-import { canEdit } from "@/lib/store/workspaces";
+import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 import { PublicBar } from "./public-bar";
+import { ToolbarSwitch } from "./view-pref-toggle";
 
 /**
  * A page that is one form, e.g. the front desk's booking form. With steps it asks a few fields at a time and can end
@@ -74,6 +75,23 @@ export function FormView({ view }: { view: FormViewConfig }) {
   const inSteps = new Set(wizard ? steps.flatMap((s) => s.blockIds ?? []) : []);
   const stepBlocks = wizard && !reviewing ? blocks.filter((b) => steps[step]?.blockIds?.includes(b.id)) : [];
   const below = blocks.filter((b) => !inSteps.has(b.id));
+  // Booking forms: whether a visitor can book several slots in a row (on unless switched off).
+  const applyChange = useWorkspaces((s) => s.applyChange);
+  const multiple = view.multipleSlots !== false;
+  const setMultiple = (next: boolean) =>
+    applyChange(ws.id, {
+      request: next ? `Let ${view.name} book several hours` : `Limit ${view.name} to one time slot`,
+      title: next ? "Allow booking several hours in a row" : "Allow one time slot per booking",
+      facts: [],
+      steps: [
+        {
+          kind: "change",
+          label: view.name,
+          detail: next ? "One time slot → Several in a row" : "Several in a row → One time slot",
+        },
+      ],
+      ops: [{ op: "update_view", viewId: view.id, patch: { multipleSlots: next } }],
+    });
 
   const reset = () => {
     setCreatedId(null);
@@ -127,7 +145,11 @@ export function FormView({ view }: { view: FormViewConfig }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PublicBar view={view} />
+      <PublicBar view={view}>
+        {entity.booking && ws.mode === "live" && canManage(ws.role) ? (
+          <ToolbarSwitch checked={multiple} onChange={setMultiple} label="Several hours per booking" />
+        ) : null}
+      </PublicBar>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[560px] px-5 py-8">
           {created ? (

@@ -84,8 +84,18 @@ export type PublicForm = {
   fields: PublicField[];
   /** For relation fields: the records a visitor may choose from. */
   choices: Record<string, { id: string; title: string }[]>;
-  /** Booking forms pick a resource, a day and a free slot instead of typing times. */
-  booking?: { resourceFieldId: string; timeFieldId: string; resources: PublicResource[] };
+  /**
+   * Booking forms pick a resource, a day and free slots instead of typing times. With multiple, a visitor can pick
+   * several slots in a row as one booking. dayFieldIds are the record's own date fields for the booking day: they
+   * aren't asked, they're filled in from the picked slot (here and on the server).
+   */
+  booking?: {
+    resourceFieldId: string;
+    timeFieldId: string;
+    resources: PublicResource[];
+    multiple: boolean;
+    dayFieldIds: string[];
+  };
   /** Multi-step forms: the fields of each step, in order, and the form's blocks shown in that step. */
   steps?: {
     title: string;
@@ -366,7 +376,6 @@ export function publicFieldsOf(bp: Blueprint, view: FormView): Field[] {
       !issued.has(f.id) &&
       f.type !== "status" &&
       f.type !== "money" &&
-      f.type !== "image" &&
       f.type !== "person" &&
       (f.type !== "relation" || published.has(f.relation?.entityId ?? "")),
   );
@@ -377,6 +386,17 @@ export function publicFieldsOf(bp: Blueprint, view: FormView): Field[] {
       ]
     : editable;
   return chosen;
+}
+
+/** A plain date field that only repeats the booking's day ("Date", "Booking date", "Play day"), not a birthday. */
+const DAY_FIELD = /^(booking|reservation|reserved|play|game|session|visit|event)?[\s_-]*(date|day)$/i;
+
+/** The record's date fields that are the booking's day, so they follow the picked slot instead of being asked. */
+export function bookingDayFieldIds(entity: Entity): string[] {
+  if (!entity.booking) return [];
+  return entity.fields
+    .filter((f) => f.type === "date" && (DAY_FIELD.test(f.name.trim()) || DAY_FIELD.test(f.id)))
+    .map((f) => f.id);
 }
 
 export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView): PublicForm | null {
@@ -409,6 +429,8 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
       resources: records
         .filter((r) => r.entityId === resourceEntity.id)
         .map((r) => ({ id: r.id, title: recordTitle(resourceEntity, r), ...hours })),
+      multiple: view.multipleSlots !== false,
+      dayFieldIds: bookingDayFieldIds(entity).filter((id) => fields.some((f) => f.id === id)),
     };
     choices[b.resourceFieldId] ??= booking.resources.map((r) => ({ id: r.id, title: r.title }));
   }
@@ -429,10 +451,14 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
       ...(picker ? { extras: true } : {}),
       ...(blockIds?.length ? { blockIds } : {}),
     }));
-    // The slot is picked under the resource, so it always belongs to the resource's step.
+    // The slot is picked under the resource, so it always belongs to the resource's step. The booking's own date
+    // field follows the slot, so no step asks it.
     if (booking) {
-      const { resourceFieldId, timeFieldId } = booking;
-      steps = steps.map((s) => ({ ...s, fieldIds: s.fieldIds.filter((id) => id !== timeFieldId) }));
+      const { resourceFieldId, timeFieldId, dayFieldIds } = booking;
+      steps = steps.map((s) => ({
+        ...s,
+        fieldIds: s.fieldIds.filter((id) => id !== timeFieldId && !dayFieldIds.includes(id)),
+      }));
       const home = steps.find((s) => s.fieldIds.includes(resourceFieldId)) ?? steps[0];
       home.fieldIds.push(timeFieldId);
       steps = steps.filter((s) => s.fieldIds.length || s.extras || s.blockIds?.length);
