@@ -7,7 +7,8 @@ export type Slot = { start: string; end: string; free: boolean };
 
 /**
  * The bookable slots of one resource on one Manila day, for a public booking form. A slot is taken when a
- * booking with a blocking status overlaps it, and slots that have already started aren't offered.
+ * booking with a blocking status overlaps it. Slots that have already started aren't listed at all: a day of
+ * crossed-out morning hours only buries the times a visitor can still book.
  */
 export function slotsFor(
   bp: Blueprint,
@@ -38,10 +39,11 @@ export function slotsFor(
   const close = minutesOf(hours.closesAt);
   for (let m = minutesOf(hours.opensAt); m + hours.slotMinutes <= close; m += hours.slotMinutes) {
     const range = { start: at(day, hhmm(m)), end: at(day, hhmm(m + hours.slotMinutes)) };
+    if (Date.parse(range.start) <= now.getTime()) continue;
     const busy = taken.some((r) =>
       overlaps(range, r.data[booking.timeFieldId] as { start: string; end: string }),
     );
-    slots.push({ ...range, free: !busy && Date.parse(range.start) > now.getTime() });
+    slots.push({ ...range, free: !busy });
   }
   return slots;
 }
