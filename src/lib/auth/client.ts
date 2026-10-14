@@ -62,7 +62,26 @@ export async function signIn(input: { email: string; password: string }): Promis
 }
 
 export function signInWithGoogle(next: string) {
-  return authClient.signIn.social({ provider: "google", callbackURL: next, errorCallbackURL: "/sign-in" });
+  return authClient.signIn.social({
+    provider: "google",
+    callbackURL: next,
+    errorCallbackURL: next === "/" ? "/sign-in" : `/sign-in?next=${encodeURIComponent(next)}`,
+  });
+}
+
+/** What to tell someone Google sent back with an `error` code, so a failed sign-in never looks like nothing happened. */
+export function googleErrorMessage(code: string): string {
+  switch (code) {
+    case "access_denied":
+      return "Google sign-in was cancelled.";
+    case "account_not_linked":
+    case "unable_to_link_account":
+      return "We couldn't connect Google to the account with this email. Sign in with your password instead.";
+    case "account_already_linked_to_different_user":
+      return "That Google account is already connected to a different EveryOps account.";
+    default:
+      return "Google sign-in didn't finish. Try again, or use your email and password.";
+  }
 }
 
 export async function signOut() {
