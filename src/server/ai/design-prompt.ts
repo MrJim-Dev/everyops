@@ -513,6 +513,8 @@ sample records (use every menu item or price they show, up to 40 records per rec
 
 Formula language (formula.expr, freezeWhen, filters, rule conditions and values):
 - Field references by id on the same record (rate, qty); through a relation field: player.member, product.price.
+  One link only: product.price works, product.category.name and crew_member.position.daily_rate don't. When a
+  formula needs a value two links away, give the record its own link (or a formula field) one step away.
 - Numbers, 'strings', true, false, null. Operators: + - * / % == != < <= > >= && || ! and cond ? a : b.
 - Functions: ${Object.keys(FUNCTIONS).join(", ")}. hour/weekday read Asia/Manila time (weekday 0 = Sunday);
   duration_hours(range) and days(range) measure time ranges; is_today, is_this_month, is_upcoming test dates.

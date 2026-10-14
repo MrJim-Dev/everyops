@@ -2,9 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+import type { Blueprint } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
-import { cleanCopy, ensurePages, givenIn, mergeDateAndSlot, repairStructure, tidy } from "./design";
+import { computeAll } from "@/lib/engine/compute";
+import {
+  cleanCopy,
+  ensurePages,
+  flattenLinks,
+  givenIn,
+  mergeDateAndSlot,
+  repairStructure,
+  shrunk,
+  tidy,
+} from "./design";
 
 describe("ensurePages", () => {
   it("gives a record type without any screen its own page", () => {
@@ -27,6 +38,43 @@ describe("ensurePages", () => {
 });
 
 describe("repairStructure", () => {
+  it("moves a page off the app's own URLs (a lists page Gemini called Settings)", () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
+    const bp = structuredClone(blueprint);
+    bp.systems.push({
+      id: "settings",
+      name: "Settings",
+      icon: "package",
+      viewIds: [bp.views[0].id],
+      widgetIds: [],
+    });
+    const fixed = repairStructure(bp);
+    const page = fixed.systems.at(-1);
+    expect(page).toMatchObject({ id: "setup", name: "Setup" });
+  });
+  it("drops a table grouping that can't group and points a board at the status field", () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
+    const bp = structuredClone(blueprint);
+    const table = bp.views.find((v) => v.type === "table" && v.entityId === "booking");
+    const booking = bp.entities.find((e) => e.id === "booking");
+    const select = booking?.fields.find((f) => f.type === "select");
+    if (table?.type !== "table" || !booking || !select) throw new Error("fixture changed");
+    table.groupByFieldId = booking.booking?.timeFieldId;
+    bp.views.push({
+      id: "board",
+      type: "kanban",
+      entityId: "booking",
+      name: "Board",
+      statusFieldId: select.id,
+      cardFieldIds: [],
+    });
+    const fixed = repairStructure(bp);
+    expect(fixed.views.find((v) => v.id === table.id)).not.toHaveProperty("groupByFieldId");
+    expect(fixed.views.find((v) => v.id === "board")).toMatchObject({
+      statusFieldId: booking.booking?.statusFieldId,
+    });
+    expect(validateBlueprint(fixed).filter((e) => /group|Board columns/.test(e.message))).toEqual([]);
+  });
   it("restores booking settings, attaches add-on lines to their booking and renames a Settings page", () => {
     const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
     const bp = structuredClone(blueprint);
@@ -287,5 +335,100 @@ describe("givenIn", () => {
     expect(givenIn(brief, "Mon-Sun: 8:00 AM - 6:00 PM")).toBe(false);
     expect(givenIn(brief, "hello@kapeilaya.ph")).toBe(false);
     expect(givenIn(brief, "0918 555 1234")).toBe(false);
+  });
+});
+
+describe("repairs that return only part of the design", () => {
+  const sized = (entities: number, views: number) => ({
+    entities: Array.from({ length: entities }) as never[],
+    views: Array.from({ length: views }) as never[],
+  });
+  it("are sent back when most record types or views are gone", () => {
+    const before = { entities: 9, views: 14 };
+    expect(shrunk(before, sized(2, 2))[0]).toMatch(
+      /only part of the design \(2 of 9 record types, 2 of 14 views\)/,
+    );
+    expect(shrunk(before, sized(9, 6))).toHaveLength(1);
+  });
+  it("pass when the design keeps its size or the first attempt is being checked", () => {
+    expect(shrunk({ entities: 9, views: 14 }, sized(8, 13))).toEqual([]);
+    expect(shrunk(null, sized(2, 2))).toEqual([]);
+  });
+});
+
+describe("formulas two links away", () => {
+  const blueprint = (): Blueprint =>
+    ({
+      version: 1,
+      workspaceName: "Realty",
+      entities: [
+        {
+          id: "property",
+          name: "Property",
+          pluralName: "Properties",
+          primaryFieldId: "title",
+          fields: [
+            { id: "title", name: "Title", type: "text" },
+            { id: "price", name: "Price", type: "money" },
+          ],
+        },
+        {
+          id: "deal",
+          name: "Deal",
+          pluralName: "Deals",
+          primaryFieldId: "name",
+          fields: [
+            { id: "name", name: "Name", type: "text" },
+            { id: "property", name: "Property", type: "relation", relation: { entityId: "property" } },
+          ],
+        },
+        {
+          id: "commission",
+          name: "Commission",
+          pluralName: "Commissions",
+          primaryFieldId: "label",
+          fields: [
+            { id: "label", name: "Label", type: "text" },
+            { id: "deal", name: "Deal", type: "relation", relation: { entityId: "deal" } },
+            {
+              id: "amount",
+              name: "Amount",
+              type: "formula",
+              formula: { expr: "deal.property.price * 0.03", resultType: "money" },
+            },
+            {
+              id: "note",
+              name: "Note",
+              type: "formula",
+              formula: { expr: "'see a.b.c' + deal.property.title", resultType: "text" },
+            },
+          ],
+        },
+      ],
+      views: [],
+      widgets: [],
+      rules: [],
+      systems: [],
+    }) as unknown as Blueprint;
+
+  it("read through a one-link copy on the record in between, and compute", () => {
+    const bp = flattenLinks(blueprint());
+    const commission = bp.entities[2].fields;
+    expect(commission.find((f) => f.id === "amount")?.formula?.expr).toBe("deal.property_price * 0.03");
+    expect(commission.find((f) => f.id === "note")?.formula?.expr).toBe("'see a.b.c' + deal.property_title");
+    expect(bp.entities[1].fields.find((f) => f.id === "property_price")).toMatchObject({
+      type: "formula",
+      formula: { expr: "property.price", resultType: "money" },
+    });
+    expect(validateBlueprint(bp).filter((e) => /Formula|resolve/.test(e.message))).toEqual([]);
+    const at = "2026-10-14T00:00:00.000Z";
+    const rec = (id: string, entityId: string, data: Record<string, unknown>) =>
+      ({ id, entityId, data, createdAt: at, updatedAt: at }) as never;
+    const records = computeAll(bp, [
+      rec("p1", "property", { title: "Lot 4", price: 2_000_000 }),
+      rec("d1", "deal", { name: "Santos", property: "p1" }),
+      rec("c1", "commission", { label: "Santos", deal: "d1" }),
+    ]);
+    expect(records.find((r) => r.id === "c1")?.data.amount).toBe(60_000);
   });
 });

@@ -36,10 +36,11 @@ export async function interviewTurn(
       system: INTERVIEW_SYSTEM,
       prompt,
       task: "interview",
-      // A full brief for a business with public pages, add-ons and payments runs 3–6k characters and takes 10–20 s;
-      // a real runaway is still caught early (filler without spaces, endless numbers) or past 9k characters.
+      // A full brief for a business with public pages, add-ons and payments runs 3–8k characters (every status and
+      // list type spelled out) and takes 10–20 s; a real runaway is still caught early (filler without spaces,
+      // endless numbers) or past 12k characters.
       timeoutMs: 40_000,
-      maxStringChars: 9000,
+      maxStringChars: 12_000,
     });
     if (result.ok) {
       const t = result.data;
