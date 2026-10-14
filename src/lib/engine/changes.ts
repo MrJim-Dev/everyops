@@ -1,6 +1,7 @@
 import { findEntity } from "@/lib/blueprint/lookup";
 import type {
   Block,
+  BlockItem,
   Blueprint,
   DataRecord,
   Entity,
@@ -74,7 +75,49 @@ export type ChangeOp =
   | { op: "remove_rule"; ruleId: string }
   | { op: "remove_block"; viewId: string; blockId: string }
   /** Moves a sidebar page to a position (0 is the top). */
-  | { op: "move_system"; systemId: string; index: number };
+  | { op: "move_system"; systemId: string; index: number }
+  /** Changes the words of one block on a form or landing page. Fields that don't apply to its type are ignored. */
+  | { op: "update_block"; viewId: string; blockId: string; patch: BlockPatch }
+  /** Replaces a landing page's blocks, e.g. with the standard site layout. */
+  | {
+      op: "replace_blocks";
+      viewId: string;
+      blocks: Block[];
+      layout?: "standard";
+    };
+
+/** New words for a block. Only the keys its type has are used. */
+export type BlockPatch = Partial<{
+  heading: string;
+  subheading: string;
+  ctaLabel: string;
+  title: string;
+  markdown: string;
+  items: BlockItem[];
+  phone: string;
+  email: string;
+  address: string;
+  hours: string;
+}>;
+
+/** The keys each block type can take from a BlockPatch. */
+const PATCHABLE: Partial<Record<Block["type"], (keyof BlockPatch)[]>> = {
+  hero: ["heading", "subheading", "ctaLabel"],
+  text: ["markdown"],
+  records: ["title"],
+  form: ["title"],
+  highlights: ["title", "items"],
+  steps: ["title", "items"],
+  contact: ["title", "phone", "email", "address", "hours"],
+};
+
+/** The patch with only what this block type uses; empty when nothing applies. */
+export function patchFor(block: Block, patch: BlockPatch): BlockPatch {
+  const keys = PATCHABLE[block.type] ?? [];
+  return Object.fromEntries(
+    Object.entries(patch).filter(([k, v]) => keys.includes(k as keyof BlockPatch) && v !== undefined),
+  ) as BlockPatch;
+}
 
 /** Data edits a plan may make after its design changes: add, change or delete records. */
 export type RecordOp =
@@ -401,6 +444,21 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         if (blocks.some((b) => b.id === op.block.id)) break;
         const at = op.beforeBlockId ? blocks.findIndex((b) => b.id === op.beforeBlockId) : -1;
         blocks.splice(at < 0 ? blocks.length : at, 0, op.block);
+        break;
+      }
+      case "update_block": {
+        const view = next.views.find((v) => v.id === op.viewId);
+        if (view?.type !== "form" && view?.type !== "landing") break;
+        const i = (view.blocks ?? []).findIndex((b) => b.id === op.blockId);
+        const blocks = view.blocks ?? [];
+        if (i >= 0) blocks[i] = { ...blocks[i], ...patchFor(blocks[i], op.patch) } as Block;
+        break;
+      }
+      case "replace_blocks": {
+        const view = next.views.find((v) => v.id === op.viewId);
+        if (view?.type !== "landing") break;
+        view.blocks = op.blocks;
+        if (op.layout) view.layout = op.layout;
         break;
       }
     }

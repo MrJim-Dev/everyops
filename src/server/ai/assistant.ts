@@ -23,6 +23,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { widgetValue } from "@/lib/engine/aggregate";
 import {
   applyOps,
+  type BlockPatch,
   type ChangeOp,
   type ChangePlan,
   commitChange,
@@ -34,6 +35,7 @@ import { metricFormatter } from "@/lib/engine/metric-format";
 import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
 import { isPublic } from "@/lib/public/resolve";
+import { copyFromBlocks, standardBlocks } from "@/lib/public/site-template";
 import { type Invite, type Member, randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
 import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer } from "./assistant-prompt";
@@ -197,11 +199,91 @@ function toRemoval(bp: Blueprint, o: RawRemoval, planned: ChangeOp[]): ChangeOp 
   }
 }
 
+type RawBlockEdit = {
+  title?: string;
+  text?: string;
+  items?: { title: string; body: string }[];
+};
+
+/**
+ * A section's new words as Gemini writes them ("Title: …", "Text: …", "Button: …", "Item: title | body",
+ * "Phone: …"), as title, text and item rows. A line without a label is the text.
+ */
+export function sectionWords(raw: string): RawBlockEdit {
+  const out: RawBlockEdit = { items: [] };
+  const extra: string[] = [];
+  for (const line of raw.split("\n")) {
+    const m = /^\s*([A-Za-z ]{2,12}):\s*(.*)$/.exec(line);
+    const label = m?.[1].trim().toLowerCase();
+    const value = m?.[2].trim() ?? "";
+    if (!m || !label) {
+      if (line.trim()) extra.push(line);
+      continue;
+    }
+    if (label === "title" || label === "heading" || label === "headline") out.title = value;
+    else if (label === "text" || label === "intro" || label === "subheading" || label === "body")
+      out.text = value;
+    else if (label === "item" || label === "step" || label === "highlight") {
+      const [title, ...body] = value.split("|");
+      out.items?.push({ title: title.trim(), body: body.join("|").trim() });
+    } else out.items?.push({ title: m[1].trim(), body: value });
+  }
+  if (extra.length) out.text = [out.text, ...extra].filter(Boolean).join("\n");
+  return out;
+}
+
+/** Gemini's flat section edit, turned into the words that block type has. */
+export function blockPatchFrom(block: Block, o: RawBlockEdit): BlockPatch {
+  const title = o.title?.trim() || undefined;
+  const text = o.text?.trim() || undefined;
+  const items = o.items
+    ?.map((i) => ({ title: i.title.trim(), body: i.body.trim() }))
+    .filter((i) => i.title || i.body);
+  switch (block.type) {
+    case "hero": {
+      // The hero's button text comes as an items row titled Button (keeps Gemini's schema small).
+      const button = items?.find((i) => /button|cta/i.test(i.title))?.body;
+      return {
+        ...(title ? { heading: title } : {}),
+        ...(text ? { subheading: text } : {}),
+        ...(button ? { ctaLabel: button } : {}),
+      };
+    }
+    case "text":
+      return text ? { markdown: text } : {};
+    case "records":
+    case "form":
+      return title ? { title } : {};
+    case "highlights":
+    case "steps":
+      return {
+        ...(title ? { title } : {}),
+        ...(items?.length ? { items: items.filter((i) => i.title) } : {}),
+      };
+    case "contact": {
+      const row = (re: RegExp) => items?.find((i) => re.test(i.title))?.body;
+      const details = {
+        phone: row(/phone|mobile|call|tel/i),
+        email: row(/mail/i),
+        address: row(/address|location|where|map/i),
+        hours: row(/hour|open|time|schedule/i),
+      };
+      return {
+        ...(title ? { title } : {}),
+        ...Object.fromEntries(Object.entries(details).filter(([, v]) => v !== undefined)),
+      };
+    }
+    default:
+      return {};
+  }
+}
+
 function toDesignOps(
   bp: Blueprint,
   raw: RawPlan["ops"],
   renames: RawPlan["renames"] = [],
   formulas: RawPlan["formulas"] = [],
+  workspaceName = "",
 ): { ops: ChangeOp[]; errors: string[] } {
   const ops: ChangeOp[] = [];
   const errors: string[] = [];
@@ -387,7 +469,24 @@ function toDesignOps(
   for (const [i, r] of renames.entries()) {
     const name = r.newName.trim();
     if (!name) errors.push(`renames[${i}]: needs newName`);
-    else if (r.kind === "page") ops.push({ op: "rename_system", systemId: r.id, name });
+    else if (r.kind === "section") {
+      // New words for a website section travel as a rename (keeps Gemini's schema in budget).
+      const view = bp.views.find(
+        (v) => (v.type === "landing" || v.type === "form") && v.blocks?.some((b) => b.id === r.id),
+      );
+      const block =
+        view?.type === "landing" || view?.type === "form"
+          ? view.blocks?.find((b) => b.id === r.id)
+          : undefined;
+      if (!view || !block) {
+        errors.push(`renames[${i}]: there's no website section "${r.id}"`);
+        continue;
+      }
+      const patch = blockPatchFrom(block, sectionWords(name));
+      if (Object.keys(patch).length)
+        ops.push({ op: "update_block", viewId: view.id, blockId: block.id, patch });
+      else errors.push(`renames[${i}]: nothing to change on the ${block.type} section`);
+    } else if (r.kind === "page") ops.push({ op: "rename_system", systemId: r.id, name });
     else ops.push({ op: "rename_view", viewId: r.id, name });
   }
   // New fields show up as a column in every table of their record type.
@@ -427,6 +526,27 @@ function toDesignOps(
       op.view.type !== "landing"
     )
       op.view.entityId = resolveEntity(op.view.entityId);
+  }
+  // A new landing page uses the standard site: its hero words stay, the rest comes from the data.
+  // Blocks the plan adds to that new page are folded in: their words become its copy; custom HTML stays as is.
+  for (const op of [...ops]) {
+    if (op.op !== "add_view" || op.view.type !== "landing") continue;
+    const viewId = op.view.id;
+    const added = ops.flatMap((x) => (x.op === "add_block" && x.viewId === viewId ? [x.block] : []));
+    const others = ops.filter(
+      (x) =>
+        !(x.op === "add_view" && x.view.type === "landing") && !(x.op === "add_block" && x.viewId === viewId),
+    );
+    const blocks = [...(op.view.blocks ?? []), ...added];
+    op.view.blocks = [
+      ...standardBlocks(applyOps(bp, others), workspaceName, copyFromBlocks(blocks)),
+      ...blocks.filter((b) => b.type === "html"),
+    ];
+    op.view.layout = "standard";
+    for (let k = ops.length - 1; k >= 0; k--) {
+      const x = ops[k];
+      if (x.op === "add_block" && x.viewId === viewId) ops.splice(k, 1);
+    }
   }
   // Blocks on public pages point at real record types, fields and forms.
   const fieldsOf = (id: string) =>
@@ -524,6 +644,7 @@ function toDesignOps(
     "move_view",
     "update_view",
     "add_block",
+    "update_block",
     "add_view_field",
     "add_widget",
     "update_widget",
@@ -554,7 +675,9 @@ function toDesignOps(
       (op.op === "move_view" ||
         op.op === "rename_view" ||
         op.op === "update_view" ||
-        op.op === "add_block") &&
+        op.op === "add_block" ||
+        op.op === "update_block" ||
+        op.op === "remove_block") &&
       !viewKnown(op.viewId)
     )
       errors.push(`${op.op}: view "${op.viewId}" doesn't exist`);
@@ -731,6 +854,8 @@ export async function assistantTurn(input: {
   team?: { members: Member[]; invites: Invite[] };
   /** Called with what the assistant is doing, shown while it works. */
   onStatus?: (status: string) => void;
+  /** The business name, for the words of a new website. */
+  workspaceName?: string;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
   const permissions = input.canDesign
@@ -854,7 +979,7 @@ ${input.messages
     if (a.kind !== "plan") return { ok: true, kind: a.kind, reply: a.reply, suggestions, ...withNav };
     status("Checking the plan against your workspace");
 
-    const design = toDesignOps(bp, a.plan.ops, a.plan.renames, a.plan.formulas);
+    const design = toDesignOps(bp, a.plan.ops, a.plan.renames, a.plan.formulas, input.workspaceName);
     const errors = [...design.errors];
     if (design.ops.length && !input.canDesign)
       errors.push("This person can't change the design; plan data changes only or explain who can.");
@@ -914,7 +1039,8 @@ ${input.messages
         suggestions,
         ...withNav,
         plan: {
-          request: input.messages.at(-1)?.text ?? "",
+          // History shows the person's own words, without the note about which section they clicked.
+          request: (input.messages.at(-1)?.text ?? "").replace(/^\(About the .+? section I clicked\)\n?/, ""),
           baseVersion: bp.version,
           title: a.plan.title || "Workspace change",
           facts: facts.slice(0, 6),

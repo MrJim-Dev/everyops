@@ -21,6 +21,7 @@ import { CATALOG } from "@/lib/catalog";
 import { computeAll } from "@/lib/engine/compute";
 import { isImagePath } from "@/lib/engine/records";
 import { MAX_HTML_BYTES } from "@/lib/public/html-page";
+import { copyFromBlocks, type SiteCopy, standardBlocks } from "@/lib/public/site-template";
 import { hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
 import { DESIGN_SYSTEM, type Design, designRequest } from "./design-prompt";
@@ -602,7 +603,15 @@ export async function designWorkspace(
     if (!result.ok) return { ok: false, message: result.error };
     const raw = toBlueprint(result.data);
     const samples = mergeDateAndSlot(raw, result.data.samples);
-    const bp = ensurePages(repairStructure(tidy(raw)));
+    const name = result.data.workspaceName || workspaceName;
+    const bp = ensurePages(
+      withStandardSite(
+        repairStructure(tidy(raw)),
+        name,
+        result.data.site,
+        fileParts.length ? undefined : brief,
+      ),
+    );
     const errors = [
       ...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`),
       ...extraChecks(bp, brief),
@@ -611,7 +620,7 @@ export async function designWorkspace(
       const records = computeAll(bp, toRecords(bp, samples, now), now);
       return {
         ok: true,
-        name: result.data.workspaceName || workspaceName,
+        name,
         summary: result.data.summary,
         data: { blueprint: bp, records },
       };
@@ -800,6 +809,69 @@ const BUTTON_VERBS: Record<string, string> = {
   declined: "Decline",
   denied: "Deny",
 };
+/**
+ * Every website uses the standard layout. Gemini writes the words (site); the page itself is built from the
+ * workspace's data. A design with a public form but no landing page gets one; custom HTML sections stay.
+ */
+export function withStandardSite(
+  bp: Blueprint,
+  name: string,
+  site?: Design["site"],
+  /** The brief, to keep only contact details the owner actually gave. Skipped when files may hold them. */
+  brief?: string,
+): Blueprint {
+  const landing = bp.views.find((v) => v.type === "landing");
+  const hasForm = bp.views.some((v) => v.type === "form" && v.public);
+  if (!landing && !hasForm) return bp;
+  const copy: SiteCopy = site
+    ? {
+        headline: site.headline,
+        intro: site.intro,
+        cta: site.cta,
+        offerTitle: site.offerTitle,
+        highlights: site.highlights,
+        steps: site.steps,
+        contact: Object.fromEntries(
+          site.contact
+            .filter((c) => brief === undefined || givenIn(brief, c.value))
+            .map((c) => [c.kind, c.value]),
+        ),
+      }
+    : copyFromBlocks(landing?.type === "landing" ? landing.blocks : []);
+  const html = landing?.type === "landing" ? landing.blocks.filter((b) => b.type === "html") : [];
+  const blocks = [...standardBlocks(bp, name, copy), ...html];
+  if (landing?.type === "landing") {
+    landing.blocks = blocks;
+    landing.layout = "standard";
+    return bp;
+  }
+  const id = bp.views.some((v) => v.id === "home") ? "site_home" : "home";
+  bp.views.push({
+    id,
+    entityId: "",
+    name: "Home",
+    type: "landing",
+    public: true,
+    layout: "standard",
+    blocks,
+  });
+  return bp;
+}
+
+/**
+ * Whether a contact detail comes from the brief rather than the model's imagination: its digits (phones, hours)
+ * or its longer words (addresses) appear there.
+ */
+export function givenIn(brief: string, value: string): boolean {
+  const text = brief.toLowerCase();
+  const digits = value.replace(/\D/g, "");
+  if (digits.length >= 7) return text.replace(/\D/g, "").includes(digits);
+  const numbers = value.match(/\d+/g) ?? [];
+  if (numbers.length && !numbers.every((n) => new RegExp(`\\b${n}\\b`).test(text))) return false;
+  const words = value.toLowerCase().match(/[a-z]{4,}/g) ?? [];
+  const known = words.filter((w) => text.includes(w));
+  return numbers.length ? true : known.length >= Math.min(2, words.length);
+}
 
 const PAGE_ICONS: [RegExp, IconName][] = [
   [/court|room|venue|table|space|resource/, "court"],
