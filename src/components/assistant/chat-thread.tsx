@@ -298,7 +298,7 @@ export function ChatThread({
                   {t.plan ? (
                     <PlanCard
                       plan={t.plan}
-                      state={t.planState}
+                      state={chat.planStateOf(t)}
                       onApply={() => chat.apply(i, t.plan as ChangePlan)}
                       onDismiss={() => chat.dismiss(i)}
                       onUndo={() => chat.undo(i, t.changeId)}
