@@ -218,4 +218,28 @@ describe("assistant plans", () => {
       "Other details",
     ]);
   });
+  it("opens up a form placed on a landing page", () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
+    const form = blueprint.views.find((v) => v.type === "form");
+    if (form?.type !== "form") throw new Error("no form");
+    const bp = structuredClone(blueprint);
+    const own = bp.views.find((v) => v.id === form.id);
+    if (own?.type === "form") own.public = false;
+    const ops: ChangeOp[] = [
+      {
+        op: "add_view",
+        systemId: bp.systems[0].id,
+        view: {
+          id: "home",
+          entityId: "",
+          name: "Home",
+          type: "landing",
+          blocks: [{ id: "book", type: "form", viewId: form.id }],
+        },
+      },
+    ];
+    openUpPublicForms(bp, ops);
+    const after = applyOps(bp, ops).views.find((v) => v.id === form.id);
+    expect(after?.type === "form" && after.public).toBe(true);
+  });
 });

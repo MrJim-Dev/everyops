@@ -19,6 +19,25 @@ function watch(text: string, maxStringChars?: number) {
 const NOW = new Date("2026-10-14T03:00:00Z");
 
 describe("runaway answers", () => {
+  it("stops text that goes round in circles without repeating exactly", () => {
+    const words =
+      "cool done very soon easily ready go now instantly please very nicely today perfect alright great thanks".split(
+        " ",
+      );
+    let salad = "";
+    for (let i = 0; salad.length < 6000; i++) salad += `${words[(i * 7) % words.length]} `;
+    const result = watch(JSON.stringify({ reply: salad }), 24_000);
+    expect(result?.why).toBe("text that goes round in circles");
+    expect(result?.at).toBeLessThan(3000);
+    // Repeated cards on a page aren't a loop.
+    const cards = Array.from(
+      { length: 30 },
+      (_, i) =>
+        `<div class="card"><h3>Court ${i + 1}</h3><p>Indoor, lights, ${i % 2 ? "glass walls" : "open air"}</p></div>`,
+    ).join("");
+    expect(watch(JSON.stringify({ starter: cards }), 24_000)).toBeNull();
+  });
+
   it("stops a short phrase that repeats, long before the length limit", () => {
     const loop = JSON.stringify({ reply: `Here is the plan: ${"complete matches ".repeat(200)}` });
     const result = watch(loop, 24_000);
@@ -44,7 +63,14 @@ describe("runaway answers", () => {
     expect(watch(JSON.stringify(courtBookingsSample(NOW)))).toBeNull();
     expect(watch(JSON.stringify(posSample(NOW)))).toBeNull();
     const page = {
-      starter: "## House rules\n\n".concat("Bring clean court shoes and your own water bottle. ".repeat(40)),
+      // Long, ordinary prose: forty different house rules.
+      starter: "## House rules\n\n".concat(
+        Array.from(
+          { length: 40 },
+          (_, i) =>
+            `${i + 1}. ${["Bring clean court shoes", "Refill your own water bottle", "Book slots in advance", "Return rented paddles", "Keep the lounge tidy", "Respect quiet hours after ten", "Report damaged nets to staff", "Children need an adult with them"][i % 8]} ${["on weekdays", "during tournaments", "after league nights", "before open play", "when courts are full"][i % 5]}.`,
+        ).join("\n"),
+      ),
     };
     expect(watch(JSON.stringify(page))).toBeNull();
     expect(

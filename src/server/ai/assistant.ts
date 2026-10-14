@@ -38,7 +38,7 @@ import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
 import { formSnippet } from "@/lib/public/html-page";
 import { isPublic, publicFieldsOf, publicForm } from "@/lib/public/resolve";
-import { copyFromBlocks, standardBlocks } from "@/lib/public/site-template";
+import { copyFromBlocks, mainForm, standardBlocks } from "@/lib/public/site-template";
 import { type Invite, type Member, randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
 import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer, designOp } from "./assistant-prompt";
@@ -410,7 +410,11 @@ function toDesignOps(
         break;
       }
       case "move_page":
-        if (bp.systems.some((s) => s.id === o.pageId))
+        // A page added earlier in this plan can be moved too ("add a website page at the top").
+        if (
+          bp.systems.some((s) => s.id === o.pageId) ||
+          ops.some((x) => x.op === "add_system" && x.system.id === o.pageId)
+        )
           ops.push({ op: "move_system", systemId: o.pageId, index: Math.round(o.position) });
         else errors.push(`${at}: page "${o.pageId}" doesn't exist`);
         break;
@@ -506,6 +510,9 @@ function toDesignOps(
   }
   // A new landing page uses the standard site: its hero words stay, the rest comes from the data.
   // Blocks the plan adds to that new page are folded in: their words become its copy; custom HTML stays as is.
+  // A form added with it is the site's booking or sign-up form, so it's public (the site's button opens it).
+  if (ops.some((x) => x.op === "add_view" && x.view.type === "landing"))
+    for (const x of ops) if (x.op === "add_view" && x.view.type === "form") x.view.public = true;
   for (const op of [...ops]) {
     if (op.op !== "add_view" || op.view.type !== "landing") continue;
     const viewId = op.view.id;
@@ -1147,14 +1154,23 @@ export function setAsideBadOps(json: unknown, setAside: string[]): unknown {
 
 /** Form ids that custom HTML pages in this plan embed or post to (data-everyops-embed, data-everyops-form). */
 function embeddedIn(ops: ChangeOp[], pageHtml: string[] = []): string[] {
-  return [
+  // Form blocks on pages the plan adds or adds blocks to (a landing page with a booking form) count too.
+  const blocks = ops.flatMap((op) =>
+    op.op === "add_block"
+      ? [op.block]
+      : op.op === "add_view" && (op.view.type === "landing" || op.view.type === "form")
+        ? (op.view.blocks ?? [])
+        : [],
+  );
+  const forms = blocks.flatMap((b) => (b.type === "form" ? [b.viewId] : []));
+  const html = [
     ...ops.flatMap((op) =>
       op.op === "add_view" && op.view.type === "html" && op.view.html ? [op.view.html] : [],
     ),
     ...pageHtml,
-  ].flatMap((html) =>
-    [...html.matchAll(/data-everyops-(?:embed|form)\s*=\s*["']([^"']+)["']/g)].map((m) => m[1]),
-  );
+    ...blocks.flatMap((b) => (b.type === "html" ? [b.html] : [])),
+  ].flatMap((h) => [...h.matchAll(/data-everyops-(?:embed|form)\s*=\s*["']([^"']+)["']/g)].map((m) => m[1]));
+  return [...forms, ...html];
 }
 
 /** Forms this plan adds, changes or puts on a custom page: the ones whose public use it must check. */
@@ -1234,6 +1250,11 @@ export function openUpPublicForms(
   if (!wantsSteps) return;
   // Asked for a form in steps: a form the plan touches that still has none is split the usual way.
   next = applyOps(bp, ops);
+  // A new landing page's button opens the main public form, so that's the form they mean.
+  if (ops.some((op) => op.op === "add_view" && op.view.type === "landing")) {
+    const main = mainForm(next);
+    if (main) touched.add(main.id);
+  }
   for (const view of next.views) {
     if (view.type !== "form" || !touched.has(view.id) || view.steps?.length) continue;
     const entity = next.entities.find((e) => e.id === view.entityId);

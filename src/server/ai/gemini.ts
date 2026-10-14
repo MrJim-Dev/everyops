@@ -111,6 +111,17 @@ function repeating(tail: string): boolean {
   return false;
 }
 
+/**
+ * Text that goes round in circles without repeating exactly: a few words shuffled over and over ("cool done very
+ * soon easily ready go now…"). Real text, HTML included, uses far more different words in the same stretch.
+ */
+function circling(window: string): boolean {
+  // Markup repeats by design (a grid of cards, a CSS file); only prose is judged by its words.
+  if ((window.match(/[<{]/g)?.length ?? 0) > 10) return false;
+  const words = window.toLowerCase().match(/[a-z]{2,}/g) ?? [];
+  return words.length >= 200 && new Set(words).size / words.length < 0.08;
+}
+
 export function runawayWatcher(maxStringChars = 3000) {
   let inString = false;
   let escaped = false;
@@ -118,6 +129,7 @@ export function runawayWatcher(maxStringChars = 3000) {
   let unbroken = 0;
   let digits = 0;
   let tail = "";
+  let window = "";
   return (chunk: string): string | null => {
     for (const ch of chunk) {
       if (inString) {
@@ -138,8 +150,10 @@ export function runawayWatcher(maxStringChars = 3000) {
         }
         length++;
         tail = (tail + ch).slice(-400);
+        window = (window + ch).slice(-2000);
         // Checked every 20 characters: a short phrase repeating for 400 characters is a loop, however long it is.
         if (length % 20 === 0 && repeating(tail)) return "text that repeats itself";
+        if (length % 200 === 0 && circling(window)) return "text that goes round in circles";
         // HTML and CSS run long without spaces (body{margin:0;font-family:…}); their punctuation breaks a run too.
         // Filler that never ends ("…_done_now_perfectly_setup_…") has none of it.
         unbroken = BREAKS.has(ch) ? 0 : unbroken + 1;
@@ -151,6 +165,7 @@ export function runawayWatcher(maxStringChars = 3000) {
         unbroken = 0;
         digits = 0;
         tail = "";
+        window = "";
       } else if (/[0-9.eE+-]/.test(ch)) {
         if (++digits > 40) return "a number that never ends";
       } else digits = 0;
