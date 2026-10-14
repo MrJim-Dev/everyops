@@ -1,5 +1,6 @@
 {
   "name": "everyops",
+  "description": "EveryOps — A workspace for every kind of business operation. Built for the Google Cloud AI Builder Cup 2026.",
   "version": "0.1.0",
   "private": true,
   "scripts": {
