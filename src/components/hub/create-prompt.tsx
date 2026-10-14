@@ -26,6 +26,31 @@ function readPending(): string | null {
 /** The dashboard prompt's textarea; other parts of the page focus it to start a workspace. */
 export const PROMPT_ID = "create-prompt";
 
+/**
+ * "New workspace" from anywhere in the app: an empty workspace, opened on Ask EveryOps, where the setup
+ * conversation starts with the first message. A blank one you already have (nothing typed yet) is reopened
+ * instead, so clicking New workspace twice doesn't stack up empty workspaces.
+ */
+export function useNewWorkspace() {
+  const router = useRouter();
+  const createWorkspace = useWorkspaces((s) => s.createWorkspace);
+  return () => {
+    const { workspaces, owner } = useWorkspaces.getState();
+    const blank = Object.values(workspaces).find(
+      (w) =>
+        w.ownerId === owner &&
+        w.setup &&
+        !w.setup.prompt &&
+        !w.setup.attachments?.length &&
+        !w.setup.progress?.messages?.length,
+    );
+    const slug =
+      blank?.slug ??
+      createWorkspace({ name: "New workspace", summary: "Setting up", data: EMPTY, setup: { prompt: "" } });
+    router.push(`/w/${slug}/ask`);
+  };
+}
+
 const EMPTY: WorkspaceData = {
   blueprint: {
     version: 1,
@@ -56,6 +81,7 @@ export function CreatePrompt() {
     ref.current?.focus();
   });
 
+  // Sending lifts the home page away (a rare, once-per-workspace moment), then the setup chat rises in to meet it.
   const create = (text: string, attachments: AttachmentRef[] = []) => {
     const slug = createWorkspace({
       slug: idFromPrompt(text),
@@ -64,8 +90,13 @@ export function CreatePrompt() {
       data: EMPTY,
       setup: { prompt: text, ...(attachments.length ? { attachments } : {}) },
     });
-    router.push(`/w/${slug}/ask`);
+    const go = () => router.push(`/w/${slug}/ask`);
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return go();
+    router.prefetch(`/w/${slug}/ask`);
+    document.documentElement.dataset.eoLeaving = "";
+    setTimeout(go, 240);
   };
+  // Cleared once the setup chat has risen in (SetupInterview), so the loading screen in between knows to stay quiet.
 
   /** Visitors sign in first, then come back here and the setup continues with this prompt. */
   const signInFirst = () => {

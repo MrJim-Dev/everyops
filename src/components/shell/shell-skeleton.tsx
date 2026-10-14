@@ -1,6 +1,22 @@
+"use client";
+
+import { LogoMarkThinking } from "@/components/brand/logo";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useMounted } from "@/hooks/use-mounted";
 
 export function ShellSkeleton() {
+  // Arriving from the home prompt (CreatePrompt marks the page): no skeleton flash between the two screens, just
+  // the quiet mark until the setup chat rises in.
+  const fromPrompt = useMounted() && "eoLeaving" in document.documentElement.dataset;
+  if (fromPrompt)
+    return (
+      <div className="flex h-dvh items-center justify-center bg-shell" aria-busy="true">
+        <span className="flex items-center gap-2.5 text-[13.5px] text-muted-foreground">
+          <LogoMarkThinking className="size-3.5" />
+          Starting your workspace
+        </span>
+      </div>
+    );
   return (
     <div className="flex h-dvh bg-shell" aria-busy="true">
       <span className="sr-only">Loading workspace</span>

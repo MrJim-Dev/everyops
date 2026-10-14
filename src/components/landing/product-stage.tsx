@@ -135,7 +135,7 @@ function Window() {
   return (
     <div className="overflow-hidden rounded-2xl border border-foreground/10 bg-background shadow-[0_50px_140px_-40px_rgba(0,0,0,0.9)] ring-1 ring-black/40">
       <div className="flex h-11 items-center gap-3 border-b px-4 text-[12px]">
-        <LogoMark className="size-3.5 text-primary" />
+        <LogoMark className="size-3.5" />
         <span className="font-medium">Court House PH</span>
         <span className="text-muted-foreground">/ Bookings</span>
         <span className="ml-auto hidden text-muted-foreground sm:inline">Tue, 13 Oct</span>

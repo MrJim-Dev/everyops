@@ -7,8 +7,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AttachmentTray, ComposerTools, DropOverlay, MessageFiles } from "@/components/ai/composer-tools";
 import { useAttachments } from "@/components/ai/use-attachments";
 import { useVoiceInput } from "@/components/ai/use-voice-input";
-import { Rich } from "@/components/assistant/chat-thread";
+import { TypedRich } from "@/components/assistant/chat-thread";
 import { Thinking } from "@/components/assistant/thinking";
+import { LogoMark } from "@/components/brand/logo";
+import { StarterChips } from "@/components/hub/starters";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
@@ -17,6 +19,8 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { useFollowBottom } from "@/hooks/use-follow-bottom";
+import { typingMs } from "@/hooks/use-typewriter";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import {
   type ChatTurn,
@@ -25,6 +29,7 @@ import {
   type SetupProgress,
   useWorkspaces,
 } from "@/lib/store/workspaces";
+import { cn } from "@/lib/utils";
 import { AssistantMessage, UserMessage } from "./messages";
 
 type Phase = "idle" | "thinking" | "designing";
@@ -81,7 +86,10 @@ export function SetupInterview({
   const [messages, setMessages] = useState<ChatTurn[]>(() =>
     progress?.messages?.length
       ? progress.messages
-      : [{ role: "user", text: prompt, ...(initialFiles?.length ? { attachments: initialFiles } : {}) }],
+      : // A blank workspace ("New workspace") starts with no message; the conversation starts with the first one.
+        prompt || initialFiles?.length
+        ? [{ role: "user", text: prompt, ...(initialFiles?.length ? { attachments: initialFiles } : {}) }]
+        : [],
   );
   const [profile, setProfile] = useState<ProfileLine[]>(progress?.profile ?? []);
   const [plan, setPlan] = useState<string[]>(progress?.plan ?? []);
@@ -92,6 +100,15 @@ export function SetupInterview({
   const files = useAttachments();
   const voice = useVoiceInput((said) => setInput((v) => (v.trim() ? `${v.trimEnd()} ${said}` : said)));
   const scroller = useRef<HTMLDivElement>(null);
+  useFollowBottom(scroller);
+  const box = useRef<HTMLTextAreaElement>(null);
+  // Replies already there when the page opens show whole; ones that arrive now type themselves out.
+  const seen = useRef(messages.length);
+  // Arrived just now from the home prompt (its one message, nothing answered yet): the page rises in to meet it.
+  const fresh = useRef(messages.length === 1 && !progress?.messages?.length);
+  useEffect(() => {
+    delete document.documentElement.dataset.eoLeaving;
+  }, []);
   const busy = phase !== "idle";
 
   useEffect(() => {
@@ -181,37 +198,74 @@ export function SetupInterview({
 
   const create = () => {
     if (!draft) return;
-    finishSetup(ws.id, draft.data, draft.name, draft.summary);
     const first = draft.data.blueprint.systems[0];
-    router.push(`/w/${ws.id}${first ? `/${first.id}` : ""}`);
+    const go = () => {
+      finishSetup(ws.id, draft.data, draft.name, draft.summary);
+      router.push(`/w/${ws.id}${first ? `/${first.id}` : ""}`);
+    };
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return go();
+    // The setup screen softens away, then the new workspace settles in (the shell clears the mark on arrival).
+    document.documentElement.dataset.eoLeaving = "";
+    setTimeout(go, 240);
   };
 
   const last = messages.at(-1);
   const suggestions = !busy && !failure && last?.role === "assistant" ? (last.suggestions ?? []) : [];
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_300px]">
+    <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_360px]">
       <div className="flex min-h-0 flex-col">
         <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
           <div className="mx-auto flex max-w-[680px] flex-col gap-5">
+            {!messages.length && !busy ? (
+              <div className="animate-rise flex flex-col items-center gap-4 pt-[12vh] text-center">
+                <span className="flex size-11 items-center justify-center rounded-xl border bg-card">
+                  <LogoMark className="size-5" />
+                </span>
+                <h2 className="text-balance text-[26px] font-semibold tracking-[-0.02em]">
+                  What does your business need?
+                </h2>
+                <p className="max-w-[440px] text-pretty text-[14px] text-muted-foreground">
+                  Describe how you work. EveryOps asks a few questions, then builds it here.
+                </p>
+                <StarterChips
+                  className="mt-2"
+                  onPick={(text) => {
+                    setInput(text);
+                    box.current?.focus();
+                  }}
+                />
+              </div>
+            ) : null}
             {messages.map((m, i) =>
               m.role === "user" ? (
                 // biome-ignore lint/suspicious/noArrayIndexKey: messages only grow
-                <div key={i} className="flex flex-col gap-1.5">
+                <div key={i} className={cn("flex flex-col gap-1.5", fresh.current && !i && "animate-rise")}>
                   <MessageFiles files={m.attachments} />
                   {m.text ? <UserMessage>{m.text}</UserMessage> : null}
                 </div>
               ) : (
                 // biome-ignore lint/suspicious/noArrayIndexKey: messages only grow
                 <AssistantMessage key={i}>
-                  <Rich text={m.text} />
+                  <TypedRich text={m.text} typing={i >= seen.current} />
                 </AssistantMessage>
               ),
             )}
 
             {draft && !busy ? (
               <AssistantMessage>
-                <div className="rounded-xl border bg-card">
+                {/* The review card rises in once "Here's …" has typed out. */}
+                <div
+                  className={cn(
+                    "rounded-xl border bg-card",
+                    messages.length > seen.current && "animate-rise",
+                  )}
+                  style={
+                    messages.length > seen.current
+                      ? { animationDelay: `${typingMs(messages.at(-1)?.text ?? "")}ms` }
+                      : undefined
+                  }
+                >
                   <div className="border-b px-4 py-3">
                     <p className="text-[14px] font-semibold">{draft.name}</p>
                     <p className="text-[12.5px] text-muted-foreground">{draft.summary}</p>
@@ -281,7 +335,11 @@ export function SetupInterview({
 
         <div className="border-t px-5 py-3">
           <form
-            className="mx-auto w-full max-w-[680px]"
+            // The composer arrives from below with the first message, a beat after it.
+            className={cn(
+              "mx-auto w-full max-w-[680px]",
+              fresh.current && "animate-rise [animation-delay:90ms]",
+            )}
             onSubmit={(e) => {
               e.preventDefault();
               send(input);
@@ -296,8 +354,16 @@ export function SetupInterview({
                 </InputGroupAddon>
               ) : null}
               <InputGroupTextarea
+                ref={box}
+                autoFocus={!messages.length}
                 aria-label="Message Ask EveryOps"
-                placeholder={draft ? "Ask for changes before you create it…" : "Reply to EveryOps…"}
+                placeholder={
+                  draft
+                    ? "Ask for changes before you create it…"
+                    : messages.length
+                      ? "Reply to EveryOps…"
+                      : "I need a system to…"
+                }
                 value={input}
                 rows={1}
                 className="max-h-40 min-h-11 px-3.5 py-3 text-[14px]"

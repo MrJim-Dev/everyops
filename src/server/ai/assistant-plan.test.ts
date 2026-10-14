@@ -6,10 +6,40 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import type { ChangeOp } from "@/lib/engine/changes";
 import { applyOps } from "@/lib/engine/changes";
-import { embedForms, openUpPublicForms, setAsideBadOps, unanswerable, unbackedRuleSteps } from "./assistant";
+import {
+  embedForms,
+  openUpPublicForms,
+  setAsideBadOps,
+  toDesignOps,
+  unanswerable,
+  unbackedRuleSteps,
+} from "./assistant";
 import { toRule } from "./design";
 
 describe("assistant plans", () => {
+  // "Merge duplicate fields": Lapu-Lapu Aqua Flow had Rider (text) beside Rider Options (a choice), Oct 14.
+  it("merges a duplicate into the field views use: redefined in place, options carried over, duplicate removed", () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-14T03:00:00Z"));
+    const booking = blueprint.entities.find((e) => e.id === "booking");
+    const method = booking?.fields.find((f) => f.id === "method");
+    if (!booking || !method) throw new Error("no method field");
+    const options = method.options;
+    booking.fields.push({ ...method, id: "method_select", name: "Method options" });
+    Object.assign(method, { type: "text", options: undefined });
+    const raw = [
+      { op: "add_field", entityId: "booking", field: { id: "method", name: "Method", type: "select" } },
+      { op: "remove", what: "field", id: "method_select", parentId: "booking" },
+    ] as Parameters<typeof toDesignOps>[1];
+    const { ops, errors } = toDesignOps(blueprint, raw);
+    expect(errors).toEqual([]);
+    const next = applyOps(blueprint, ops);
+    const fields = next.entities.find((e) => e.id === "booking")?.fields ?? [];
+    expect(options?.length).toBeGreaterThan(0);
+    expect(fields.find((f) => f.id === "method")).toMatchObject({ type: "select", options });
+    expect(fields.some((f) => f.id === "method_select")).toBe(false);
+    expect(validateBlueprint(next)).toEqual([]);
+  });
+
   it("sets aside an operation that fits no shape instead of failing the whole answer", () => {
     const setAside: string[] = [];
     const json = {

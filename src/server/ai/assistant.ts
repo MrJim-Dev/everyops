@@ -342,7 +342,7 @@ function visitorView(bp: Blueprint, view: FormView): string {
   ].join("");
 }
 
-function toDesignOps(
+export function toDesignOps(
   bp: Blueprint,
   raw: RawPlan["ops"],
   renames: RawPlan["renames"] = [],
@@ -480,15 +480,19 @@ function toDesignOps(
         const unknown = entity
           ? (fieldIds ?? []).filter((id) => !entity.fields.some((f) => f.id === id) && !added.includes(id))
           : [];
-        if (unknown.length && entity) {
+        // A field of another record type on this view (an order line's product on the order form) is a slip: it's
+        // dropped, and the rest of the update stands. Only a list with nothing valid left goes back to Gemini.
+        if (unknown.length && entity && unknown.length === (fieldIds ?? []).length) {
           errors.push(
             `${at}: ${unknown.join(", ")} aren't fields of ${entity.id} (fields: ${entity.fields.map((f) => f.id).join(", ")})`,
           );
           break;
         }
+        const kept = fieldIds?.filter((id) => !unknown.includes(id));
+        for (const s of split?.steps ?? []) s.fieldIds = s.fieldIds.filter((id) => !unknown.includes(id));
         if (
           view &&
-          fieldIds?.length &&
+          kept?.length &&
           !["table", "kanban", "approval_queue", "form", "checkout"].includes(view.type)
         ) {
           errors.push(`${at}: a ${view.type} view has no columns to order`);
@@ -497,7 +501,7 @@ function toDesignOps(
         const patch = {
           ...(o.public !== undefined ? { public: o.public } : {}),
           ...(o.intro ? { intro: o.intro } : {}),
-          ...(fieldIds?.length ? { fieldIds } : {}),
+          ...(kept?.length ? { fieldIds: kept } : {}),
           // Steps keep the form's own review setting; a form getting steps for the first time ends with one.
           ...(split?.steps
             ? {
@@ -784,7 +788,27 @@ function toDesignOps(
     const i = ORDER.indexOf(op.op);
     return i < 0 ? ORDER.length : i;
   };
-  ops.splice(0, ops.length, ...unique.sort((a, b) => rank(a) - rank(b)));
+  // Removing a field or rule the same plan adds again ("merge the duplicates": drop rider, add rider as a choice)
+  // means redefine it; the add replaces it in place, so the removal is dropped instead of deleting the new one.
+  const kept = unique.filter(
+    (op) =>
+      !(
+        op.op === "remove_field" &&
+        unique.some((x) => x.op === "add_field" && x.entityId === op.entityId && x.field.id === op.fieldId)
+      ) && !(op.op === "remove_rule" && unique.some((x) => x.op === "add_rule" && x.rule.id === op.ruleId)),
+  );
+  // A field redefined as a choice without its options keeps the ones it had, or takes them from the duplicate the
+  // plan merges away (rider_select, status_options): Gemini drops them often, and they're already in the workspace.
+  for (const op of kept) {
+    if (op.op !== "add_field" || !["select", "status", "multi_select"].includes(op.field.type)) continue;
+    if (op.field.options?.length) continue;
+    const fields = bp.entities.find((e) => e.id === op.entityId)?.fields ?? [];
+    // Its duplicates count whether or not this plan removes them (a repair round often sends only the fixed op).
+    const siblings = fields.filter((f) => f.id.startsWith(`${op.field.id}_`));
+    const from = [fields.find((f) => f.id === op.field.id), ...siblings].find((f) => f?.options?.length);
+    if (from?.options) op.field.options = from.options;
+  }
+  ops.splice(0, ops.length, ...kept.sort((a, b) => rank(a) - rank(b)));
   // Existing ids can't be redefined, and every new view or widget must land in a section.
   for (const op of ops) {
     const viewKnown = (id: string) =>
@@ -806,11 +830,6 @@ function toDesignOps(
       errors.push(`${op.op}: page "${op.systemId}" doesn't exist`);
     if (op.op === "add_entity" && bp.entities.some((e) => e.id === op.entity.id))
       errors.push(`Record type "${op.entity.id}" already exists`);
-    if (
-      op.op === "add_field" &&
-      bp.entities.find((e) => e.id === op.entityId)?.fields.some((f) => f.id === op.field.id)
-    )
-      errors.push(`Field "${op.field.id}" already exists on ${op.entityId}`);
     if (
       op.op === "update_field" &&
       !bp.entities.find((e) => e.id === op.entityId)?.fields.some((f) => f.id === op.fieldId) &&
@@ -1106,13 +1125,14 @@ ${input.messages
     return copies.get(id) as Promise<string | null>;
   };
   let prompt = withFiles(context);
-  let repaired = false;
+  // Two rounds of fixes: a big multi-part request can slip in a new place after the first one.
+  let repairs = 0;
   let restarted = false;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     status(
       attempt === 0
         ? "Thinking it through"
-        : repaired
+        : repairs
           ? "Reworking the plan so it fits your workspace"
           : "Gemini's first answer didn't come through, trying again",
     );
@@ -1281,14 +1301,14 @@ ${input.messages
         ops: JSON.stringify(a.plan.ops).slice(0, 3000),
       }),
     );
-    if (repaired) break;
-    repaired = true;
+    if (repairs === 2) break;
+    repairs++;
     if (errors.some((e) => e.endsWith("needs options")))
       errors.push(
         'Every select and status field needs "options": [{ "id": "lead", "label": "Lead", "tone": "neutral" }, …] with the choices the person described, or sensible ones.',
       );
     prompt = withFiles(
-      `${context}\n\nYour previous plan:\n${JSON.stringify(a.plan)}\n\nIt was rejected:\n- ${errors.length ? errors.slice(0, 15).join("\n- ") : "it had no operations"}\nReturn a corrected answer. The person never saw the rejected plan, so write the reply as your first answer: don't mention corrections or errors.`,
+      `${context}\n\nYour previous plan:\n${JSON.stringify(a.plan)}\n\nIt was rejected:\n- ${errors.length ? errors.slice(0, 15).join("\n- ") : "it had no operations"}\nReturn the complete corrected plan: every operation the request needs, not only the ones you fixed. The person never saw the rejected plan, so write the reply as your first answer: don't mention corrections or errors.`,
     );
   }
   return {
@@ -1381,14 +1401,10 @@ export function openUpPublicForms(
     if (view.type !== "form" || !view.public || !touched.has(view.id)) continue;
     const entity = next.entities.find((e) => e.id === view.entityId);
     if (!entity) continue;
-    const asked = new Set(publicFieldsOf(next, view).map((f) => f.id));
-    for (const f of entity.fields)
-      if (
-        f.required &&
-        !asked.has(f.id) &&
-        (f.type === "relation" || f.type === "select" || f.type === "multi_select") &&
-        f.id !== entity.booking?.resourceFieldId
-      )
+    // Anything required that visitors aren't asked (a link to a private list, an order number the business assigns)
+    // becomes optional, or every submission would fail. The same test as unanswerable(), so nothing is left for it.
+    for (const f of stuckFields(next, view, entity))
+      if (f.id !== entity.booking?.resourceFieldId)
         ops.push({ op: "update_field", entityId: entity.id, fieldId: f.id, patch: { required: false } });
     const contact = view.fieldIds.some((id) => {
       const f = entity.fields.find((x) => x.id === id);
@@ -1472,9 +1488,21 @@ function withGuestStep(steps: FormStep[], ids: string[]): FormStep[] {
   return out;
 }
 
+/** Required fields a public form doesn't ask visitors for, which the app can't fill in itself either. */
+function stuckFields(bp: Blueprint, view: FormView, entity: Entity) {
+  const asked = new Set(publicFieldsOf(bp, view).map((f) => f.id));
+  return entity.fields.filter(
+    (f) =>
+      f.required &&
+      !asked.has(f.id) &&
+      !["formula", "rollup", "status", "money"].includes(f.type) &&
+      f.id !== entity.parent?.fieldId,
+  );
+}
+
 /**
- * A public form this plan adds or opens up must not require what a visitor can't fill in (a link to a private list
- * such as players, a typed amount): every submission would fail. The assistant is told how to fix it.
+ * A public form this plan adds or opens up must not require what a visitor can't fill in: every submission would
+ * fail. openUpPublicForms already makes those optional; this is the last check before the plan is shown.
  */
 export function unanswerable(next: Blueprint, ops: ChangeOp[]): string[] {
   const touched = touchedForms(ops, embeddedIn(ops));
@@ -1482,14 +1510,7 @@ export function unanswerable(next: Blueprint, ops: ChangeOp[]): string[] {
     if (v.type !== "form" || !v.public || !touched.has(v.id)) return [];
     const entity = next.entities.find((e) => e.id === v.entityId);
     if (!entity) return [];
-    const asked = new Set(publicFieldsOf(next, v).map((f) => f.id));
-    const stuck = entity.fields.filter(
-      (f) =>
-        f.required &&
-        !asked.has(f.id) &&
-        !["formula", "rollup", "status", "money"].includes(f.type) &&
-        f.id !== entity.parent?.fieldId,
-    );
+    const stuck = stuckFields(next, v, entity);
     return stuck.length
       ? [
           `${v.id}: visitors can't fill in ${stuck.map((f) => f.id).join(", ")} (required, but not shown on public forms). Make ${stuck.length > 1 ? "them" : "it"} optional with update_field, and ask who is booking with text fields (guest name, phone) added with add_field and listed in the form.`,
@@ -1538,11 +1559,15 @@ const OP_NAMES = new Set([
 
 const OP_ALIASES: Record<string, string> = {
   patch_field: "update_field",
+  patch: "update_field",
   edit_field: "update_field",
   modify_field: "update_field",
   change_field: "update_field",
   edit_view: "update_view",
   patch_view: "update_view",
+  // There's no rule editing op: a rule is redefined by adding it again with its id.
+  update_rule: "add_rule",
+  edit_rule: "add_rule",
 };
 
 /**

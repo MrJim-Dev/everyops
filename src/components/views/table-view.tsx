@@ -205,6 +205,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
             pad(i),
             i === 0 && "font-medium",
             numeric(field) && "text-right",
+            inlineEdit && canEditInline(field) && "relative",
           )}
         >
           {field.type === "status" ? (
