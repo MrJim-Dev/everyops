@@ -1,7 +1,7 @@
 import "server-only";
 import { sql } from "kysely";
 import { recordTitle } from "@/lib/blueprint/lookup";
-import type { DataRecord, FieldValue, RecordData } from "@/lib/blueprint/types";
+import type { Blueprint, DataRecord, Entity, FieldValue, FormView, RecordData } from "@/lib/blueprint/types";
 import { createRecord } from "@/lib/engine/records";
 import { autoReferenceFields, nextReference } from "@/lib/engine/references";
 import { isTimeRange } from "@/lib/format";
@@ -66,6 +66,198 @@ export async function publicSlots(
   return slotsFor(bp, doc.records, view, resourceId, day);
 }
 
+type Draft =
+  | { ok: false; status: number; message: string; fieldErrors?: { fieldId?: string; message: string }[] }
+  | {
+      ok: true;
+      data: { blueprint: Blueprint; records: DataRecord[] };
+      record: DataRecord;
+      picked: { title: string; quantity: number }[];
+      offered: ReturnType<typeof publicExtras>;
+    };
+
+/**
+ * What a visitor's answers become: the record and its add-on lines, run through the same engine as the app, but
+ * not saved. Submitting saves it; a quote only reads the totals off it.
+ */
+function draftFromVisitor(
+  bp: Blueprint,
+  records: DataRecord[],
+  view: FormView,
+  entity: Entity,
+  raw: Record<string, unknown>,
+  rawExtras: Record<string, unknown>,
+  now: Date,
+  quote = false,
+): Draft {
+  const form = publicForm(bp, records, view);
+  const input: RecordData = {};
+  for (const f of publicFieldsOf(bp, view)) {
+    const v = raw[f.id];
+    if (v === undefined || v === null || v === "") continue;
+    let value: FieldValue | undefined;
+    switch (f.type) {
+      case "text":
+        value = text(v, 300);
+        break;
+      case "long_text":
+        value = text(v, 4000);
+        break;
+      case "number":
+      case "money":
+      case "percent":
+        value = typeof v === "number" && Number.isFinite(v) ? v : undefined;
+        break;
+      case "date":
+        value = typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;
+        break;
+      case "datetime":
+        value = typeof v === "string" && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : undefined;
+        break;
+      case "time_range":
+        value = isTimeRange(v as FieldValue)
+          ? { start: String((v as { start: string }).start), end: String((v as { end: string }).end) }
+          : undefined;
+        break;
+      case "select":
+        value = typeof v === "string" && f.options?.some((o) => o.id === v) ? v : undefined;
+        break;
+      case "multi_select":
+        value = Array.isArray(v)
+          ? v.filter((x): x is string => typeof x === "string" && !!f.options?.some((o) => o.id === x))
+          : undefined;
+        break;
+      case "checkbox":
+        value = v === true;
+        break;
+      case "relation":
+        value = typeof v === "string" && form?.choices[f.id]?.some((c) => c.id === v) ? v : undefined;
+        break;
+    }
+    if (value !== undefined) input[f.id] = value;
+  }
+  // The business sets statuses; a new submission starts at the first one (e.g. Pending or Unpaid).
+  // Typed-in amounts are the business's to set too; a required one starts at zero for staff to fill in.
+  for (const f of entity.fields) {
+    if (f.type === "status" && f.options?.[0] && input[f.id] === undefined) input[f.id] = f.options[0].id;
+    if (f.type === "money" && f.required && input[f.id] === undefined) input[f.id] = 0;
+  }
+  for (const f of autoReferenceFields(entity))
+    if (input[f.id] === undefined) input[f.id] = nextReference(entity, f, records);
+  const asked = publicFieldsOf(bp, view);
+  if (quote) fillForQuote(entity, input);
+  const contact = visitorContactIds(asked);
+  const missing = asked.filter((f) => contact.has(f.id) && input[f.id] === undefined);
+  if (missing.length && !quote)
+    return {
+      ok: false,
+      status: 422,
+      message: `${missing[0].name} is required`,
+      fieldErrors: missing.map((f) => ({ fieldId: f.id, message: `${f.name} is required` })),
+    } as const;
+  const booking = entity.booking;
+  const time = booking ? input[booking.timeFieldId] : undefined;
+  if (booking && isTimeRange(time ?? null) && Date.parse((time as { start: string }).start) <= now.getTime())
+    return { ok: false, status: 422, message: "Pick a time that hasn't started yet." } as const;
+
+  const result = createRecord({ blueprint: bp, records: records }, entity.id, input, now);
+  if (!result.ok)
+    return {
+      ok: false,
+      status: 422,
+      message: result.errors[0]?.message ?? "Check the form and try again.",
+      fieldErrors: result.errors,
+    } as const;
+  // Add-ons become line items under the new record, through the same engine (rules, totals, roll-ups).
+  let data = result.data;
+  const picked: { title: string; quantity: number }[] = [];
+  const offered = publicExtras(bp, records, view, now);
+  const extras = view.extras;
+  const line = extras && bp.entities.find((e) => e.id === extras.lineEntityId);
+  if (offered && extras && line?.parent) {
+    const parentField = line.parent.fieldId;
+    for (const [itemId, n] of Object.entries(rawExtras).slice(0, 20)) {
+      const item = offered.items.find((i) => i.id === itemId);
+      const quantity = typeof n === "number" && Number.isInteger(n) ? Math.min(n, 50) : 0;
+      if (!item || quantity < 1) continue;
+      const lineData: RecordData = { [parentField]: result.record.id, [extras.itemFieldId]: item.id };
+      if (extras.quantityFieldId) lineData[extras.quantityFieldId] = quantity;
+      // Other counts the line asks for (hours, nights) start at 1, and its own name (a Title field) is the item's;
+      // the business can change them.
+      for (const f of line.fields) {
+        if (lineData[f.id] !== undefined) continue;
+        if (f.required && f.type === "number") lineData[f.id] = 1;
+        if ((f.required || f.id === line.primaryFieldId) && f.type === "text") lineData[f.id] = item.title;
+      }
+      const added = createRecord(data, line.id, lineData, now);
+      if (!added.ok)
+        return {
+          ok: false,
+          status: 422,
+          message: `${item.title}: ${added.errors[0]?.message ?? "couldn't be added"}`,
+        } as const;
+      data = added.data;
+      picked.push({ title: item.title, quantity });
+    }
+  }
+  const record = data.records.find((r) => r.id === result.record.id) ?? result.record;
+  return { ok: true, data, record, picked, offered };
+}
+
+/** A quote doesn't know the visitor's name yet; required text it can't affect the total with is filled in. */
+function fillForQuote(entity: Entity, input: RecordData) {
+  for (const f of entity.fields) {
+    if (!f.required || input[f.id] !== undefined) continue;
+    if (f.type === "text" || f.type === "long_text") input[f.id] = "Quote";
+    else if (f.type === "number" || f.type === "money") input[f.id] = 0;
+    else if ((f.type === "select" || f.type === "status") && f.options?.[0]) input[f.id] = f.options[0].id;
+  }
+}
+
+export type QuoteResult =
+  | { ok: true; lines: { name: string; text: string }[] }
+  | { ok: false; message: string };
+
+/**
+ * The amount a visitor's booking comes to before they send it: the record's money fields (court fee, add-ons,
+ * total), worked out by the same engine as a real submission and never saved.
+ */
+export async function quotePublicForm(
+  slug: string,
+  viewId: string,
+  raw: Record<string, unknown>,
+  rawExtras: Record<string, unknown> = {},
+  now = new Date(),
+): Promise<QuoteResult> {
+  const doc = await readDoc(slug);
+  if (!doc || doc.meta.setup) return { ok: false, message: "This page doesn't exist." };
+  const bp = doc.blueprint;
+  const view = bp.views.find((v) => v.id === viewId);
+  const entity = bp.entities.find((e) => e.id === view?.entityId);
+  if (view?.type !== "form" || !view.public || !entity) return { ok: false, message: "No such form." };
+  const drafted = draftFromVisitor(bp, doc.records, view, entity, raw, rawExtras, now, true);
+  if (!drafted.ok) return { ok: false, message: drafted.message };
+  const money = entity.fields.filter(
+    (f) =>
+      (f.type === "money" ||
+        (f.type === "formula" && f.formula?.resultType === "money") ||
+        (f.type === "rollup" &&
+          f.rollup?.op === "sum" &&
+          /total|amount|fee|price|cost/i.test(`${f.id} ${f.name}`))) &&
+      typeof drafted.record.data[f.id] === "number" &&
+      (drafted.record.data[f.id] as number) > 0,
+  );
+  // Per-unit rates read like charges on their own; leave them to the totals they feed.
+  const lines = money.filter((f) => !/\brate\b|per.?(hour|night|day)|unit/i.test(`${f.id} ${f.name}`));
+  return {
+    ok: true,
+    lines: lines.map((f) => ({
+      name: f.name,
+      text: formatCell(bp, drafted.data.records, f, drafted.record.data[f.id]).text,
+    })),
+  };
+}
+
 export type SubmitResult =
   | { ok: true; reference: string; title: string; summary: { name: string; text: string }[] }
   | { ok: false; status: number; message: string; fieldErrors?: { fieldId?: string; message: string }[] };
@@ -97,71 +289,9 @@ export async function submitPublicForm(
     const entity = bp.entities.find((e) => e.id === view?.entityId);
     if (view?.type !== "form" || !view.public || !entity)
       return { ok: false, status: 404, message: "This form isn't taking submissions." } as const;
-    const form = publicForm(bp, doc.records, view);
-    const input: RecordData = {};
-    for (const f of publicFieldsOf(bp, view)) {
-      const v = raw[f.id];
-      if (v === undefined || v === null || v === "") continue;
-      let value: FieldValue | undefined;
-      switch (f.type) {
-        case "text":
-          value = text(v, 300);
-          break;
-        case "long_text":
-          value = text(v, 4000);
-          break;
-        case "number":
-        case "money":
-        case "percent":
-          value = typeof v === "number" && Number.isFinite(v) ? v : undefined;
-          break;
-        case "date":
-          value = typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;
-          break;
-        case "datetime":
-          value =
-            typeof v === "string" && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : undefined;
-          break;
-        case "time_range":
-          value = isTimeRange(v as FieldValue)
-            ? { start: String((v as { start: string }).start), end: String((v as { end: string }).end) }
-            : undefined;
-          break;
-        case "select":
-          value = typeof v === "string" && f.options?.some((o) => o.id === v) ? v : undefined;
-          break;
-        case "multi_select":
-          value = Array.isArray(v)
-            ? v.filter((x): x is string => typeof x === "string" && !!f.options?.some((o) => o.id === x))
-            : undefined;
-          break;
-        case "checkbox":
-          value = v === true;
-          break;
-        case "relation":
-          value = typeof v === "string" && form?.choices[f.id]?.some((c) => c.id === v) ? v : undefined;
-          break;
-      }
-      if (value !== undefined) input[f.id] = value;
-    }
-    // The business sets statuses; a new submission starts at the first one (e.g. Pending or Unpaid).
-    // Typed-in amounts are the business's to set too; a required one starts at zero for staff to fill in.
-    for (const f of entity.fields) {
-      if (f.type === "status" && f.options?.[0] && input[f.id] === undefined) input[f.id] = f.options[0].id;
-      if (f.type === "money" && f.required && input[f.id] === undefined) input[f.id] = 0;
-    }
-    for (const f of autoReferenceFields(entity))
-      if (input[f.id] === undefined) input[f.id] = nextReference(entity, f, doc.records);
-    const asked = publicFieldsOf(bp, view);
-    const contact = visitorContactIds(asked);
-    const missing = asked.filter((f) => contact.has(f.id) && input[f.id] === undefined);
-    if (missing.length)
-      return {
-        ok: false,
-        status: 422,
-        message: `${missing[0].name} is required`,
-        fieldErrors: missing.map((f) => ({ fieldId: f.id, message: `${f.name} is required` })),
-      } as const;
+    const drafted = draftFromVisitor(bp, doc.records, view, entity, raw, rawExtras, now);
+    if (!drafted.ok) return drafted;
+    const { data, record, picked, offered } = drafted;
     const booking = entity.booking;
     const time = booking ? input[booking.timeFieldId] : undefined;
     if (
@@ -229,7 +359,6 @@ export async function submitPublicForm(
     if (saved.conflicts.length)
       throw new Error(`public submission conflicted on ${saved.conflicts.join(", ")}`);
     await sql`update workspace set updated_at = now() where id = ${slug}`.execute(trx);
-    const record: DataRecord = data.records.find((r) => r.id === result.record.id) ?? result.record;
     const shown = entity.fields.filter(
       (f) =>
         (f.id === booking?.resourceFieldId ||
