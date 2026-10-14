@@ -72,7 +72,7 @@ Think ahead like a consultant who has set up many businesses like this one:
   records for each main record type, with Filipino names and PHP amounts.
   Include everything in the plan: public forms with their steps and add-ons (which record type holds the items, the
   line items and the totals), payment methods, approvals and dashboards. Name the community system you built on
-  (by its id) when you used one.
+  (by its id) in the brief when you used one; the plan, profile and message never show ids.
   Your message then tells the owner in one or two sentences what you're building for them. Never mention the brief,
   the designer, blueprints or other internal steps.
 - Keep the profile up to date every turn. Write like a helpful colleague: short, plain, no jargon, no field ids.

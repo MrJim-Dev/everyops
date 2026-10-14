@@ -11,8 +11,10 @@ import { Label } from "@/components/ui/label";
 import { useRecordActions } from "@/components/workspace/use-record-actions";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useReportView } from "@/lib/assistant/screen-store";
+import { useCurrentUser } from "@/lib/auth/client";
 import { getEntity, getField, recordsOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { CheckoutView as CheckoutConfig, DataRecord, Entity, Field } from "@/lib/blueprint/types";
+import { priceFieldOf, saleRecords, stockFieldOf } from "@/lib/engine/register";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SearchInput } from "./search-input";
@@ -21,9 +23,9 @@ import { ViewEmpty } from "./view-empty";
 const LOW_STOCK = 5;
 
 /**
- * Register conventions, resolved from the blueprint by field type: a product
- * has one money field (price), one number field (stock) and one select
- * (category). Lines link to a product and store qty and price.
+ * Register conventions, resolved from the blueprint by field type and name: a product has a price, maybe a
+ * stock count (none means it isn't tracked) and a category select. `saleRecords` fills the order and its
+ * lines, whatever the generated blueprint called their fields.
  */
 function resolve(entity: Entity, type: Field["type"], prefer?: string) {
   return (
@@ -35,17 +37,16 @@ function resolve(entity: Entity, type: Field["type"], prefer?: string) {
 export function CheckoutView({ view }: { view: CheckoutConfig }) {
   const { blueprint, records } = useWorkspace();
   const actions = useRecordActions();
+  const user = useCurrentUser();
   const product = getEntity(blueprint, view.productEntityId);
   const line = getEntity(blueprint, view.lineEntityId);
   const order = getEntity(blueprint, view.entityId);
-  const priceField = resolve(product, "money", "price");
-  const stockField = resolve(product, "number", "stock");
+  const priceField = priceFieldOf(product);
+  const stockField = stockFieldOf(product);
   const categoryField = resolve(product, "select", "category");
   const lineProduct = line.fields.find((f) => f.type === "relation" && f.relation?.entityId === product.id);
   const payment = getField(order, view.paymentFieldId);
-  const placedAt = resolve(order, "datetime");
   const orderStatus = order.fields.find((f) => f.type === "status");
-  const cashField = order.fields.find((f) => f.id === "cash_received");
 
   const [query, setQuery] = useState("");
   useReportView({ viewId: view.id, search: query.trim() || undefined });
@@ -65,7 +66,9 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
   );
   const byId = (id: string) => records.find((r) => r.id === id);
   const price = (p: DataRecord | undefined) => Number(p?.data[priceField?.id ?? ""] ?? 0);
-  const stock = (p: DataRecord | undefined) => Number(p?.data[stockField?.id ?? ""] ?? 0);
+  // Products without a stock count aren't tracked, so they never sell out.
+  const stock = (p: DataRecord | undefined) =>
+    stockField ? Number(p?.data[stockField.id] ?? 0) : Number.POSITIVE_INFINITY;
   const total = cart.reduce((sum, item) => sum + price(byId(item.productId)) * item.qty, 0);
   const cashValue = Number(cash) || 0;
   const isCash = method === "cash";
@@ -95,35 +98,42 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
     return `#${Math.max(1000, ...codes) + 1}`;
   };
 
-  const complete = (statusId: string | undefined) => {
+  const complete = (status: "completed" | "held") => {
     if (!lineProduct) return;
     const code = nextCode();
-    const result = actions.createWithLines(
-      order.id,
-      {
-        [order.primaryFieldId]: code,
-        ...(placedAt ? { [placedAt.id]: new Date().toISOString() } : {}),
-        [payment.id]: method,
-        ...(orderStatus && statusId ? { [orderStatus.id]: statusId } : {}),
-        ...(cashField && isCash && cashValue ? { [cashField.id]: cashValue } : {}),
-      },
-      line.id,
-      cart.map((item) => ({
-        [lineProduct.id]: item.productId,
-        qty: item.qty,
-        price: price(byId(item.productId)),
-      })),
-    );
+    const items = cart.flatMap((item) => {
+      const p = byId(item.productId);
+      return p ? [{ product: p, qty: item.qty }] : [];
+    });
+    const sale = saleRecords({
+      product,
+      order,
+      line,
+      paymentFieldId: payment.id,
+      items,
+      code,
+      method,
+      // A blank amount means the customer paid exactly.
+      cash: status === "held" || !isCash ? undefined : cash === "" ? total : cashValue,
+      status,
+      cashier: user?.name || user?.email,
+    });
+    const result = actions.createWithLines(order.id, sale.order, line.id, sale.lines);
     if (!result.ok) {
-      toast.error(result.errors[0]?.message ?? "The sale could not be saved");
+      const first = result.errors[0]?.message;
+      toast.error(first ?? "The sale could not be saved", {
+        description: first?.endsWith("is required")
+          ? "The Register doesn't ask for this field. Ask the assistant to give it a default or make it optional."
+          : undefined,
+      });
       return;
     }
     toast.success(
-      statusId === "held" ? `Order ${code} held` : `Sale ${code} completed · ${formatMoney(total)}`,
+      status === "held" ? `Order ${code} held` : `Sale ${code} completed · ${formatMoney(total)}`,
     );
     setCart([]);
     setCash("");
-    if (statusId !== "held") {
+    if (status !== "held") {
       setJustSold(code);
       setTimeout(() => setJustSold(null), 1400);
     }
@@ -171,6 +181,10 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
                     <span className="text-[12px] text-muted-foreground">Sold out</span>
                   ) : left <= LOW_STOCK ? (
                     <span className="text-[12px] text-warning">{left} left</span>
+                  ) : stockField ? (
+                    <span className="font-mono text-[12px] text-muted-foreground tabular">
+                      {left} in stock
+                    </span>
                   ) : null}
                   {inCart ? (
                     <span key={inCart} className="animate-pop font-mono text-[12px] text-primary tabular">
@@ -296,7 +310,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
               </div>
               <div className="flex h-9 flex-col justify-center text-right">
                 <span className="text-[11px] text-muted-foreground">
-                  {shortBy > 0 ? "Still due" : "Change due"}
+                  {shortBy > 0 ? "Still due" : cash === "" ? "Exact amount" : "Change due"}
                 </span>
                 <span
                   className={cn("font-mono text-[15px] font-medium tabular", shortBy > 0 && "text-warning")}
