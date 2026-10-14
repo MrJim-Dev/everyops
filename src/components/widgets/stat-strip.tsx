@@ -27,7 +27,7 @@ export function StatStrip({ widgets }: { widgets: Widget[] }) {
             <dd className="flex items-end justify-between gap-3">
               <span
                 className={cn(
-                  "font-mono text-[24px] font-medium tracking-tight tabular",
+                  "text-[24px] font-semibold tracking-[-0.02em] tabular-nums",
                   value < 0 && "text-destructive",
                 )}
               >
@@ -56,7 +56,7 @@ function Change({ change, against }: { change: number | null; against: string })
       ) : (
         <ArrowDownRightIcon aria-hidden="true" className="size-3.5 shrink-0 text-destructive" />
       )}
-      <span className={cn("font-mono tabular", !flat && (up ? "text-primary" : "text-destructive"))}>
+      <span className={cn("tabular-nums", !flat && (up ? "text-primary" : "text-destructive"))}>
         {flat ? "No change" : `${up ? "Up" : "Down"} ${pct}%`}
       </span>
       <span className="truncate">vs {against}</span>

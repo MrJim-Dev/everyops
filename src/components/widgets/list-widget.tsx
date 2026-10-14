@@ -60,7 +60,8 @@ export function ListWidget({ widget, viewHref }: { widget: Widget; viewHref?: st
                         : "hidden shrink-0 text-muted-foreground sm:inline"
                     }
                   >
-                    <FieldValue field={f} value={r.data[f.id]} />
+                    {/* Dashboard numbers read in the text face, like the stats above; tables keep the mono. */}
+                    <FieldValue field={f} value={r.data[f.id]} className="font-sans tabular-nums" />
                   </span>
                 ))}
               </button>

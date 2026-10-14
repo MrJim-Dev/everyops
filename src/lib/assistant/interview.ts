@@ -392,7 +392,7 @@ export function buildBookingWorkspace(answers: Answers, now: Date): WorkspaceDat
         },
         {
           id: "unpaid_list",
-          title: "Needs payment",
+          title: "Upcoming unpaid",
           entityId: "booking",
           type: "list",
           filter: "status == 'unpaid' && is_upcoming(slot)",

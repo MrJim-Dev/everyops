@@ -74,7 +74,7 @@ export function AgendaWidget({ widget, viewHref }: { widget: Widget; viewHref?: 
                         fresh[item.record.id] && "animate-flash",
                       )}
                     >
-                      <span className="font-mono text-[12.5px] tabular">
+                      <span className="text-[12.5px] tabular-nums">
                         {item.allDay ? "All day" : formatTime(item.start)}
                         {item.end && !item.allDay ? (
                           <span className="block text-[11px] text-muted-foreground">
