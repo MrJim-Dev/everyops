@@ -249,7 +249,7 @@ export const assistantAnswer = z.object({
   reply: z
     .string()
     .describe(
-      "What you say to the person. Plain text; short paragraphs or '- ' bullets; no headings or tables.",
+      "What you say to the person. Plain text; short paragraphs separated by a blank line, with '- ' bullets or '1. ' items each on their own line; no headings or tables.",
     ),
   suggestions: z.array(z.string()).describe("0 to 3 short follow-ups the person might send next"),
   sources: z
