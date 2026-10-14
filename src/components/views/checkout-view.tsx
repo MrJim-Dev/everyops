@@ -13,12 +13,13 @@ import { useRecordActions } from "@/components/workspace/use-record-actions";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useReportView } from "@/lib/assistant/screen-store";
 import { useCurrentUser } from "@/lib/auth/client";
-import { getEntity, getField, recordsOf, recordTitle } from "@/lib/blueprint/lookup";
+import { findEntity, getEntity, getField, recordsOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { CheckoutView as CheckoutConfig, DataRecord, Entity, Field } from "@/lib/blueprint/types";
 import {
   customerFieldOf,
   isCreditMethod,
   lowStockFieldOf,
+  paymentChoices,
   priceFieldOf,
   saleRecords,
   stockFieldOf,
@@ -62,7 +63,14 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
   useReportView({ viewId: view.id, search: query.trim() || undefined });
   const [category, setCategory] = useState("all");
   const [cart, setCart] = useState<{ productId: string; qty: number }[]>([]);
-  const [method, setMethod] = useState(payment.options?.[0]?.id ?? "cash");
+  const methods = paymentChoices(
+    payment,
+    records,
+    payment.relation ? findEntity(blueprint, payment.relation.entityId) : undefined,
+  );
+  const [picked, setMethod] = useState("");
+  // Linked payment methods load with the records, so fall back to the first one until the cashier picks.
+  const method = methods.some((m) => m.id === picked) ? picked : (methods[0]?.id ?? "");
   const [cash, setCash] = useState("");
   const orderRef = useRef<HTMLElement>(null);
   const [justSold, setJustSold] = useState<string | null>(null);
@@ -82,12 +90,12 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
     stockField ? Number(p?.data[stockField.id] ?? 0) : Number.POSITIVE_INFINITY;
   const total = cart.reduce((sum, item) => sum + price(byId(item.productId)) * item.qty, 0);
   const cashValue = Number(cash) || 0;
-  const isCash = method === "cash";
+  const methodLabel = methods.find((m) => m.id === method)?.label ?? "";
+  const isCash = method === "cash" || /\bcash\b/i.test(methodLabel);
   const shortBy = isCash && cash !== "" ? total - cashValue : 0;
-  const credit = isCreditMethod(payment, method);
+  const credit = isCreditMethod(`${method} ${methodLabel}`);
   const needsCustomer = credit && !!customerField && !customer;
   const lowAt = (p: DataRecord) => Number(p.data[lowStockField?.id ?? ""]) || LOW_STOCK;
-  const methodLabel = payment.options?.find((o) => o.id === method)?.label ?? "credit";
 
   const add = (productId: string) =>
     setCart((c) => {
@@ -302,7 +310,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
               variant="boxed"
               value={method}
               onValueChange={setMethod}
-              options={(payment.options ?? []).map((o) => ({ value: o.id, label: o.label }))}
+              options={methods.map((o) => ({ value: o.id, label: o.label }))}
             />
           </div>
           {customerField ? (
@@ -316,7 +324,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
                 field={customerField}
                 value={customer}
                 onChange={setCustomer}
-                invalid={needsCustomer}
+                invalid={needsCustomer && cart.length > 0}
               />
             </div>
           ) : null}

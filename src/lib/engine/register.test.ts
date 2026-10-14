@@ -3,7 +3,14 @@ import type { DataRecord, Entity } from "@/lib/blueprint/types";
 import { posSample } from "@/lib/catalog/canteen-pos";
 import { f } from "@/lib/catalog/define";
 import { createWithLines } from "./records";
-import { customerFieldOf, isCreditMethod, lowStockFieldOf, saleRecords, stockFieldOf } from "./register";
+import {
+  customerFieldOf,
+  isCreditMethod,
+  lowStockFieldOf,
+  paymentChoices,
+  saleRecords,
+  stockFieldOf,
+} from "./register";
 
 const NOW = new Date("2026-10-14T06:00:00Z");
 
@@ -124,9 +131,12 @@ describe("register sale", () => {
       fields: [...order.fields, f.relation("customer", "Customer", "customers")],
     };
     const payment = withCustomer.fields.find((x) => x.id === "payment_method");
-    expect(payment && isCreditMethod(payment, "utang")).toBe(true);
-    expect(payment && isCreditMethod(payment, "cash")).toBe(false);
+    expect(payment && isCreditMethod("utang Utang")).toBe(true);
+    expect(payment && isCreditMethod("cash Cash")).toBe(false);
     expect(customerFieldOf(withCustomer, "products")?.id).toBe("customer");
+    expect(
+      customerFieldOf({ ...order, fields: [f.relation("method", "Payment Method", "methods")] }, "products"),
+    ).toBeUndefined();
     const sale = saleRecords({
       product,
       order: withCustomer,
@@ -163,5 +173,33 @@ describe("register sale", () => {
     const result = createWithLines(ws, "order", sale.order, "order_line", sale.lines, NOW);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.record.data.change_due).toBe(100 - Number(result.record.data.total));
+  });
+
+  it("offers a linked list of payment methods, leaving out inactive ones", () => {
+    const methods: Entity = {
+      id: "methods",
+      name: "Payment Method",
+      pluralName: "Payment Methods",
+      primaryFieldId: "type",
+      fields: [f.text("type", "Type"), f.checkbox("active", "Active")],
+    };
+    const rec = (id: string, type: string, active: boolean) => ({
+      id,
+      entityId: "methods",
+      data: { type, active },
+      createdAt: "",
+      updatedAt: "",
+    });
+    const field = f.relation("payment_method", "Payment Method", "methods");
+    expect(
+      paymentChoices(
+        field,
+        [rec("m1", "Cash", true), rec("m2", "GCash", true), rec("m3", "Maya", false)],
+        methods,
+      ),
+    ).toEqual([
+      { id: "m1", label: "Cash" },
+      { id: "m2", label: "GCash" },
+    ]);
   });
 });

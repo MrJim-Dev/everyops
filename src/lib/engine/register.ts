@@ -64,13 +64,32 @@ export function customerFieldOf(order: Entity, productEntityId: string): Field |
   const links = order.fields.filter(
     (f) => f.type === "relation" && !computed(f) && f.relation?.entityId !== productEntityId,
   );
-  return links.find((f) => /customer|client|buyer|suki|member|patron/i.test(`${f.id} ${f.name}`)) ?? links[0];
+  // Only a link that names who bought: an order's other links (payment methods, tables) aren't customers.
+  return links.find((f) => /customer|client|buyer|suki|member|patron/i.test(`${f.id} ${f.name}`));
 }
 
-/** Credit sales (utang, charge to account) must say who owes the money. */
-export function isCreditMethod(payment: Field, methodId: string): boolean {
-  const option = payment.options?.find((o) => o.id === methodId);
-  return /utang|credit|charge|account|lista|on.?tab/i.test(`${methodId} ${option?.label ?? ""}`);
+/** Credit sales (utang, charge to account) must say who owes the money. Takes the method's id and label. */
+export function isCreditMethod(method: string): boolean {
+  return /utang|credit|charge|lista|on.?tab/i.test(method);
+}
+
+/**
+ * The ways to pay a sale: a select's options, or the records of a linked list (a "Payment Methods" table with
+ * GCash and Maya accounts), leaving out ones marked inactive.
+ */
+export function paymentChoices(
+  payment: Field,
+  records: DataRecord[],
+  methods: Entity | undefined,
+): { id: string; label: string }[] {
+  if (payment.type !== "relation" || !methods)
+    return (payment.options ?? []).map(({ id, label }) => ({ id, label }));
+  const active = methods.fields.find(
+    (f) => f.type === "checkbox" && /active|enabled|available/i.test(`${f.id} ${f.name}`),
+  );
+  return records
+    .filter((r) => r.entityId === methods.id && (!active || r.data[active.id] !== false))
+    .map((r) => ({ id: r.id, label: recordTitle(methods, r) }));
 }
 
 /** The option a completed (or held) sale gets in a generated status field. */
