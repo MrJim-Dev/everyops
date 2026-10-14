@@ -22,8 +22,10 @@ import { CATALOG } from "@/lib/catalog";
 import { samplesThisYear } from "@/lib/catalog/shift";
 import { computeAll } from "@/lib/engine/compute";
 import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
+import { impliedRules } from "@/lib/engine/implied-rules";
 import { isImagePath } from "@/lib/engine/records";
 import { repairRules } from "@/lib/engine/rule-repair";
+import { withCustomSite } from "@/lib/public/custom-site";
 import { MAX_HTML_BYTES } from "@/lib/public/html-page";
 import { copyFromBlocks, type SiteCopy, standardBlocks } from "@/lib/public/site-template";
 import { hhmm, todayKey } from "@/lib/time";
@@ -181,7 +183,8 @@ export function toRule(r: Design["rules"][number]): Rule {
           : {
               type: "adjust_number" as const,
               target: target(a.target),
-              fieldId: a.fieldId ?? "",
+              // Gemini sometimes names the field it changes in value ("value": "stock").
+              fieldId: a.fieldId ?? (a.value && /^[a-z_][a-z0-9_]*$/.test(a.value) ? a.value : ""),
               delta: a.delta ?? "0",
             },
     ),
@@ -433,6 +436,10 @@ export function tidy(bp: Blueprint): Blueprint {
     .filter((sys) => sys.viewIds.length + sys.widgetIds.length > 0);
   bp.rules = bp.rules.filter((r) => entityIds.has(r.trigger.entityId));
   bp.rules = repairRules(bp);
+  // Totals the design moves (stock received and sold, leave days, balances) stay in sync even when the designer
+  // didn't write the automation.
+  const empty = { ...bp, entities: [], rules: [] };
+  bp.rules.push(...impliedRules(empty, bp).map((x) => x.rule));
   // A dashboard of only numbers gets the charts and lists an owner looks at first.
   const board = dashboardSystem(bp);
   if (board) {
@@ -905,6 +912,8 @@ export async function designWorkspace(
       const dated = samplesThisYear(bp, toRecords(bp, filled, now), now);
       if (dated.fields) console.info(JSON.stringify({ event: "design_samples_moved", fields: dated.fields }));
       const records = computeAll(bp, dated.records, now);
+      // Businesses whose customers book on their own get a custom HTML website and a calendar that suits them.
+      withCustomSite(bp, records, name, now);
       return {
         ok: true,
         name,

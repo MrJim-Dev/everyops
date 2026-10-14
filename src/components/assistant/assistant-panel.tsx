@@ -1,6 +1,13 @@
 "use client";
 
-import { ChatsCircleIcon, ClockCounterClockwiseIcon, SparkleIcon, XIcon } from "@phosphor-icons/react";
+import {
+  ArrowsOutSimpleIcon,
+  ChatsCircleIcon,
+  ClockCounterClockwiseIcon,
+  SparkleIcon,
+  XIcon,
+} from "@phosphor-icons/react";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
@@ -26,14 +33,21 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
     },
   });
   const { ws, manager, editor } = chat;
+  const router = useRouter();
+  const pathname = usePathname();
+  /** The same conversation as a full page, with room to read plans; "Side panel" there comes back here. */
+  const expand = () => {
+    useAssistant.getState().setReturnTo(pathname);
+    router.push(`${ws.basePath}/ask`);
+  };
 
   return (
-    <section aria-label="Assistant" className={cn("flex min-h-0 flex-col bg-background", className)}>
+    <section aria-label="Ask EveryOps" className={cn("flex min-h-0 flex-col bg-background", className)}>
       <header className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <span className="mr-1 flex size-6 items-center justify-center rounded-md border">
           <LogoMark className="size-3" />
         </span>
-        <span className="flex-1 text-[13.5px] font-semibold">Assistant</span>
+        <span className="flex-1 text-[13.5px] font-semibold">Ask EveryOps</span>
         <Button
           size="icon-sm"
           variant={chat.showHistory ? "secondary" : "ghost"}
@@ -54,7 +68,19 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
         >
           <ChatsCircleIcon />
         </Button>
-        <Button size="icon-sm" variant="ghost" aria-label="Close assistant" onClick={onClose}>
+        {manager ? (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Open as a full page"
+            title="Open as a full page"
+            className="hidden md:inline-flex"
+            onClick={expand}
+          >
+            <ArrowsOutSimpleIcon />
+          </Button>
+        ) : null}
+        <Button size="icon-sm" variant="ghost" aria-label="Close Ask EveryOps" onClick={onClose}>
           <XIcon />
         </Button>
       </header>

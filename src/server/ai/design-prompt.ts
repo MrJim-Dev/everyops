@@ -493,10 +493,16 @@ export const PUBLIC_PAGES_GUIDE = `Public pages (customers use them without an a
   forms ask for the resource (court) and its time_range field; visitors pick a free slot, double bookings are
   refused. Bookings made publicly carry the guest's details as text fields on the booking (guest name, phone,
   email); a relation to people (players, clients) must not be required.
-- The website (a landing page) always uses EveryOps's standard layout: hero, highlights, what's offered, how it
-  works, payment methods, FAQs and contact, filled in from the data. When designing a workspace, don't add a
-  landing view: write the website's words in site, and EveryOps builds the page. Contact details come only from
-  the brief or files; never invent a phone number or address.
+- The website: a business whose customers book, order or sign up on their own gets a public form (the booking form)
+  and a website. At setup EveryOps builds that website as a custom HTML page, designed and filled in from the data
+  and the words in site (hero, highlights, what's offered, how it works, payment methods, FAQs and contact), with
+  buttons that open the booking form. When designing a workspace, don't add a landing or html view for it: write
+  the website's words in site, and EveryOps builds the page. A website added later with the assistant uses the
+  standard landing layout unless the person asks for HTML. Contact details come only from the brief or files;
+  never invent a phone number or address.
+- Booking forms can show their calendar three ways (the owner switches it on the form's page): a strip of days
+  with that day's times, one day as a grid of every court or room side by side, or a month calendar. Stays and
+  rentals of whole days always pick check-in and check-out on a month calendar.
 - A landing page is a landing view (entityId "") made of blocks, top to bottom: hero (heading, subheading,
   ctaLabel, ctaViewId = a public form), text (markdown: about, location, hours), records (live data from a record
   type: fieldIds with the title first, a filter, layout cards, list, table or faq), form (embeds a public form),
@@ -518,15 +524,24 @@ roster) may follow the brief: the brief decides what to build, and the files sup
 sample records (use every menu item or price they show, up to 40 records per record type).
 
 Formula language (formula.expr, freezeWhen, filters, rule conditions and values):
-- Field references by id on the same record (rate, qty); through a relation field: player.member, product.price.
-  One link only: product.price works, product.category.name and crew_member.position.daily_rate don't. When a
-  formula needs a value two links away, give the record its own link (or a formula field) one step away.
+- Field references by id on the same record (rate, qty); through relation fields, up to three links:
+  product.price, delivery.supplier.lead_days, crew_member.position.daily_rate. Every part before the last must be
+  a relation field.
 - Numbers, 'strings', true, false, null. Operators: + - * / % == != < <= > >= && || ! and cond ? a : b.
 - Functions: ${Object.keys(FUNCTIONS).join(", ")}. hour/weekday read Asia/Manila time (weekday 0 = Sunday);
   duration_hours(range) and days(range) measure time ranges; is_today, is_this_month, is_upcoming test dates.
 - Status and select values compare against option ids: status == 'done'.
 
 Rules for a valid blueprint:
+- Automations (rules) change other records when something happens. Totals records move (stock from deliveries,
+  sales and stock movements; balances; leave days) are also connected automatically when a record type links to
+  the record with the total and has a quantity or amount, so a missing one gets added. adjust_number adds a formula to a number
+  field: on the record itself (target self) or on a linked one (target relation with the link's fieldId). Always
+  set fieldId to the field it changes and delta to what it adds: receiving stock on a Stock Delivery with product
+  and quantity is trigger created on the delivery, target relation product, fieldId stock, delta quantity (or
+  quantity * product.pack_size); a sale line is delta -qty. Use trigger created for these: the app keeps them in
+  step when the record is edited or deleted, and a when condition (status == 'received') makes it count only
+  while true. Never adjust_number on updated (it would count again on every edit).
 - Every id referenced (fields, entities, views, widgets, options) must exist. Ids are snake_case.
 - Each record type has a primary field (a text field) and only the fields it needs.
 - select, multi_select and status fields need options. Use status for workflows (kanban boards, approvals).
@@ -599,3 +614,21 @@ Rules for a valid blueprint:
 ${PUBLIC_PAGES_GUIDE}
 
 The two examples below are valid blueprints from EveryOps's template library. Follow their conventions.`;
+
+/**
+ * How EveryOps writes custom HTML pages: Emil Kowalski's design engineering rules (purposeful, fast, interruptible
+ * motion and the small details people feel), short enough to sit in a prompt.
+ */
+export const HTML_DESIGN_GUIDE = `Design custom HTML pages the way Emil Kowalski would (simple, clean, polished):
+    - One clear headline, a short lead and one primary action ("Book a court") repeated at the top, after "How it
+      works" and in the footer; generous spacing, a readable measure (about 60 characters), 2 to 3 colors.
+    - Motion only where it explains or confirms: sections fade in with 8px of rise as they scroll into view, a short
+      30 to 80 ms stagger, and nothing waits for an animation. Never animate from scale(0); start at opacity 0 and
+      scale(0.95) or translateY(8px).
+    - Easing: a strong ease-out, cubic-bezier(0.23, 1, 0.32, 1), for entrances and presses; ease-in-out only for
+      things moving on screen; never ease-in. Durations: presses 100 to 160 ms, small popovers 150 to 200 ms, UI under
+      300 ms.
+    - Buttons and cards answer presses with transform: scale(0.97). Transition exact properties (transform,
+      opacity, background-color), never "all"; animate only transform and opacity.
+    - Hover effects only inside @media (hover: hover) and (pointer: fine). Respect prefers-reduced-motion: keep the
+      fades, drop the movement. Visible :focus-visible outlines, real buttons and links, alt text on pictures.`;

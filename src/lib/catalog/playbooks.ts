@@ -28,8 +28,27 @@ export type Playbook = {
 export const COMMON_NEEDS = `- Payment methods (GCash, Maya, bank transfer, cash): name, type, account name, account number, QR code picture,
   instructions, active. Active ones show on public forms so customers know where to pay; customers type their
   payment reference number, and a status (pending payment → paid/confirmed) lets staff verify before confirming.
-- A public page customers use without an account when they book, order or inquire themselves, plus FAQs if they ask
-  the same questions often. Public forms with more than 5 questions, or with add-ons, are forms in steps.
+- When customers book, order, sign up or inquire on their own (a booking system, a rental, an event, a class, a
+  shop taking orders): a public booking (or order) form AND a website. EveryOps builds the website as a custom HTML
+  page in its own polished design (Emil Kowalski's design rules: clear, fast, purposeful motion) from the words in
+  site and the data, with buttons that open the form; write strong site words (headline, intro, button, three
+  highlights, three steps). Add FAQs if customers ask the same questions often. Public forms with more than 5
+  questions, or with add-ons, are forms in steps.
+- A booking system with a public HTML website also gets a public HTML booking page: the page customers book on,
+  in the same design system as the website (same palette, type, nav and footer, linked from the website's buttons),
+  with the live booking form embedded in it so the calendar, add-ons and payment step still work. That public
+  booking form (public true) exists for the booking page to embed; customers reach it through the booking page,
+  never its bare link. Staff get their own private form (not public) inside the workspace to add walk-in, phone and
+  chat bookings.
+- Choose the booking calendar on purpose, from what is booked and how many of it there are:
+  - grid (resources side by side for one day): 2 to 8 things booked by the hour at the same place (courts, rooms,
+    bays, lanes, studios, tables).
+  - month (a month calendar, then that day's times): one thing to book (a single studio, venue, room or
+    photographer), or bookings made weeks ahead (events, packages, shoots).
+  - days (a strip of days with each day's times): appointments with a service or staff member, many resources, or
+    no resource to choose.
+  - Whole days (stays, rentals, equipment out for days): the booking's period is a date range, picked as check-in
+    and check-out on a month calendar; never an hourly grid.
 - An Overview dashboard: today's bookings or orders, revenue this week and month, unpaid or pending items, and a chart.
 - Anything sold or rented on top of the main service (rentals, extras, items for sale) is an add-on: a record type of
   items with a price, line items under the booking or order (item link, quantity, line total = price × quantity),
@@ -45,8 +64,8 @@ export const BUILD_PRINCIPLES = `- Lists the business will add to, rename or ret
   types, leave types, departments and positions, branches, suppliers, channels and sources. Give each a name (the
   primary field), an active checkbox (pickers and public forms show active == true), an order number when order
   matters, and the values it carries (price, rate, duration, budget, credits) so amounts read them through the link
-  (service.price) instead of being typed again. Formulas reach one link away (position.rate, never
-  position.department.name): when a record needs a value two links away, link it directly too.
+  (service.price) instead of being typed again. Formulas reach up to three links (position.rate,
+  position.department.name, delivery.supplier.lead_days).
 - Short fixed choices that only change with the design are select fields: payment type, priority, unit of measure,
   channel of a ticket, yes/no style choices.
 - Everything that moves through work has a status field with its whole lifecycle in order: the first option is
@@ -101,4 +120,27 @@ export function matchPlaybooks(text: string): Playbook[] {
     if (!p.unless?.some((id) => chosen.some((c) => c.id === id))) chosen.push(p);
   }
   return chosen;
+}
+
+/**
+ * What a request for a whole area usually involves ("add stock management" is items with stock, receiving, stock
+ * movements and the automations between them), from the same playbooks setup builds from, so an edit gets the same
+ * judgment as a new workspace instead of building only the words. Empty when nothing matches.
+ */
+export function requestGuide(request: string): string {
+  // Only requests for something new; renaming, moving or tweaking what exists needs no checklist.
+  const wantsNew =
+    /\b(add|create|set ?up|build|make|track|manage|need|want|start|include|enable|implement|introduce|integrate)\b/i.test(
+      request,
+    ) &&
+    !/^\s*(please\s+)?(rename|move|reorder|change|edit|update|fix|delete|remove|hide|show|sort|filter)\b/i.test(
+      request,
+    );
+  if (!wantsNew) return "";
+  const playbooks = matchPlaybooks(request).slice(0, 2);
+  if (!playbooks.length) return "";
+  return `
+
+What this request usually involves (build the parts this workspace needs, connected to what it already has):
+${playbooks.map((p) => `${p.name}:\n${p.needs}`).join("\n\n")}`;
 }

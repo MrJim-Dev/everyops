@@ -132,6 +132,16 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
   const applyChange = useWorkspaces((s) => s.applyChange);
   const undoChange = useWorkspaces((s) => s.undoChange);
   const history = useWorkspaces((s) => s.workspaces[ws.id]?.changes ?? NO_CHANGES);
+  /**
+   * What happened to a turn's plan, with History as the source of truth: a plan applied here and later undone (or
+   * redone) in History shows that, instead of what the conversation remembered.
+   */
+  const planStateOf = (t: AssistantTurn): AssistantTurn["planState"] => {
+    if (!t.changeId || (t.planState !== "applied" && t.planState !== "undone")) return t.planState;
+    const entry = history.find((c) => c.id === t.changeId);
+    if (!entry) return t.planState;
+    return entry.undoneAt ? "undone" : "applied";
+  };
   const [input, setInput] = useState("");
   const textarea = useRef<HTMLTextAreaElement>(null);
   const files = useAttachments();
@@ -188,7 +198,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
         text: [
           t.ref && `(About the ${t.ref} section I clicked)`,
           t.text,
-          t.plan && `(Plan "${t.plan.title}" — ${t.planState ?? "pending"})`,
+          t.plan && `(Plan "${t.plan.title}" — ${planStateOf(t) ?? "pending"})`,
           t.navigate && `(${t.navigate.open ? "Opened" : "Linked to"} ${t.navigate.label})`,
         ]
           .filter(Boolean)
@@ -317,7 +327,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
   /** The changes still in effect that this conversation applied from the message at `index` on. */
   const liveFrom = (index: number) => {
     const ids = new Set(
-      turns.slice(index).flatMap((t) => (t.planState === "applied" && t.changeId ? [t.changeId] : [])),
+      turns.slice(index).flatMap((t) => (planStateOf(t) === "applied" && t.changeId ? [t.changeId] : [])),
     );
     return ids.size ? history.filter((c) => ids.has(c.id) && !c.undoneAt) : NO_CHANGES;
   };
@@ -358,7 +368,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
     const undone = new Set(after.filter((c) => c.undoneAt).map((c) => c.id));
     const { patch } = useAssistant.getState();
     turns.forEach((t, i) => {
-      if (i >= index && t.planState === "applied" && t.changeId && undone.has(t.changeId))
+      if (i >= index && t.changeId && undone.has(t.changeId) && t.planState !== "undone")
         patch(ws.id, i, { planState: "undone" });
     });
     const count = result.undone.length;
@@ -426,6 +436,8 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
     retry,
     apply,
     undo,
+    /** A plan's state as History has it now (undone or redone there shows here too). */
+    planStateOf,
     /** Whether the message at an index has changes after it that can be reverted. */
     canRevertFrom: (index: number) => editor && liveFrom(index).length > 0,
     previewRevert,

@@ -1,8 +1,10 @@
 import { findEntity } from "@/lib/blueprint/lookup";
+import { walkPath } from "@/lib/blueprint/paths";
 import type {
   Block,
   BlockItem,
   Blueprint,
+  BookingLayout,
   DataRecord,
   Entity,
   Field,
@@ -19,6 +21,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { computeAll } from "./compute";
 import { recordContext } from "./context";
 import { parseExpr, run, truthy } from "./expr";
+import { completeRule } from "./rule-repair";
 
 /**
  * The only edits a change plan may make to the design. Every one is reversible: a change saves a whole new
@@ -39,6 +42,7 @@ export type ChangeOp =
   | { op: "rename_workspace"; name: string }
   | { op: "add_entity"; entity: Entity }
   | { op: "add_system"; system: System }
+  /** Adds an automation, or replaces the one with the same id (how an automation is fixed or changed). */
   | { op: "add_rule"; rule: Rule }
   /** Moves a view (tab) to another page. A page left with nothing on it is removed. */
   | { op: "move_view"; viewId: string; systemId: string }
@@ -60,6 +64,8 @@ export type ChangeOp =
         fieldIds?: string[];
         steps?: FormStep[];
         review?: boolean;
+        multipleSlots?: boolean;
+        bookingLayout?: BookingLayout;
       };
     }
   /** Adds a block (live data, text, a form) to a form or landing page, optionally before another block. */
@@ -71,6 +77,11 @@ export type ChangeOp =
   /** Removes a sidebar page with its tabs and cards. */
   | { op: "remove_system"; systemId: string }
   | { op: "remove_view"; viewId: string }
+  /**
+   * Swaps a tab for a new one in the same place on its page, e.g. a table turned into a board. Links to the old
+   * tab ("View all" on cards) point at the new one.
+   */
+  | { op: "replace_view"; viewId: string; view: View }
   | { op: "remove_widget"; widgetId: string }
   | { op: "remove_rule"; ruleId: string }
   | { op: "remove_block"; viewId: string; blockId: string }
@@ -227,12 +238,10 @@ function freezeDependents(bp: Blueprint, entityId: string, fieldId: string) {
       if (!f.formula) continue;
       const parsed = parseExpr(f.formula.expr);
       if (!parsed.ok) continue;
-      const reads = parsed.refs.some((ref) => {
-        const [head, tail] = ref.split(".");
-        if (e.id === entityId && head === fieldId) return true;
-        const link = e.fields.find((x) => x.id === head);
-        return !!tail && tail === fieldId && link?.relation?.entityId === entityId;
-      });
+      // Directly, or anywhere along a path of links ("delivery.supplier.lead_days").
+      const reads = parsed.refs.some((ref) =>
+        walkPath(bp, e, ref.split(".")).steps.some((s) => s.entity.id === entityId && s.field.id === fieldId),
+      );
       if (!reads) continue;
       f.type = f.formula.resultType;
       delete f.formula;
@@ -271,6 +280,13 @@ function removeField(bp: Blueprint, entityId: string, fieldId: string) {
     if (v.type === "notes" && v.metaFieldIds) v.metaFieldIds = keep(v.metaFieldIds);
   }
   for (const w of bp.widgets) if (w.entityId === entityId && w.list) w.list.fieldIds = keep(w.list.fieldIds);
+  // A duplicate removed beside its original (payment_method_select next to payment_method, a merge): a chart grouped
+  // by the duplicate groups by the original instead of breaking.
+  const original = entity.fields.find((f) => fieldId.startsWith(`${f.id}_`));
+  if (original)
+    for (const w of bp.widgets)
+      if (w.entityId === entityId && w.chart?.groupByFieldId === fieldId)
+        w.chart.groupByFieldId = original.id;
   for (const v of bp.views)
     if ((v.type === "form" || v.type === "landing") && v.blocks)
       for (const b of v.blocks)
@@ -319,7 +335,12 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
     switch (op.op) {
       case "add_field": {
         const entity = next.entities.find((e) => e.id === op.entityId);
-        if (entity && !entity.fields.some((f) => f.id === op.field.id)) entity.fields.push(op.field);
+        if (!entity) break;
+        // An existing id is redefined in place ("make Rider a choice of Jun or Manuel"): the id stays, so views,
+        // filters and record values keep pointing at it. Undo restores the previous blueprint.
+        const at = entity.fields.findIndex((f) => f.id === op.field.id);
+        if (at >= 0) entity.fields[at] = op.field;
+        else entity.fields.push(op.field);
         break;
       }
       case "update_field": {
@@ -369,9 +390,15 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "add_system":
         if (!next.systems.some((s) => s.id === op.system.id)) next.systems.push(op.system);
         break;
-      case "add_rule":
-        if (!next.rules.some((r) => r.id === op.rule.id)) next.rules.push(op.rule);
+      case "add_rule": {
+        // Blanks with one sensible answer (which stock field, which quantity) are filled in; anything else that
+        // can't run is reported by validation, so the plan is corrected before anyone sees it.
+        const rule = completeRule(next, structuredClone(op.rule));
+        const at = next.rules.findIndex((r) => r.id === rule.id);
+        if (at >= 0) next.rules[at] = rule;
+        else next.rules.push(rule);
         break;
+      }
       case "move_view": {
         const target = next.systems.find((s) => s.id === op.systemId);
         if (!target || !next.views.some((v) => v.id === op.viewId)) break;
@@ -396,6 +423,25 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "remove_view":
         removeView(next, op.viewId);
         break;
+      case "replace_view": {
+        const at = next.views.findIndex((v) => v.id === op.viewId);
+        if (at < 0) break;
+        if (op.view.id === op.viewId) {
+          next.views[at] = op.view;
+          break;
+        }
+        if (next.views.some((v) => v.id === op.view.id)) break;
+        const places = next.systems.flatMap((s) => {
+          const i = s.viewIds.indexOf(op.viewId);
+          return i < 0 ? [] : [{ s, i }];
+        });
+        const cards = next.widgets.filter((w) => w.list?.viewId === op.viewId);
+        removeView(next, op.viewId);
+        next.views.splice(at, 0, op.view);
+        for (const { s, i } of places) s.viewIds.splice(i, 0, op.view.id);
+        for (const w of cards) if (w.list) w.list.viewId = op.view.id;
+        break;
+      }
       case "remove_widget":
         removeWidget(next, op.widgetId);
         break;

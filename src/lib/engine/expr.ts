@@ -83,7 +83,8 @@ function tokenize(src: string): Token[] {
       continue;
     }
     if (/[A-Za-z_]/.test(ch)) {
-      const m = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?/.exec(src.slice(i));
+      // A name, or a path through links: product.price, delivery.supplier.lead_days.
+      const m = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*/.exec(src.slice(i));
       if (!m) throw new Error(`Bad name at ${i}`);
       tokens.push({ t: "id", v: m[0] });
       i += m[0].length;

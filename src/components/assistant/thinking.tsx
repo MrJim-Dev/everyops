@@ -41,14 +41,14 @@ export function Thinking({
       {avatar ? (
         <span
           className={cn(
-            "flex size-7 shrink-0 items-center justify-center border bg-card text-primary",
+            "flex size-7 shrink-0 items-center justify-center border bg-card",
             avatar === "square" ? "rounded-lg" : "rounded-full",
           )}
         >
           <LogoMarkThinking className="size-3.5" />
         </span>
       ) : (
-        <LogoMarkThinking className="size-3.5 text-primary" />
+        <LogoMarkThinking className="size-3.5" />
       )}
       <output aria-live="polite" className="flex flex-wrap items-baseline gap-x-2">
         <span

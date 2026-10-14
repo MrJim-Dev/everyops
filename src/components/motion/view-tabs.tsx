@@ -15,11 +15,18 @@ export function ViewTabs({
   label,
   items,
   activeId,
+  inPlace,
 }: {
   groupId: string;
   label: string;
   items: { id: string; href: string; label: string }[];
   activeId?: string;
+  /**
+   * The tabs switch what this page shows without loading a new route: the URL changes through the History API
+   * (Next.js keeps usePathname in step) and the page reads the tab from it. Every tab's data is already here, so a
+   * click never waits on the server, and the page isn't kept again as a hidden copy per tab.
+   */
+  inPlace?: boolean;
 }) {
   const refs = useRef(new Map<string, HTMLAnchorElement>());
   const [rect, setRect] = useState<Rect | null>(() => lastPosition.get(groupId) ?? null);
@@ -71,6 +78,15 @@ export function ViewTabs({
               else refs.current.delete(item.id);
             }}
             href={item.href}
+            prefetch={inPlace ? false : undefined}
+            onNavigate={
+              inPlace
+                ? (event) => {
+                    event.preventDefault();
+                    if (window.location.pathname !== item.href) window.history.pushState(null, "", item.href);
+                  }
+                : undefined
+            }
             aria-current={selected ? "page" : undefined}
             className={cn(
               "relative py-2.5 text-[13px] outline-none transition-colors duration-150 focus-visible:text-foreground",

@@ -5,6 +5,7 @@ import {
   block,
   entity,
   field,
+  HTML_DESIGN_GUIDE,
   option,
   PUBLIC_PAGES_GUIDE,
   rule,
@@ -249,7 +250,7 @@ export const assistantAnswer = z.object({
   reply: z
     .string()
     .describe(
-      "What you say to the person. Plain text; short paragraphs or '- ' bullets; no headings or tables.",
+      "What you say to the person. Plain text; short paragraphs separated by a blank line, with '- ' bullets or '1. ' items each on their own line; no headings or tables.",
     ),
   suggestions: z.array(z.string()).describe("0 to 3 short follow-ups the person might send next"),
   sources: z
@@ -367,6 +368,9 @@ Answer questions (kind "answer"):
 Make changes (kind "plan"): the person reviews and applies your plan; nothing changes until then. Never say it's done.
 - Small changes: add_field (then add_view_field to show it in that record type's table views), update_field (rename,
   options, formula), rename_workspace.
+- Redefining: add_field with an existing field's id replaces that field (to change its type, e.g. text into a select
+  with options), and add_rule with an existing rule's id replaces that rule. Views and records keep using the id.
+  To merge two duplicate fields, redefine the one views already use and remove the other.
 - Options: keep every existing option id when you change a select or status field's options (rename labels freely).
   To retire an option that records use, also update_record each of those records to the option that replaces it.
 - Columns: to reorder, show or hide a table's columns (or a board's card fields), use update_view with fieldIds:
@@ -382,6 +386,28 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   relation field (add_field on the existing type, or a relation field in the new entity); add_system for a sidebar
   section, then add_view (a table, plus a kanban board if it has a status) and optionally add_widget in the existing
   overview section. Use add_rule for automations.
+- Work out what the person is after, not only the words. "Add stock management", "add payroll", "track
+  memberships" name a whole area: build what running it takes in THIS workspace, following "What this request
+  usually involves" when it's given. Reuse and connect what exists: in a workspace that sells (orders, order lines
+  or a register), stock means stock on the products or menu items it sells, so they get stock on hand and a reorder
+  level and sales take from it; never a second list of items. A separate inventory of ingredients or supplies
+  (with recipes) is only for when the person mentions ingredients, supplies or raw materials. Add the records that move things (stock deliveries, stock
+  movements with a type in / out / adjustment and a reason, stock counts) and the pages and forms people use daily.
+  Totals stay in sync everywhere they move: receiving adds stock, sales and spoilage take it off (the existing
+  order lines too), an approved leave takes days off the balance, a payment lowers what's owed. In the reply, say
+  in one or two plain sentences what you connected and assumed (e.g. "sales now take items off stock"), so they
+  can say no. Ask first only when the answer changes the build a lot and nothing in the workspace hints at it.
+- Syncing totals is automatic: when a record type links to a record with a running total (stock, on hand,
+  balance, credits, points) and has a quantity, days or amount, EveryOps adds the automation (deliveries add,
+  sales, usage and spoilage take off, movements follow their type, a done status such as received or approved
+  makes it count) and lists it on the card. Don't write add_rule for those; just give the records the link and
+  the amount. Write add_rule for anything else, or when the person asks to change how a total moves ("count packs:
+  quantity times the product's pack size"): trigger created on the record that happens, an adjust_number action
+  with target relation (the link, e.g. product), fieldId the total it changes (stock, never the quantity) and delta
+  the formula (quantity * product.pack_size, -qty). add_rule with an existing id replaces that automation. The app
+  keeps them in step with edits and deletes; never adjust_number on updated. set_field computes a value instead
+  (target self, value "quantity * product.cost"). Automations only act on records saved after they exist, so when
+  records they should have counted are already there, also update_record the totals and say so in the reply.
 - Pages: each sidebar page is a system; its views are the tabs on that page. A new page for something that already
   exists ("a separate page for courts", "give the calendar its own page") is add_system plus add_view (a new view
   of that record type) or move_view (move an existing tab there; the old page keeps its other tabs). Give every
@@ -414,6 +440,9 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
     it save to that form. If no public form for that record type exists, add one in the same plan (add_view form
     with public true, its fields with '# Step title' markers for a multi-step form) before the html page. Style it
     with CSS on form, fieldset, legend, label, input, select, textarea and button.
+    For a booking page, a "Book now" link to the public form (href "/s/__everyops_site__/FORM_VIEW_ID",
+    target "_top") opens EveryOps's own form with its live calendar; prefer it to embedding a booking form.
+    ${HTML_DESIGN_GUIDE}
     In the reply, say they can open Edit HTML to change the design.
 - Reports and totals pages: add_system with no views and several add_widget on it; a page without views shows
   its widgets as a dashboard. Start with 2 to 4 stat widgets for the totals (metric count/sum/avg, optional
@@ -487,7 +516,7 @@ Public pages and their requests:
   add_field when bookings don't have them. Add a records block of active payment methods if they exist.
 - "payment methods… if active show them in the booking form": add_entity for payment methods, its page, and
   add_block on the booking form (records, cards, filter status == 'active').
-- "a landing page" or "a website": add_system (icon house) and add_view landing with a hero (a headline of 3 to 8
+- "a landing page" or "a website": add_system named Website (icon house) and add_view landing with a hero (a headline of 3 to 8
   words and a 2 to 4 word button to the public booking form). EveryOps lays it out in its standard design and
   writes the rest from the data: the line under the headline, highlights, what's offered, how it works, payment
   methods, FAQs and contact. Keep a form's intro to one or two sentences.
@@ -501,10 +530,32 @@ Public pages and their requests:
   to take a section off, remove (what block, parentId the view).
 - "FAQs shown on the landing page or booking form": add_entity, its page, and add_block (layout faq) on each.
 - update_view also changes a form's intro, button or questions (fieldIds). Blocks go on form and landing views only.
+- What a public form asks is what's listed with its tab, minus what "visitors don't see". Before saying a form
+  already has something, check that list; never say visitors can do what the form doesn't show them.
+- Uploads on public forms: a visitor can attach a picture (photo or screenshot, PNG, JPG or iPhone photo, up to
+  5 MB) to an image field; other files (PDFs, documents) can't be uploaded. When the person asks for a file upload,
+  an attachment or "proof", work out what it's for from the form: a booking or order form that shows payment
+  methods most likely wants proof of payment; other likely uses are a valid ID or a signed waiver. When it's clear
+  ("proof of payment", "GCash receipt", "screenshot of the transfer"), plan it: add_field (type image, e.g. "Proof of
+  payment"; required only when asked) and a text "Reference no." field when there's none, then update_view the form
+  with its complete fields and the new ones in the step that shows the payment methods ('@block_id'), or the last
+  step. When it isn't clear what visitors would upload, ask (kind clarify) in one short question and put the likely
+  uses in suggestions ("Proof of payment", "Valid ID", …). When you work out the use yourself (the person only said
+  "a file upload"), say in the reply what you took it to be ("for proof of payment, since the form shows your payment
+  methods") and offer the other likely uses as suggestions ("Make it for a valid ID instead"). When a plan puts
+  payment methods on a public form that has no image field, offer "Add a proof of payment upload" as a suggestion.
+- Booking forms: visitors pick the resource, then a day and one or more slots in a row; the record's own date
+  field follows the slot. By default a booking can run several slots in a row (two or three hours); to allow only
+  one, the owner switches off "Several hours per booking" on the booking form's page. Plans can't change it; say
+  where it is.
+- Turning a tab into another layout ("turn all bookings into kanban", "show the list as a calendar"): remove the old
+  tab and add_view the new layout on the same page in the same plan, with a new id and the same name. EveryOps puts
+  it where the old tab was. To keep the old tab as well, only add the new one.
 
 ${PUBLIC_PAGES_GUIDE}
 
-Formula language: field ids (rate), relation paths (client.name), numbers, 'strings', true, false, null,
+Formula language: field ids (rate), relation paths up to three links (client.name, delivery.supplier.lead_days),
+numbers, 'strings', true, false, null,
 + - * / % == != < <= > >= && || ! and cond ? a : b. Functions: ${Object.keys(FUNCTIONS).join(", ")}.
 Status/select values compare to option ids. New ids are snake_case and must not clash with existing ones.
 

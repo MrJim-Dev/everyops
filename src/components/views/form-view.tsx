@@ -14,12 +14,18 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { statusField } from "@/lib/blueprint/field-kind";
 import { formSteps, missingInStep, placeExtras, stepOfField } from "@/lib/blueprint/form-steps";
 import { findRecord, getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
-import type { FormView as FormViewConfig, RecordData } from "@/lib/blueprint/types";
+import {
+  BOOKING_LAYOUTS,
+  type BookingLayout,
+  type FormView as FormViewConfig,
+  type RecordData,
+} from "@/lib/blueprint/types";
 import type { FieldError } from "@/lib/engine/records";
 import { publicExtras, publicFieldsOf, resolveBlocks, submitButton } from "@/lib/public/resolve";
-import { canEdit } from "@/lib/store/workspaces";
+import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 import { PublicBar } from "./public-bar";
+import { ToolbarSwitch } from "./view-pref-toggle";
 
 /**
  * A page that is one form, e.g. the front desk's booking form. With steps it asks a few fields at a time and can end
@@ -74,6 +80,39 @@ export function FormView({ view }: { view: FormViewConfig }) {
   const inSteps = new Set(wizard ? steps.flatMap((s) => s.blockIds ?? []) : []);
   const stepBlocks = wizard && !reviewing ? blocks.filter((b) => steps[step]?.blockIds?.includes(b.id)) : [];
   const below = blocks.filter((b) => !inSteps.has(b.id));
+  // Booking forms: whether a visitor can book several slots in a row (on unless switched off).
+  const applyChange = useWorkspaces((s) => s.applyChange);
+  const multiple = view.multipleSlots !== false;
+  const setMultiple = (next: boolean) =>
+    applyChange(ws.id, {
+      request: next ? `Let ${view.name} book several hours` : `Limit ${view.name} to one time slot`,
+      title: next ? "Allow booking several hours in a row" : "Allow one time slot per booking",
+      facts: [],
+      steps: [
+        {
+          kind: "change",
+          label: view.name,
+          detail: next ? "One time slot → Several in a row" : "Several in a row → One time slot",
+        },
+      ],
+      ops: [{ op: "update_view", viewId: view.id, patch: { multipleSlots: next } }],
+    });
+  // Booking forms: how visitors pick when. Whole-day bookings always use the month calendar.
+  const timeField = entity.booking
+    ? entity.fields.find((f) => f.id === entity.booking?.timeFieldId)
+    : undefined;
+  const layout = view.bookingLayout ?? "days";
+  const setLayout = (next: BookingLayout) =>
+    next !== layout &&
+    applyChange(ws.id, {
+      request: `Show ${view.name} with the ${LAYOUT_NAMES[next].toLowerCase()} calendar`,
+      title: `Booking calendar: ${LAYOUT_NAMES[next]}`,
+      facts: [],
+      steps: [
+        { kind: "change", label: view.name, detail: `${LAYOUT_NAMES[layout]} → ${LAYOUT_NAMES[next]}` },
+      ],
+      ops: [{ op: "update_view", viewId: view.id, patch: { bookingLayout: next } }],
+    });
 
   const reset = () => {
     setCreatedId(null);
@@ -127,7 +166,33 @@ export function FormView({ view }: { view: FormViewConfig }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PublicBar view={view} />
+      <PublicBar view={view}>
+        {entity.booking && timeField?.range !== "dates" && ws.mode === "live" && canManage(ws.role) ? (
+          <>
+            <fieldset className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+              <legend className="sr-only">Booking calendar</legend>
+              <span aria-hidden="true">Calendar</span>
+              <span className="inline-flex rounded-md border p-0.5">
+                {BOOKING_LAYOUTS.map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    aria-pressed={layout === l}
+                    onClick={() => setLayout(l)}
+                    className={cn(
+                      "rounded-[5px] px-2 py-0.5 outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/50",
+                      layout === l ? "bg-muted text-foreground" : "hover:text-foreground",
+                    )}
+                  >
+                    {LAYOUT_NAMES[l]}
+                  </button>
+                ))}
+              </span>
+            </fieldset>
+            <ToolbarSwitch checked={multiple} onChange={setMultiple} label="Several hours per booking" />
+          </>
+        ) : null}
+      </PublicBar>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[560px] px-5 py-8">
           {created ? (
@@ -283,3 +348,5 @@ export function FormView({ view }: { view: FormViewConfig }) {
     </div>
   );
 }
+
+const LAYOUT_NAMES: Record<BookingLayout, string> = { days: "Days", grid: "Court grid", month: "Month" };

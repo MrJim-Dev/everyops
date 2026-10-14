@@ -20,7 +20,7 @@ export function ProgressWidget({ widget }: { widget: Widget }) {
     <WidgetFrame title={widget.title}>
       <div className="flex flex-col gap-3 px-5 pb-5">
         <div className="flex items-baseline justify-between gap-3">
-          <span className="font-mono text-[15px] tabular">
+          <span className="text-[15px] tabular-nums">
             <AnimatedValue value={format(value)} />{" "}
             <span className="text-muted-foreground">of {format(target)}</span>
           </span>

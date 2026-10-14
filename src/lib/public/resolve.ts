@@ -11,6 +11,7 @@ import type {
   Block,
   BlockItem,
   Blueprint,
+  BookingLayout,
   DataRecord,
   Entity,
   Field,
@@ -33,15 +34,24 @@ import {
   formatRange,
   isTimeRange,
 } from "@/lib/format";
+import { type HeroFact, heroFacts } from "./hero-facts";
 import { pageHtml } from "./html-page";
-import { standardBlocks } from "./site-template";
+import { bookLabel, cleanIntro, defaultCopy, mainForm, offeringOf, standardBlocks } from "./site-template";
 
 export type PageDocs = Record<string, { body: string } | undefined>;
+
+/**
+ * The standard site's first default lines, saved into pages made before Oct 14. They're replaced by today's default
+ * when a page is shown; words a person or the AI wrote are never touched.
+ */
+const OLD_DEFAULT_INTRO =
+  /^(Send your request online and .+ will get back to you\.|Book .+ in a few taps and get a confirmation from .+\.)$/;
 
 export type Cell = {
   fieldId: string;
   name: string;
-  kind: "text" | "markdown" | "image" | "status" | "number";
+  /** tag: a choice (a court's surface, an item's category), shown as a small label. */
+  kind: "text" | "markdown" | "image" | "status" | "number" | "tag";
   text: string;
   tone?: Tone;
 };
@@ -75,8 +85,24 @@ export type PublicForm = {
   fields: PublicField[];
   /** For relation fields: the records a visitor may choose from. */
   choices: Record<string, { id: string; title: string }[]>;
-  /** Booking forms pick a resource, a day and a free slot instead of typing times. */
-  booking?: { resourceFieldId: string; timeFieldId: string; resources: PublicResource[] };
+  /**
+   * Booking forms pick a resource, a day and free slots instead of typing times. With multiple, a visitor can pick
+   * several slots in a row as one booking. dayFieldIds are the record's own date fields for the booking day: they
+   * aren't asked, they're filled in from the picked slot (here and on the server).
+   */
+  booking?: {
+    resourceFieldId: string;
+    timeFieldId: string;
+    resources: PublicResource[];
+    multiple: boolean;
+    dayFieldIds: string[];
+    /** Date fields for the booking's last day (Check-out, Departure): filled from the picked range's end. */
+    endDayFieldIds: string[];
+    /** How the picker looks (see FormView.bookingLayout). */
+    layout: BookingLayout;
+    /** Whole days (a stay from check-in to check-out) instead of times. */
+    dates: boolean;
+  };
   /** Multi-step forms: the fields of each step, in order, and the form's blocks shown in that step. */
   steps?: {
     title: string;
@@ -95,7 +121,19 @@ export type PublicForm = {
 export type PublicExtraItem = { id: string; title: string; price?: number; priceText?: string };
 
 export type ResolvedBlock =
-  | { id: string; type: "hero"; heading: string; subheading?: string; ctaLabel?: string; ctaHref?: string }
+  | {
+      id: string;
+      type: "hero";
+      heading: string;
+      subheading?: string;
+      ctaLabel?: string;
+      ctaHref?: string;
+      /** A quieter second button down to what's offered on the same page, e.g. See our courts. */
+      secondaryLabel?: string;
+      secondaryHref?: string;
+      /** What a visitor wants to know before booking, from the data: how many, hours, price, how to pay. */
+      facts?: HeroFact[];
+    }
   | { id: string; type: "text"; markdown: string }
   | { id: string; type: "html"; html: string }
   | {
@@ -134,6 +172,8 @@ export type PublicSite = {
   slug: string;
   name: string;
   pages: { id: string; name: string; type: "landing" | "form" | "html" }[];
+  /** The header's button: the main public form, named for what it does ("Book a court"). */
+  book?: { id: string; label: string };
 };
 
 export const sitePath = (slug: string, viewId?: string) => (viewId ? `/s/${slug}/${viewId}` : `/s/${slug}`);
@@ -162,7 +202,9 @@ export function siteOf(slug: string, name: string, bp: Blueprint): PublicSite | 
   // A site with only forms still gets a home page: the standard one, built from its data.
   if (views.every((v) => v.type === "form"))
     pages.unshift({ id: autoHomeId(bp), name: "Home", type: "landing" });
-  return { slug, name, pages };
+  const main = mainForm(bp);
+  const book = main ?? views.find((v): v is FormView => v.type === "form");
+  return { slug, name, pages, ...(book ? { book: { id: book.id, label: bookLabel(bp, book.id) } } : {}) };
 }
 
 /** The id of the standard home page a site gets when it has no landing page of its own. */
@@ -210,11 +252,11 @@ export function formatCell(
       return { ...base, kind: "status", text: option?.label ?? "", tone: option?.tone };
     }
     case "choice":
-      return { ...base, kind: "text", text: optionOf(field, value)?.label ?? String(value) };
+      return { ...base, kind: "tag", text: optionOf(field, value)?.label ?? String(value) };
     case "multi":
       return {
         ...base,
-        kind: "text",
+        kind: "tag",
         text: (Array.isArray(value) ? value : []).map((v) => optionOf(field, v)?.label ?? v).join(", "),
       };
     case "checkbox":
@@ -341,7 +383,6 @@ export function publicFieldsOf(bp: Blueprint, view: FormView): Field[] {
       !issued.has(f.id) &&
       f.type !== "status" &&
       f.type !== "money" &&
-      f.type !== "image" &&
       f.type !== "person" &&
       (f.type !== "relation" || published.has(f.relation?.entityId ?? "")),
   );
@@ -352,6 +393,30 @@ export function publicFieldsOf(bp: Blueprint, view: FormView): Field[] {
       ]
     : editable;
   return chosen;
+}
+
+/** A plain date field that only repeats the booking's day ("Date", "Booking date", "Play day"), not a birthday. */
+const DAY_FIELD =
+  /^((booking|reservation|reserved|play|game|session|visit|event|start|arrival)?[\s_-]*(date|day)|check[\s_-]?in([\s_-]*(date|day))?|arrival)$/i;
+/** A date field for the booking's last day: Check-out, Departure, End date. */
+const END_DAY_FIELD =
+  /^(check[\s_-]?out([\s_-]*(date|day))?|departure([\s_-]*(date|day))?|end[\s_-]*(date|day))$/i;
+
+const dateFieldsMatching = (entity: Entity, pattern: RegExp) =>
+  entity.booking
+    ? entity.fields
+        .filter((f) => f.type === "date" && (pattern.test(f.name.trim()) || pattern.test(f.id)))
+        .map((f) => f.id)
+    : [];
+
+/** The record's date fields that are the booking's (first) day, so they follow the picked slot or stay. */
+export function bookingDayFieldIds(entity: Entity): string[] {
+  return dateFieldsMatching(entity, DAY_FIELD);
+}
+
+/** The record's date fields for the last day of a booking (a stay's check-out), filled from the picked range's end. */
+export function bookingEndDayFieldIds(entity: Entity): string[] {
+  return dateFieldsMatching(entity, END_DAY_FIELD);
 }
 
 export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView): PublicForm | null {
@@ -378,12 +443,18 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
     : undefined;
   if (b && resourceEntity && fields.some((f) => f.id === b.timeFieldId)) {
     const hours = resourceEntity.resource ?? { opensAt: "08:00", closesAt: "20:00", slotMinutes: 60 };
+    const dates = entity.fields.find((f) => f.id === b.timeFieldId)?.range === "dates";
     booking = {
       resourceFieldId: b.resourceFieldId,
       timeFieldId: b.timeFieldId,
       resources: records
         .filter((r) => r.entityId === resourceEntity.id)
         .map((r) => ({ id: r.id, title: recordTitle(resourceEntity, r), ...hours })),
+      multiple: view.multipleSlots !== false,
+      dayFieldIds: bookingDayFieldIds(entity).filter((id) => fields.some((f) => f.id === id)),
+      endDayFieldIds: bookingEndDayFieldIds(entity).filter((id) => fields.some((f) => f.id === id)),
+      layout: dates ? "month" : (view.bookingLayout ?? "days"),
+      dates,
     };
     choices[b.resourceFieldId] ??= booking.resources.map((r) => ({ id: r.id, title: r.title }));
   }
@@ -404,10 +475,16 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
       ...(picker ? { extras: true } : {}),
       ...(blockIds?.length ? { blockIds } : {}),
     }));
-    // The slot is picked under the resource, so it always belongs to the resource's step.
+    // The slot is picked under the resource, so it always belongs to the resource's step. The booking's own date
+    // field follows the slot, so no step asks it.
     if (booking) {
-      const { resourceFieldId, timeFieldId } = booking;
-      steps = steps.map((s) => ({ ...s, fieldIds: s.fieldIds.filter((id) => id !== timeFieldId) }));
+      const { resourceFieldId, timeFieldId, dayFieldIds, endDayFieldIds } = booking;
+      steps = steps.map((s) => ({
+        ...s,
+        fieldIds: s.fieldIds.filter(
+          (id) => id !== timeFieldId && !dayFieldIds.includes(id) && !endDayFieldIds.includes(id),
+        ),
+      }));
       const home = steps.find((s) => s.fieldIds.includes(resourceFieldId)) ?? steps[0];
       home.fieldIds.push(timeFieldId);
       steps = steps.filter((s) => s.fieldIds.length || s.extras || s.blockIds?.length);
@@ -487,14 +564,50 @@ export function resolveBlocks(
         try {
           edited = JSON.parse(textOf(docs, view.id, block) ?? "{}");
         } catch {}
-        const target = block.ctaViewId && publicIds.has(block.ctaViewId) ? block.ctaViewId : undefined;
+        // A hero without a working button still leads to the site's main form (older pages often had none).
+        const main = mainForm(bp);
+        const target =
+          block.ctaViewId && publicIds.has(block.ctaViewId)
+            ? block.ctaViewId
+            : main && publicIds.has(main.id)
+              ? main.id
+              : undefined;
+        const offer = offeringOf(bp);
+        const fallbackLabel = target ? bookLabel(bp, target) : "Book now";
+        // On a landing page: a second button down to its cards of what's offered, and the facts row.
+        const offerBlock =
+          view.type === "landing"
+            ? view.blocks?.find(
+                (b) => b.type === "records" && b.layout === "cards" && b.entityId === offer?.id,
+              )
+            : undefined;
+        const offerTitle = offerBlock?.type === "records" ? offerBlock.title : undefined;
+        const facts = view.type === "landing" ? heroFacts(bp, records, now) : [];
         out.push({
           id: block.id,
           type: "hero",
           heading: clamp(edited.heading ?? block.heading, 120) ?? "",
-          subheading: clamp(edited.subheading ?? block.subheading, 400),
-          ctaLabel: target ? (edited.ctaLabel ?? block.ctaLabel ?? "Book now") : undefined,
+          // Whole sentences only, so a line that ran on (a looped AI answer) ends where its last sentence does.
+          subheading: cleanIntro(
+            edited.subheading ??
+              (block.subheading && OLD_DEFAULT_INTRO.test(block.subheading)
+                ? defaultCopy(bp, bp.workspaceName).intro
+                : block.subheading),
+            240,
+          ),
+          // "Book now" was the saved default before buttons were named for their form; it reads as the default now.
+          ctaLabel: target
+            ? (edited.ctaLabel ??
+              (block.ctaLabel && block.ctaLabel !== "Book now" ? block.ctaLabel : fallbackLabel))
+            : undefined,
           ctaHref: target ? sitePath(slug, target) : undefined,
+          ...(offerBlock
+            ? {
+                secondaryLabel: `See ${(offerTitle ?? `our ${offer?.pluralName}`).toLowerCase()}`,
+                secondaryHref: `#${offerBlock.id}`,
+              }
+            : {}),
+          ...(facts.length ? { facts } : {}),
         });
         break;
       }

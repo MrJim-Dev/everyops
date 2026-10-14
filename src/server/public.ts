@@ -2,7 +2,7 @@ import "server-only";
 import { sql } from "kysely";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, FieldValue, FormView, RecordData } from "@/lib/blueprint/types";
-import { createRecord } from "@/lib/engine/records";
+import { createRecord, isImagePath } from "@/lib/engine/records";
 import { autoReferenceFields, nextReference } from "@/lib/engine/references";
 import { isTimeRange } from "@/lib/format";
 import {
@@ -17,9 +17,18 @@ import {
   siteOf,
   visitorContactIds,
 } from "@/lib/public/resolve";
-import { type Slot, slotsFor } from "@/lib/public/slots";
+import {
+  type DayFree,
+  dateRangeProblem,
+  daysFor,
+  type Slot,
+  slotRangeProblem,
+  slotsFor,
+} from "@/lib/public/slots";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
+import { dateKey } from "@/lib/time";
 import { db } from "./db";
+import { saveImage } from "./storage";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
 
 const ID = /^[a-z0-9][a-z0-9-]{1,79}$/;
@@ -66,6 +75,22 @@ export async function publicSlots(
   return slotsFor(bp, doc.records, view, resourceId, day);
 }
 
+/** Free and taken days of one resource from a day on, for a public form that books whole days (stays, rentals). */
+export async function publicDays(
+  slug: string,
+  viewId: string,
+  resourceId: string,
+  from: string,
+  count: number,
+): Promise<DayFree[] | null> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return null;
+  const doc = await readDoc(slug);
+  if (!doc) return null;
+  const view = doc.blueprint.views.find((v) => v.id === viewId);
+  if (view?.type !== "form" || !view.public) return null;
+  return daysFor(doc.blueprint, doc.records, view, resourceId, from, count);
+}
+
 type Draft =
   | { ok: false; status: number; message: string; fieldErrors?: { fieldId?: string; message: string }[] }
   | {
@@ -81,6 +106,7 @@ type Draft =
  * not saved. Submitting saves it; a quote only reads the totals off it.
  */
 function draftFromVisitor(
+  slug: string,
   bp: Blueprint,
   records: DataRecord[],
   view: FormView,
@@ -133,8 +159,22 @@ function draftFromVisitor(
       case "relation":
         value = typeof v === "string" && form?.choices[f.id]?.some((c) => c.id === v) ? v : undefined;
         break;
+      case "image":
+        // Only a picture this workspace's public upload stored (a proof of payment); never a link elsewhere.
+        value = isImagePath(v) && v.startsWith(`/api/files/${slug}/`) ? v : undefined;
+        break;
     }
     if (value !== undefined) input[f.id] = value;
+  }
+  // The booking's own date field is the day of the picked slot, whatever was sent for it.
+  const booked = form?.booking;
+  const range = booked ? input[booked.timeFieldId] : undefined;
+  if (booked && isTimeRange(range ?? null)) {
+    const { start, end } = range as { start: string; end: string };
+    for (const id of booked.dayFieldIds) input[id] = dateKey(start);
+    // A stay's check-out is its end day; a booking of hours ends the day it started (or just after midnight).
+    for (const id of booked.endDayFieldIds)
+      input[id] = dateKey(booked.dates ? end : new Date(Date.parse(end) - 1));
   }
   // The business sets statuses; a new submission starts at the first one (e.g. Pending or Unpaid).
   // Typed-in amounts are the business's to set too; a required one starts at zero for staff to fill in.
@@ -157,8 +197,30 @@ function draftFromVisitor(
     } as const;
   const booking = entity.booking;
   const time = booking ? input[booking.timeFieldId] : undefined;
-  if (booking && isTimeRange(time ?? null) && Date.parse((time as { start: string }).start) <= now.getTime())
+  // Stays check their days below (a stay may start today); bookings of hours must not have started.
+  if (
+    booking &&
+    !booked?.dates &&
+    isTimeRange(time ?? null) &&
+    Date.parse((time as { start: string }).start) <= now.getTime()
+  )
     return { ok: false, status: 422, message: "Pick a time that hasn't started yet." } as const;
+  // A picked range is whole slots inside opening hours, and one slot when the form allows only one. A stay is days:
+  // check-out after check-in, from today on.
+  const resource = booked?.resources.find((r) => r.id === input[booked.resourceFieldId]);
+  if (booked && resource && isTimeRange(time ?? null)) {
+    const range = time as { start: string; end: string };
+    const problem = booked.dates
+      ? dateRangeProblem(range, now)
+      : slotRangeProblem(range, resource, booked.multiple);
+    if (problem)
+      return {
+        ok: false,
+        status: 422,
+        message: problem,
+        fieldErrors: [{ fieldId: booked.timeFieldId, message: problem }],
+      } as const;
+  }
 
   // A visitor can only answer what the form asks. Required fields it doesn't show (a player record, an assigned
   // staff member) stay empty for staff to fill in, instead of refusing every submission.
@@ -239,7 +301,7 @@ export async function quotePublicForm(
   const view = bp.views.find((v) => v.id === viewId);
   const entity = bp.entities.find((e) => e.id === view?.entityId);
   if (view?.type !== "form" || !view.public || !entity) return { ok: false, message: "No such form." };
-  const drafted = draftFromVisitor(bp, doc.records, view, entity, raw, rawExtras, now, true);
+  const drafted = draftFromVisitor(slug, bp, doc.records, view, entity, raw, rawExtras, now, true);
   if (!drafted.ok) return { ok: false, message: drafted.message };
   const money = entity.fields.filter(
     (f) =>
@@ -293,7 +355,7 @@ export async function submitPublicForm(
     const entity = bp.entities.find((e) => e.id === view?.entityId);
     if (view?.type !== "form" || !view.public || !entity)
       return { ok: false, status: 404, message: "This form isn't taking submissions." } as const;
-    const drafted = draftFromVisitor(bp, doc.records, view, entity, raw, rawExtras, now);
+    const drafted = draftFromVisitor(slug, bp, doc.records, view, entity, raw, rawExtras, now);
     if (!drafted.ok) return drafted;
     const { data, record, picked, offered } = drafted;
     const booking = entity.booking;
@@ -353,4 +415,27 @@ export function allowSubmission(key: string, limit = 8, windowMs = 10 * 60_000):
   recent.push(now);
   hits.set(key, recent);
   return true;
+}
+
+export type UploadResult = { ok: true; url: string } | { ok: false; status: number; message: string };
+
+/**
+ * A visitor uploads a picture for a public form (a proof of payment). Only forms that ask a picture take uploads,
+ * and the file must really be a PNG, JPG, WebP or GIF. The record only keeps it if the form is then submitted.
+ */
+export async function uploadPublicImage(
+  slug: string,
+  viewId: string,
+  bytes: Uint8Array,
+): Promise<UploadResult> {
+  const doc = await readDoc(slug);
+  if (!doc || doc.meta.setup) return { ok: false, status: 404, message: "This page doesn't exist." };
+  const view = doc.blueprint.views.find((v) => v.id === viewId);
+  if (view?.type !== "form" || !view.public) return { ok: false, status: 404, message: "No such form." };
+  if (!publicFieldsOf(doc.blueprint, view).some((f) => f.type === "image"))
+    return { ok: false, status: 403, message: "This form doesn't take uploads." };
+  const url = await saveImage(slug, bytes);
+  if (!url)
+    return { ok: false, status: 415, message: "Upload a photo or screenshot (PNG, JPG, WebP or GIF)." };
+  return { ok: true, url };
 }

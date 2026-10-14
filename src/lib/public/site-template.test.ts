@@ -44,7 +44,7 @@ describe("standard site", () => {
     expect(hero).toMatchObject({
       heading: "Courts ready when you are",
       ctaViewId: "book",
-      ctaLabel: "Book now",
+      ctaLabel: "Book a court",
     });
     const offer = blocks[2];
     expect(offer).toMatchObject({ entityId: "court", layout: "cards" });

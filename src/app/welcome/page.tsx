@@ -3,10 +3,10 @@ import { Closing } from "@/components/landing/closing";
 import { HeroPrompt } from "@/components/landing/hero-prompt";
 import { HowItWorks } from "@/components/landing/how-it-works";
 import { LandingFooter } from "@/components/landing/landing-footer";
-import { LandingNav } from "@/components/landing/landing-nav";
 import { ProductStage } from "@/components/landing/product-stage";
 import { Statement } from "@/components/landing/statement";
 import { SystemsGallery } from "@/components/landing/systems-gallery";
+import { SiteNav } from "@/components/shell/site-nav";
 
 export const metadata: Metadata = {
   title: { absolute: "EveryOps · Describe your business, get the system that runs it" },
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 export default function WelcomePage() {
   return (
     <div id="top" className="min-h-dvh overflow-x-clip bg-shell">
-      <LandingNav />
+      <SiteNav variant="landing" />
       <main>
         <section className="relative px-5 pt-32 sm:pt-40">
           <div

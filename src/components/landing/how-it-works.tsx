@@ -31,7 +31,20 @@ const STEPS = [
 /** Steps scroll past on the left while the matching screen stays pinned on the right. */
 export function HowItWorks() {
   const [active, setActive] = useState(0);
+  // Scenes play only while the section is on screen, so the first one doesn't run out of sight on page load.
+  const [inView, setInView] = useState(false);
+  const section = useRef<HTMLElement>(null);
   const refs = useRef<(HTMLDivElement | null)[]>([]);
+
+  useEffect(() => {
+    const el = section.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), {
+      rootMargin: "-30% 0px -30% 0px",
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   useEffect(() => {
     const io = new IntersectionObserver(
@@ -47,7 +60,11 @@ export function HowItWorks() {
   }, []);
 
   return (
-    <section id="how" className="mx-auto w-full max-w-[1120px] scroll-mt-20 px-5 py-24 sm:py-32">
+    <section
+      ref={section}
+      id="how"
+      className="mx-auto w-full max-w-[1120px] scroll-mt-20 px-5 py-24 sm:py-32"
+    >
       <Reveal className="mb-14 max-w-[560px]">
         <h2 className="text-balance text-[32px] font-semibold leading-[1.1] tracking-[-0.025em] sm:text-[40px]">
           From a sentence to a system your team uses.
@@ -88,7 +105,7 @@ export function HowItWorks() {
                   </span>
                   <div
                     className={cn(
-                      "transition-opacity duration-300 lg:opacity-40",
+                      "transition-opacity duration-300 lg:opacity-50",
                       i === active && "lg:opacity-100",
                     )}
                   >
@@ -98,8 +115,8 @@ export function HowItWorks() {
                     </p>
                   </div>
                 </div>
-                <div className="h-[340px] lg:hidden">
-                  <Visual />
+                <div className="h-[380px] lg:hidden">
+                  <Visual active={inView && i === active} />
                 </div>
               </div>
             </li>
@@ -116,7 +133,7 @@ export function HowItWorks() {
                   i === active ? "opacity-100" : "pointer-events-none scale-[0.97] opacity-0 blur-[4px]",
                 )}
               >
-                <Visual />
+                <Visual active={inView && i === active} />
               </div>
             ))}
           </div>

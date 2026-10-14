@@ -2,9 +2,9 @@
 
 import {
   ArrowLeftIcon,
-  ChatsCircleIcon,
   ClockCounterClockwiseIcon,
   GearSixIcon,
+  GlobeSimpleIcon,
   MagnifyingGlassIcon,
   SidebarSimpleIcon,
   SparkleIcon,
@@ -17,13 +17,23 @@ import { SystemIcon } from "@/components/system-icon";
 import { Kbd } from "@/components/ui/kbd";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useAssistant } from "@/lib/assistant/panel-store";
+import type { Blueprint, System } from "@/lib/blueprint/types";
 import { useSidebar } from "@/lib/store/sidebar";
-import { canManage } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 import { useCommandMenu } from "./command-menu";
 import { RailTip } from "./rail-tip";
-import { RAIL_ITEM, RAIL_LABEL, railWidth, SidebarLink, SidebarSection } from "./sidebar-link";
+import { ACTIVE_ITEM, RAIL_ITEM, RAIL_LABEL, railWidth, SidebarLink, SidebarSection } from "./sidebar-link";
 import { WorkspaceSwitcher } from "./workspace-switcher";
+
+/** A page made only of public website pages: listed under Website, apart from the systems the team works in. */
+function isWebsite(bp: Blueprint, system: System) {
+  const views = system.viewIds.map((id) => bp.views.find((v) => v.id === id));
+  return (
+    !system.widgetIds.length &&
+    views.length > 0 &&
+    views.every((v) => v?.type === "landing" || (v?.type === "html" && v.public))
+  );
+}
 
 /**
  * The workspace sidebar. Its content is laid out at full width and never reflows: collapsing narrows
@@ -36,10 +46,28 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
   const { setOpen } = useCommandMenu();
   const assistantOpen = useAssistant((s) => s.open);
   const toggleAssistant = useAssistant((s) => s.toggle);
-  const manager = canManage(ws.role);
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const onAsk = isActive(`${ws.basePath}/ask`);
+  const website = ws.blueprint.systems.filter((s) => isWebsite(ws.blueprint, s));
+  const systems = ws.blueprint.systems.filter((s) => !website.includes(s));
   const toggleSidebar = useSidebar((s) => s.toggle);
   const collapsible = onNavigate === undefined;
+  // Website pages show a globe whatever icon they were saved with (often a house, which read as a second home).
+  const systemLink = (system: System, site = false) => {
+    const href = `${ws.basePath}/${system.id}`;
+    return (
+      <SidebarLink
+        key={system.id}
+        href={href}
+        active={isActive(href)}
+        icon={site ? <GlobeSimpleIcon /> : <SystemIcon name={system.icon} />}
+        onNavigate={onNavigate}
+        rail={rail}
+      >
+        {system.name}
+      </SidebarLink>
+    );
+  };
 
   return (
     <nav
@@ -85,37 +113,32 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
         </RailTip>
         {ws.mode === "live" ? (
           <>
-            <RailTip rail={rail} label="Assistant">
+            {/*
+              One way in for everyone: the panel beside the page. Owners and admins can expand it to the full
+              Ask EveryOps page, which is the same conversation; it's highlighted there too.
+            */}
+            <RailTip rail={rail} label="Ask EveryOps">
               <button
                 type="button"
-                aria-label={rail ? "Assistant" : undefined}
-                aria-pressed={assistantOpen}
+                aria-label={rail ? "Ask EveryOps" : undefined}
+                aria-pressed={assistantOpen || onAsk}
+                data-active={assistantOpen || onAsk}
                 onClick={() => {
-                  toggleAssistant();
+                  if (!onAsk) toggleAssistant();
                   onNavigate?.();
                 }}
                 className={cn(
-                  "flex h-8 items-center gap-2.5 overflow-hidden rounded-md px-2 text-[13px] whitespace-nowrap text-sidebar-foreground outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 aria-pressed:bg-sidebar-accent aria-pressed:text-foreground",
+                  "flex h-8 items-center gap-2.5 overflow-hidden rounded-md px-2 text-[13px] whitespace-nowrap text-sidebar-foreground outline-none hover:bg-sidebar-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[active=true]:hover:bg-transparent",
+                  ACTIVE_ITEM,
                   RAIL_ITEM,
                   railWidth(rail),
                 )}
               >
-                <ChatsCircleIcon className="size-4 shrink-0 text-muted-foreground" />
-                <span className={cn("flex-1 text-left", RAIL_LABEL)}>Assistant</span>
+                <SparkleIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className={cn("flex-1 text-left", RAIL_LABEL)}>Ask EveryOps</span>
                 <Kbd className={RAIL_LABEL}>⌘J</Kbd>
               </button>
             </RailTip>
-            {manager ? (
-              <SidebarLink
-                href={`${ws.basePath}/ask`}
-                active={isActive(`${ws.basePath}/ask`)}
-                icon={<SparkleIcon />}
-                onNavigate={onNavigate}
-                rail={rail}
-              >
-                Ask EveryOps
-              </SidebarLink>
-            ) : null}
             <SidebarLink
               href={`${ws.basePath}/history`}
               active={isActive(`${ws.basePath}/history`)}
@@ -139,28 +162,17 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
       </div>
 
       <SidebarSection label="Systems">
-        {ws.blueprint.systems.length === 0 ? (
+        {systems.length === 0 ? (
           <p className="px-2 py-1 text-[12px] leading-relaxed text-muted-foreground">
             Your systems will appear here once EveryOps sets them up.
           </p>
         ) : (
-          ws.blueprint.systems.map((system) => {
-            const href = `${ws.basePath}/${system.id}`;
-            return (
-              <SidebarLink
-                key={system.id}
-                href={href}
-                active={isActive(href)}
-                icon={<SystemIcon name={system.icon} />}
-                onNavigate={onNavigate}
-                rail={rail}
-              >
-                {system.name}
-              </SidebarLink>
-            );
-          })
+          systems.map((s) => systemLink(s))
         )}
       </SidebarSection>
+      {website.length ? (
+        <SidebarSection label="Website">{website.map((s) => systemLink(s, true))}</SidebarSection>
+      ) : null}
 
       <div className={cn("mt-auto flex flex-col gap-2", rail ? "pt-[52px]" : "pt-4")}>
         {ws.mode === "preview" ? (

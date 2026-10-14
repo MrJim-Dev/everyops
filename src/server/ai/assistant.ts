@@ -22,6 +22,7 @@ import type {
   Widget,
 } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
+import { requestGuide } from "@/lib/catalog/playbooks";
 import { widgetValue } from "@/lib/engine/aggregate";
 import {
   applyOps,
@@ -33,12 +34,19 @@ import {
   type RecordOp,
   type TeamOp,
 } from "@/lib/engine/changes";
+import { impliedRules, misplacedStock, replaceableRules } from "@/lib/engine/implied-rules";
 import { metricFormatter } from "@/lib/engine/metric-format";
 import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
 import { registerFields } from "@/lib/engine/register";
 import { formSnippet } from "@/lib/public/html-page";
-import { isPublic, publicFieldsOf, publicForm } from "@/lib/public/resolve";
+import {
+  bookingDayFieldIds,
+  bookingEndDayFieldIds,
+  isPublic,
+  publicFieldsOf,
+  publicForm,
+} from "@/lib/public/resolve";
 import { copyFromBlocks, mainForm, standardBlocks } from "@/lib/public/site-template";
 import { type Invite, type Member, randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
@@ -259,7 +267,82 @@ export function blockPatchFrom(block: Block, o: RawBlockEdit): BlockPatch {
   }
 }
 
-function toDesignOps(
+/**
+ * "Turn the bookings list into a board" arrives as remove the tab plus add one. Adds run before removals, so a new
+ * tab reusing the old tab's id was skipped (the id existed) and the removal then took the only copy: the plan said
+ * Applied and the tab was gone. Even with a new id the board landed at the end of the tabs. A removal and an
+ * addition on the same page become one replace_view that keeps the tab's place. An addition that reuses a tab id
+ * nothing removes is an error sent back to Gemini instead of a silent no-op.
+ */
+export function replacedTabs(bp: Blueprint, ops: ChangeOp[], errors: string[]) {
+  const systemOf = (viewId: string) => bp.systems.find((s) => s.viewIds.includes(viewId));
+  const take = (op: ChangeOp) => ops.splice(ops.indexOf(op), 1);
+  for (const add of ops.filter((o): o is Extract<ChangeOp, { op: "add_view" }> => o.op === "add_view")) {
+    const removals = ops.filter((o): o is Extract<ChangeOp, { op: "remove_view" }> => o.op === "remove_view");
+    const sameId = removals.find((r) => r.viewId === add.view.id);
+    if (sameId) {
+      take(sameId);
+      ops.splice(ops.indexOf(add), 1, { op: "replace_view", viewId: sameId.viewId, view: add.view });
+      continue;
+    }
+    if (bp.views.some((v) => v.id === add.view.id)) {
+      errors.push(
+        `add_view: tab "${add.view.id}" already exists. Give the new tab its own id, or remove the old one in the same plan to replace it.`,
+      );
+      continue;
+    }
+    // One tab out and one tab in on the same page is a swap, even with a new id.
+    const here = removals.filter((r) => systemOf(r.viewId)?.id === add.systemId);
+    const added = ops.filter((o) => o.op === "add_view" && o.systemId === add.systemId);
+    if (here.length === 1 && added.length === 1) {
+      take(here[0]);
+      ops.splice(ops.indexOf(add), 1, { op: "replace_view", viewId: here[0].viewId, view: add.view });
+    }
+  }
+}
+
+/**
+ * What a plan adds that isn't in the workspace after applying it. An op that quietly does nothing (an id that
+ * already existed) must never reach the person as "Applied".
+ */
+export function missingAfterApply(ops: ChangeOp[], next: Blueprint): string[] {
+  return ops.flatMap((op) => {
+    if ((op.op === "add_view" || op.op === "replace_view") && !next.views.some((v) => v.id === op.view.id))
+      return [`${op.op}: tab "${op.view.id}" isn't in the workspace after the plan; use a new id`];
+    if (op.op === "add_widget" && !next.widgets.some((w) => w.id === op.widget.id))
+      return [`add_widget: card "${op.widget.id}" isn't in the workspace after the plan; use a new id`];
+    if (op.op === "add_entity" && !next.entities.some((e) => e.id === op.entity.id))
+      return [`add_entity: "${op.entity.id}" isn't in the workspace after the plan; use a new id`];
+    return [];
+  });
+}
+
+/**
+ * What a public form really shows a visitor, for the assistant's context: listed fields visitors never see (the team
+ * fills those in), what the booking slot picker fills, and whether a booking can run several slots. Without it the
+ * assistant read a proof-of-payment field in the form's design and said visitors could upload one when they couldn't.
+ */
+function visitorView(bp: Blueprint, view: FormView): string {
+  if (!isPublic(view)) return "";
+  const entity = bp.entities.find((e) => e.id === view.entityId);
+  if (!entity) return "";
+  const asked = new Set(publicFieldsOf(bp, view).map((f) => f.id));
+  const hidden = view.fieldIds.filter((id) => !asked.has(id) && entity.fields.some((f) => f.id === id));
+  const booking = entity.booking;
+  const day = [...bookingDayFieldIds(entity), ...bookingEndDayFieldIds(entity)].filter((id) => asked.has(id));
+  const dates = entity.fields.find((f) => f.id === booking?.timeFieldId)?.range === "dates";
+  const picker = dates
+    ? "a month calendar (check-in, then check-out)"
+    : `a ${{ days: "day strip", grid: "court grid", month: "month calendar" }[view.bookingLayout ?? "days"]} calendar, ${view.multipleSlots === false ? "one slot per booking" : "several slots in a row allowed"}`;
+  return [
+    hidden.length ? `, visitors don't see ${hidden.join(", ")} (the team fills them in)` : "",
+    booking && asked.has(booking.timeFieldId)
+      ? `, visitors pick ${booking.timeFieldId}${day.length ? ` (and ${day.join(", ")} follow it)` : ""} on ${picker}`
+      : "",
+  ].join("");
+}
+
+export function toDesignOps(
   bp: Blueprint,
   raw: RawPlan["ops"],
   renames: RawPlan["renames"] = [],
@@ -397,15 +480,19 @@ function toDesignOps(
         const unknown = entity
           ? (fieldIds ?? []).filter((id) => !entity.fields.some((f) => f.id === id) && !added.includes(id))
           : [];
-        if (unknown.length && entity) {
+        // A field of another record type on this view (an order line's product on the order form) is a slip: it's
+        // dropped, and the rest of the update stands. Only a list with nothing valid left goes back to Gemini.
+        if (unknown.length && entity && unknown.length === (fieldIds ?? []).length) {
           errors.push(
             `${at}: ${unknown.join(", ")} aren't fields of ${entity.id} (fields: ${entity.fields.map((f) => f.id).join(", ")})`,
           );
           break;
         }
+        const kept = fieldIds?.filter((id) => !unknown.includes(id));
+        for (const s of split?.steps ?? []) s.fieldIds = s.fieldIds.filter((id) => !unknown.includes(id));
         if (
           view &&
-          fieldIds?.length &&
+          kept?.length &&
           !["table", "kanban", "approval_queue", "form", "checkout"].includes(view.type)
         ) {
           errors.push(`${at}: a ${view.type} view has no columns to order`);
@@ -414,7 +501,7 @@ function toDesignOps(
         const patch = {
           ...(o.public !== undefined ? { public: o.public } : {}),
           ...(o.intro ? { intro: o.intro } : {}),
-          ...(fieldIds?.length ? { fieldIds } : {}),
+          ...(kept?.length ? { fieldIds: kept } : {}),
           // Steps keep the form's own review setting; a form getting steps for the first time ends with one.
           ...(split?.steps
             ? {
@@ -677,6 +764,7 @@ function toDesignOps(
     "update_field",
     "add_system",
     "add_view",
+    "replace_view",
     "move_view",
     "update_view",
     "add_block",
@@ -700,11 +788,32 @@ function toDesignOps(
     const i = ORDER.indexOf(op.op);
     return i < 0 ? ORDER.length : i;
   };
-  ops.splice(0, ops.length, ...unique.sort((a, b) => rank(a) - rank(b)));
+  // Removing a field or rule the same plan adds again ("merge the duplicates": drop rider, add rider as a choice)
+  // means redefine it; the add replaces it in place, so the removal is dropped instead of deleting the new one.
+  const kept = unique.filter(
+    (op) =>
+      !(
+        op.op === "remove_field" &&
+        unique.some((x) => x.op === "add_field" && x.entityId === op.entityId && x.field.id === op.fieldId)
+      ) && !(op.op === "remove_rule" && unique.some((x) => x.op === "add_rule" && x.rule.id === op.ruleId)),
+  );
+  // A field redefined as a choice without its options keeps the ones it had, or takes them from the duplicate the
+  // plan merges away (rider_select, status_options): Gemini drops them often, and they're already in the workspace.
+  for (const op of kept) {
+    if (op.op !== "add_field" || !["select", "status", "multi_select"].includes(op.field.type)) continue;
+    if (op.field.options?.length) continue;
+    const fields = bp.entities.find((e) => e.id === op.entityId)?.fields ?? [];
+    // Its duplicates count whether or not this plan removes them (a repair round often sends only the fixed op).
+    const siblings = fields.filter((f) => f.id.startsWith(`${op.field.id}_`));
+    const from = [fields.find((f) => f.id === op.field.id), ...siblings].find((f) => f?.options?.length);
+    if (from?.options) op.field.options = from.options;
+  }
+  ops.splice(0, ops.length, ...kept.sort((a, b) => rank(a) - rank(b)));
   // Existing ids can't be redefined, and every new view or widget must land in a section.
   for (const op of ops) {
     const viewKnown = (id: string) =>
-      bp.views.some((v) => v.id === id) || ops.some((x) => x.op === "add_view" && x.view.id === id);
+      bp.views.some((v) => v.id === id) ||
+      ops.some((x) => (x.op === "add_view" || x.op === "replace_view") && x.view.id === id);
     const systemKnown = (id: string) =>
       bp.systems.some((s) => s.id === id) || ops.some((x) => x.op === "add_system" && x.system.id === id);
     if (
@@ -721,11 +830,6 @@ function toDesignOps(
       errors.push(`${op.op}: page "${op.systemId}" doesn't exist`);
     if (op.op === "add_entity" && bp.entities.some((e) => e.id === op.entity.id))
       errors.push(`Record type "${op.entity.id}" already exists`);
-    if (
-      op.op === "add_field" &&
-      bp.entities.find((e) => e.id === op.entityId)?.fields.some((f) => f.id === op.field.id)
-    )
-      errors.push(`Field "${op.field.id}" already exists on ${op.entityId}`);
     if (
       op.op === "update_field" &&
       !bp.entities.find((e) => e.id === op.entityId)?.fields.some((f) => f.id === op.fieldId) &&
@@ -963,7 +1067,7 @@ ${bp.systems
                   }${
                     // The form's fields as update_view writes them: steps and the blocks each step shows.
                     v.type === "form" ? `, fields: ${JSON.stringify(markersOf(v))}` : ""
-                  }`
+                  }${v.type === "form" ? visitorView(bp, v) : ""}`
                 : v.type === "html"
                   ? isPublic(v)
                     ? ", public"
@@ -995,7 +1099,7 @@ ${digest}${
 Looked up just now for this message (exact, from the database):
 ${looked}`
     : ""
-}
+}${requestGuide(input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")}
 
 Conversation:
 ${input.messages
@@ -1021,13 +1125,14 @@ ${input.messages
     return copies.get(id) as Promise<string | null>;
   };
   let prompt = withFiles(context);
-  let repaired = false;
+  // Two rounds of fixes: a big multi-part request can slip in a new place after the first one.
+  let repairs = 0;
   let restarted = false;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     status(
       attempt === 0
         ? "Thinking it through"
-        : repaired
+        : repairs
           ? "Reworking the plan so it fits your workspace"
           : "Gemini's first answer didn't come through, trying again",
     );
@@ -1083,7 +1188,38 @@ ${input.messages
         // "A multistep booking form": a form the plan touches gets steps even when Gemini left them out.
         /multi[\s-]?step|in steps|step[\s-]by[\s-]step|wizard/i.test(input.messages.at(-1)?.text ?? ""),
       );
-    const next = design.ops.length ? applyOps(bp, design.ops) : bp;
+    // A tab swapped for another layout keeps its place (see replacedTabs).
+    replacedTabs(bp, design.ops, errors);
+    let next = design.ops.length ? applyOps(bp, design.ops) : bp;
+    // An automation Gemini got wrong that EveryOps can work out itself is replaced, not sent back.
+    const replace = design.ops.length
+      ? replaceableRules(
+          bp,
+          next,
+          design.ops.flatMap((op) => (op.op === "add_rule" ? [op.rule.id] : [])),
+        )
+      : [];
+    if (replace.length) {
+      const kept = design.ops.filter((op) => !(op.op === "add_rule" && replace.includes(op.rule.id)));
+      design.ops.splice(0, design.ops.length, ...kept);
+      next = applyOps(bp, design.ops);
+    }
+    // What the request implies but the plan left out: receiving stock raises it, selling lowers it, approved leave
+    // takes days off the balance. Added as automations and shown on the card, so the owner sees what got connected.
+    const implied = design.ops.length ? impliedRules(bp, next) : [];
+    if (implied.length) {
+      design.ops.push(...implied.map(({ rule }) => ({ op: "add_rule" as const, rule })));
+      next = applyOps(bp, design.ops);
+    }
+    // A step that says an automation changes needs an operation behind it (the implied ones count).
+    errors.push(...unbackedRuleSteps(a.plan.steps, design.ops));
+    // "Add stock management" in a workspace that sells means stock on what it sells.
+    const stockNote = design.ops.length
+      ? misplacedStock(bp, next, input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")
+      : undefined;
+    if (stockNote) errors.push(stockNote);
+    // Whatever the plan adds must be there once it is applied; an op that quietly did nothing never shows as Applied.
+    errors.push(...missingAfterApply(design.ops, next));
     embedForms(next, records, design.ops, errors);
     errors.push(...unanswerable(next, design.ops));
     const before = new Set(validateBlueprint(bp).map((e) => `${e.path} ${e.message}`));
@@ -1146,7 +1282,10 @@ ${input.messages
           baseVersion: bp.version,
           title: a.plan.title || "Workspace change",
           facts: facts.slice(0, 6),
-          steps: a.plan.steps.slice(0, 10),
+          steps: [
+            ...a.plan.steps.slice(0, Math.max(0, 10 - implied.length)),
+            ...implied.map(({ label, detail }) => ({ kind: "add" as const, label, detail })),
+          ],
           ops: design.ops,
           recordOps: recordPart.ops,
           ...(docOps.length ? { docOps } : {}),
@@ -1162,14 +1301,14 @@ ${input.messages
         ops: JSON.stringify(a.plan.ops).slice(0, 3000),
       }),
     );
-    if (repaired) break;
-    repaired = true;
+    if (repairs === 2) break;
+    repairs++;
     if (errors.some((e) => e.endsWith("needs options")))
       errors.push(
         'Every select and status field needs "options": [{ "id": "lead", "label": "Lead", "tone": "neutral" }, …] with the choices the person described, or sensible ones.',
       );
     prompt = withFiles(
-      `${context}\n\nYour previous plan:\n${JSON.stringify(a.plan)}\n\nIt was rejected:\n- ${errors.length ? errors.slice(0, 15).join("\n- ") : "it had no operations"}\nReturn a corrected answer. The person never saw the rejected plan, so write the reply as your first answer: don't mention corrections or errors.`,
+      `${context}\n\nYour previous plan:\n${JSON.stringify(a.plan)}\n\nIt was rejected:\n- ${errors.length ? errors.slice(0, 15).join("\n- ") : "it had no operations"}\nReturn the complete corrected plan: every operation the request needs, not only the ones you fixed. The person never saw the rejected plan, so write the reply as your first answer: don't mention corrections or errors.`,
     );
   }
   return {
@@ -1262,14 +1401,10 @@ export function openUpPublicForms(
     if (view.type !== "form" || !view.public || !touched.has(view.id)) continue;
     const entity = next.entities.find((e) => e.id === view.entityId);
     if (!entity) continue;
-    const asked = new Set(publicFieldsOf(next, view).map((f) => f.id));
-    for (const f of entity.fields)
-      if (
-        f.required &&
-        !asked.has(f.id) &&
-        (f.type === "relation" || f.type === "select" || f.type === "multi_select") &&
-        f.id !== entity.booking?.resourceFieldId
-      )
+    // Anything required that visitors aren't asked (a link to a private list, an order number the business assigns)
+    // becomes optional, or every submission would fail. The same test as unanswerable(), so nothing is left for it.
+    for (const f of stuckFields(next, view, entity))
+      if (f.id !== entity.booking?.resourceFieldId)
         ops.push({ op: "update_field", entityId: entity.id, fieldId: f.id, patch: { required: false } });
     const contact = view.fieldIds.some((id) => {
       const f = entity.fields.find((x) => x.id === id);
@@ -1353,9 +1488,21 @@ function withGuestStep(steps: FormStep[], ids: string[]): FormStep[] {
   return out;
 }
 
+/** Required fields a public form doesn't ask visitors for, which the app can't fill in itself either. */
+function stuckFields(bp: Blueprint, view: FormView, entity: Entity) {
+  const asked = new Set(publicFieldsOf(bp, view).map((f) => f.id));
+  return entity.fields.filter(
+    (f) =>
+      f.required &&
+      !asked.has(f.id) &&
+      !["formula", "rollup", "status", "money"].includes(f.type) &&
+      f.id !== entity.parent?.fieldId,
+  );
+}
+
 /**
- * A public form this plan adds or opens up must not require what a visitor can't fill in (a link to a private list
- * such as players, a typed amount): every submission would fail. The assistant is told how to fix it.
+ * A public form this plan adds or opens up must not require what a visitor can't fill in: every submission would
+ * fail. openUpPublicForms already makes those optional; this is the last check before the plan is shown.
  */
 export function unanswerable(next: Blueprint, ops: ChangeOp[]): string[] {
   const touched = touchedForms(ops, embeddedIn(ops));
@@ -1363,14 +1510,7 @@ export function unanswerable(next: Blueprint, ops: ChangeOp[]): string[] {
     if (v.type !== "form" || !v.public || !touched.has(v.id)) return [];
     const entity = next.entities.find((e) => e.id === v.entityId);
     if (!entity) return [];
-    const asked = new Set(publicFieldsOf(next, v).map((f) => f.id));
-    const stuck = entity.fields.filter(
-      (f) =>
-        f.required &&
-        !asked.has(f.id) &&
-        !["formula", "rollup", "status", "money"].includes(f.type) &&
-        f.id !== entity.parent?.fieldId,
-    );
+    const stuck = stuckFields(next, v, entity);
     return stuck.length
       ? [
           `${v.id}: visitors can't fill in ${stuck.map((f) => f.id).join(", ")} (required, but not shown on public forms). Make ${stuck.length > 1 ? "them" : "it"} optional with update_field, and ask who is booking with text fields (guest name, phone) added with add_field and listed in the form.`,
@@ -1419,11 +1559,15 @@ const OP_NAMES = new Set([
 
 const OP_ALIASES: Record<string, string> = {
   patch_field: "update_field",
+  patch: "update_field",
   edit_field: "update_field",
   modify_field: "update_field",
   change_field: "update_field",
   edit_view: "update_view",
   patch_view: "update_view",
+  // There's no rule editing op: a rule is redefined by adding it again with its id.
+  update_rule: "add_rule",
+  edit_rule: "add_rule",
 };
 
 /**
@@ -1441,4 +1585,22 @@ function fixOpNames(json: unknown): unknown {
     else o.op = name;
   }
   return json;
+}
+
+/**
+ * The card's steps are Gemini's own words, so a plan could say "Delivery automation rule: formula changed" without an
+ * operation that changes it; it then showed as applied while the automation stayed the same. A step about an
+ * automation needs an add_rule (which replaces the one with the same id) or a remove_rule behind it.
+ */
+export function unbackedRuleSteps(
+  steps: { label: string; detail?: string }[],
+  ops: { op: string }[],
+): string[] {
+  if (ops.some((o) => o.op === "add_rule" || o.op === "remove_rule")) return [];
+  const claimed = steps.find((s) => /\bautomations?\b|\brule\b/i.test(`${s.label} ${s.detail ?? ""}`));
+  return claimed
+    ? [
+        `Step "${claimed.label}" changes an automation, but no operation does: add_rule with the automation's id and the complete new rule (trigger, and actions with target, fieldId and delta) replaces it.`,
+      ]
+    : [];
 }

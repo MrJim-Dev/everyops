@@ -165,6 +165,17 @@ export type FormView = ViewBase & {
   submitLabel?: string;
   /** Anyone with the link can submit it (a public booking page), at /s/[workspace]/[view]. */
   public?: boolean;
+  /**
+   * Booking forms: a visitor may pick several slots in a row (two or three hours) as one booking. On unless set to
+   * false, which limits each booking to one slot.
+   */
+  multipleSlots?: boolean;
+  /**
+   * Booking forms: how visitors pick when. "days": a strip of days with that day's times (the default). "grid": one
+   * day as a grid of every resource's times (courts side by side). "month": a month calendar, then the day's times.
+   * Bookings of whole days (stays, rentals) always pick a date range on a month calendar.
+   */
+  bookingLayout?: BookingLayout;
   /** Shown with the form, e.g. the active payment methods or FAQs. */
   blocks?: Block[];
   /** Things people add with a quantity (paddle rental, balls): each becomes a line item on the new record. */
@@ -410,3 +421,6 @@ export type WorkspaceData = {
   blueprint: Blueprint;
   records: DataRecord[];
 };
+
+export type BookingLayout = "days" | "grid" | "month";
+export const BOOKING_LAYOUTS: BookingLayout[] = ["days", "grid", "month"];

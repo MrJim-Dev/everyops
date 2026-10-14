@@ -3,6 +3,7 @@
 import { DotsThreeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +22,7 @@ import {
 } from "@/components/ui/sheet";
 import { useRecordActions } from "@/components/workspace/use-record-actions";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { useAssistant } from "@/lib/assistant/panel-store";
 import { editableFields, statusField } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { DataRecord, Entity, RecordData } from "@/lib/blueprint/types";
@@ -32,19 +34,31 @@ import { RecordFieldsForm } from "./record-fields-form";
 import { useRecordPanels } from "./record-panels";
 import { StatusMenu } from "./status-menu";
 
-/** Side panel for one record: properties, its line items, and the next sensible action. */
+/**
+ * One record: properties, its line items, and the next sensible action. A drawer from the right; while the
+ * assistant panel sits on the right, a centered modal instead, so neither covers the other.
+ */
 export function RecordSheet({ recordId, onClose }: { recordId: string | null; onClose: () => void }) {
   const { records, blueprint } = useWorkspace();
+  const assistantOpen = useAssistant((s) => s.open);
   const record = recordId ? findRecord(records, recordId) : undefined;
   const entity = record ? findEntity(blueprint, record.entityId) : undefined;
+  const body =
+    record && entity ? (
+      <RecordSheetBody key={record.id} record={record} entity={entity} onClose={onClose} />
+    ) : null;
 
+  if (assistantOpen)
+    return (
+      <Dialog open={!!record} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="flex max-h-[min(85dvh,760px)] flex-col gap-0 p-0 sm:max-w-[560px]">
+          {body}
+        </DialogContent>
+      </Dialog>
+    );
   return (
     <Sheet open={!!record} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="w-full gap-0 p-0 sm:max-w-[400px]">
-        {record && entity ? (
-          <RecordSheetBody key={record.id} record={record} entity={entity} onClose={onClose} />
-        ) : null}
-      </SheetContent>
+      <SheetContent className="w-full gap-0 p-0 data-[side=right]:sm:max-w-[480px]">{body}</SheetContent>
     </Sheet>
   );
 }
@@ -101,13 +115,14 @@ function RecordSheetBody({
             onChange={(fieldId, value) => setDraft((d) => ({ ...d, [fieldId]: value }))}
           />
         ) : (
-          <dl className="grid grid-cols-[minmax(110px,auto)_1fr] gap-x-4 gap-y-3 text-[13px]">
+          // Values wrap (long notes keep their line breaks) instead of widening the panel past its edge.
+          <dl className="grid grid-cols-[minmax(96px,32%)_minmax(0,1fr)] gap-x-4 gap-y-3 text-[13px]">
             {entity.fields
               .filter((f) => f.id !== entity.primaryFieldId && f.id !== status?.id)
               .map((field) => (
                 <div key={field.id} className="contents">
                   <dt className="text-muted-foreground">{field.name}</dt>
-                  <dd className="min-w-0">
+                  <dd className="min-w-0 [overflow-wrap:anywhere] [&_.truncate]:whitespace-pre-line">
                     <FieldValue
                       field={field}
                       value={record.data[field.id]}

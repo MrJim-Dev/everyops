@@ -775,3 +775,29 @@ select option {
 .mdxeditor-popup-container {
   color: var(--foreground);
 }
+
+/*
+ * Leaving for a new screen (the home prompt, Create workspace): the page softens away, and arriving it settles back
+ * through the same transition (WorkspaceShell clears the mark), so out and in are one path.
+ */
+main:not(main main) {
+  transition:
+    opacity 240ms var(--ease-out-strong),
+    transform 240ms var(--ease-out-strong),
+    filter 240ms var(--ease-out-strong);
+}
+[data-eo-leaving] main:not(main main) {
+  opacity: 0;
+  transform: scale(0.985);
+  filter: blur(4px);
+}
+
+/* Scroll areas inside the app: a thin, quiet thumb with no track or arrows, a little brighter while in use. The page's
+   own scrollbar is left alone. */
+:where(body *) {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--foreground) 14%, transparent) transparent;
+}
+:where(body *):hover {
+  scrollbar-color: color-mix(in oklab, var(--foreground) 26%, transparent) transparent;
+}
