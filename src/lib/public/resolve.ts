@@ -11,6 +11,7 @@ import type {
   Block,
   BlockItem,
   Blueprint,
+  BookingLayout,
   DataRecord,
   Entity,
   Field,
@@ -95,6 +96,12 @@ export type PublicForm = {
     resources: PublicResource[];
     multiple: boolean;
     dayFieldIds: string[];
+    /** Date fields for the booking's last day (Check-out, Departure): filled from the picked range's end. */
+    endDayFieldIds: string[];
+    /** How the picker looks (see FormView.bookingLayout). */
+    layout: BookingLayout;
+    /** Whole days (a stay from check-in to check-out) instead of times. */
+    dates: boolean;
   };
   /** Multi-step forms: the fields of each step, in order, and the form's blocks shown in that step. */
   steps?: {
@@ -389,14 +396,27 @@ export function publicFieldsOf(bp: Blueprint, view: FormView): Field[] {
 }
 
 /** A plain date field that only repeats the booking's day ("Date", "Booking date", "Play day"), not a birthday. */
-const DAY_FIELD = /^(booking|reservation|reserved|play|game|session|visit|event)?[\s_-]*(date|day)$/i;
+const DAY_FIELD =
+  /^((booking|reservation|reserved|play|game|session|visit|event|start|arrival)?[\s_-]*(date|day)|check[\s_-]?in([\s_-]*(date|day))?|arrival)$/i;
+/** A date field for the booking's last day: Check-out, Departure, End date. */
+const END_DAY_FIELD =
+  /^(check[\s_-]?out([\s_-]*(date|day))?|departure([\s_-]*(date|day))?|end[\s_-]*(date|day))$/i;
 
-/** The record's date fields that are the booking's day, so they follow the picked slot instead of being asked. */
+const dateFieldsMatching = (entity: Entity, pattern: RegExp) =>
+  entity.booking
+    ? entity.fields
+        .filter((f) => f.type === "date" && (pattern.test(f.name.trim()) || pattern.test(f.id)))
+        .map((f) => f.id)
+    : [];
+
+/** The record's date fields that are the booking's (first) day, so they follow the picked slot or stay. */
 export function bookingDayFieldIds(entity: Entity): string[] {
-  if (!entity.booking) return [];
-  return entity.fields
-    .filter((f) => f.type === "date" && (DAY_FIELD.test(f.name.trim()) || DAY_FIELD.test(f.id)))
-    .map((f) => f.id);
+  return dateFieldsMatching(entity, DAY_FIELD);
+}
+
+/** The record's date fields for the last day of a booking (a stay's check-out), filled from the picked range's end. */
+export function bookingEndDayFieldIds(entity: Entity): string[] {
+  return dateFieldsMatching(entity, END_DAY_FIELD);
 }
 
 export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView): PublicForm | null {
@@ -423,6 +443,7 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
     : undefined;
   if (b && resourceEntity && fields.some((f) => f.id === b.timeFieldId)) {
     const hours = resourceEntity.resource ?? { opensAt: "08:00", closesAt: "20:00", slotMinutes: 60 };
+    const dates = entity.fields.find((f) => f.id === b.timeFieldId)?.range === "dates";
     booking = {
       resourceFieldId: b.resourceFieldId,
       timeFieldId: b.timeFieldId,
@@ -431,6 +452,9 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
         .map((r) => ({ id: r.id, title: recordTitle(resourceEntity, r), ...hours })),
       multiple: view.multipleSlots !== false,
       dayFieldIds: bookingDayFieldIds(entity).filter((id) => fields.some((f) => f.id === id)),
+      endDayFieldIds: bookingEndDayFieldIds(entity).filter((id) => fields.some((f) => f.id === id)),
+      layout: dates ? "month" : (view.bookingLayout ?? "days"),
+      dates,
     };
     choices[b.resourceFieldId] ??= booking.resources.map((r) => ({ id: r.id, title: r.title }));
   }
@@ -454,10 +478,12 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
     // The slot is picked under the resource, so it always belongs to the resource's step. The booking's own date
     // field follows the slot, so no step asks it.
     if (booking) {
-      const { resourceFieldId, timeFieldId, dayFieldIds } = booking;
+      const { resourceFieldId, timeFieldId, dayFieldIds, endDayFieldIds } = booking;
       steps = steps.map((s) => ({
         ...s,
-        fieldIds: s.fieldIds.filter((id) => id !== timeFieldId && !dayFieldIds.includes(id)),
+        fieldIds: s.fieldIds.filter(
+          (id) => id !== timeFieldId && !dayFieldIds.includes(id) && !endDayFieldIds.includes(id),
+        ),
       }));
       const home = steps.find((s) => s.fieldIds.includes(resourceFieldId)) ?? steps[0];
       home.fieldIds.push(timeFieldId);

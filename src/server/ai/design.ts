@@ -24,6 +24,7 @@ import { computeAll } from "@/lib/engine/compute";
 import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
 import { isImagePath } from "@/lib/engine/records";
 import { repairRules } from "@/lib/engine/rule-repair";
+import { withCustomSite } from "@/lib/public/custom-site";
 import { MAX_HTML_BYTES } from "@/lib/public/html-page";
 import { copyFromBlocks, type SiteCopy, standardBlocks } from "@/lib/public/site-template";
 import { hhmm, todayKey } from "@/lib/time";
@@ -905,6 +906,8 @@ export async function designWorkspace(
       const dated = samplesThisYear(bp, toRecords(bp, filled, now), now);
       if (dated.fields) console.info(JSON.stringify({ event: "design_samples_moved", fields: dated.fields }));
       const records = computeAll(bp, dated.records, now);
+      // Businesses whose customers book on their own get a custom HTML website and a calendar that suits them.
+      withCustomSite(bp, records, name, now);
       return {
         ok: true,
         name,

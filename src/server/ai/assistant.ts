@@ -38,7 +38,13 @@ import { optionUsage, strandedOptions } from "@/lib/engine/options";
 import { applyRecordOps } from "@/lib/engine/records";
 import { registerFields } from "@/lib/engine/register";
 import { formSnippet } from "@/lib/public/html-page";
-import { bookingDayFieldIds, isPublic, publicFieldsOf, publicForm } from "@/lib/public/resolve";
+import {
+  bookingDayFieldIds,
+  bookingEndDayFieldIds,
+  isPublic,
+  publicFieldsOf,
+  publicForm,
+} from "@/lib/public/resolve";
 import { copyFromBlocks, mainForm, standardBlocks } from "@/lib/public/site-template";
 import { type Invite, type Member, randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
@@ -321,11 +327,15 @@ function visitorView(bp: Blueprint, view: FormView): string {
   const asked = new Set(publicFieldsOf(bp, view).map((f) => f.id));
   const hidden = view.fieldIds.filter((id) => !asked.has(id) && entity.fields.some((f) => f.id === id));
   const booking = entity.booking;
-  const day = bookingDayFieldIds(entity).filter((id) => asked.has(id));
+  const day = [...bookingDayFieldIds(entity), ...bookingEndDayFieldIds(entity)].filter((id) => asked.has(id));
+  const dates = entity.fields.find((f) => f.id === booking?.timeFieldId)?.range === "dates";
+  const picker = dates
+    ? "a month calendar (check-in, then check-out)"
+    : `a ${{ days: "day strip", grid: "court grid", month: "month calendar" }[view.bookingLayout ?? "days"]} calendar, ${view.multipleSlots === false ? "one slot per booking" : "several slots in a row allowed"}`;
   return [
     hidden.length ? `, visitors don't see ${hidden.join(", ")} (the team fills them in)` : "",
     booking && asked.has(booking.timeFieldId)
-      ? `, visitors pick ${booking.timeFieldId}${day.length ? ` (and ${day.join(", ")} follows it)` : ""} with a slot picker, ${view.multipleSlots === false ? "one slot per booking" : "several slots in a row allowed"}`
+      ? `, visitors pick ${booking.timeFieldId}${day.length ? ` (and ${day.join(", ")} follow it)` : ""} on ${picker}`
       : "",
   ].join("");
 }
