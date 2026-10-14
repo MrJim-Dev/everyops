@@ -42,7 +42,8 @@ export function PublishPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => ({
     name: existing?.name ?? ws.name,
-    summary: existing?.summary ?? "",
+    // Start from the summary the workspace already has; the owner can rewrite it for strangers.
+    summary: existing?.summary ?? useWorkspaces.getState().workspaces[ws.id]?.summary ?? "",
     category: existing?.category ?? guessCategory(ws.blueprint),
     license: existing?.license ?? ("MIT" as const),
   }));
@@ -75,6 +76,7 @@ export function PublishPage() {
   }
 
   const includes = describeBlueprint(ws.blueprint);
+  const everything = describeBlueprint(ws.blueprint, Number.POSITIVE_INFINITY);
   const preview = toCatalogSystem({
     id: existing?.id ?? "draft",
     official: false,
@@ -230,7 +232,7 @@ export function PublishPage() {
       >
         <div className="grid gap-6 md:grid-cols-[1fr_260px]">
           <ul className="grid content-start gap-2 text-[13px] sm:grid-cols-2">
-            {includes.map((item) => (
+            {everything.map((item) => (
               <li key={item} className="flex items-center gap-2">
                 <CheckIcon className="size-3.5 shrink-0 text-primary" />
                 {item}
