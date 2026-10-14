@@ -48,7 +48,7 @@ const assistantView = z.union(
         fieldIds: z
           .array(z.string())
           .describe(
-            "The fields asked, in order. A multi-step form puts '# Step title' before each step's fields, e.g. ['# Court and time', 'court', 'slot', '# Your details', 'guest_name', 'phone']",
+            "The fields asked, in order. A multi-step form puts '# Step title' before each step's fields, e.g. ['# Court and time', 'court', 'slot', '# Your details', 'guest_name', 'phone']. '@block_id' in a step shows one of the form's blocks (payment methods, FAQs) in that step",
           ),
       });
     if (type === "landing") return (o as AnyObject).omit({ blocks: true });
@@ -134,7 +134,7 @@ const assistantWidget = z.union([
 
 // One small shape per operation. A single object with every part optional made Gemini fill all of them for every
 // operation (thousands of wasted tokens, and stray widgets on renames).
-const designOp = z.union([
+export const designOp = z.union([
   z.object({ op: z.literal("add_field"), entityId: z.string(), field }),
   z.object({
     op: z.literal("update_field"),
@@ -190,7 +190,7 @@ const designOp = z.union([
       .array(z.string())
       .optional()
       .describe(
-        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, or form questions. Forms: '# Step title' before each step's fields makes it a multi-step form",
+        "The fields the view shows, in order, as the complete new list: table columns, kanban card fields, approval details, or form questions. Forms: '# Step title' before each step's fields makes it a multi-step form, and '@block_id' in a step shows one of the form's blocks there instead of below the form (e.g. ['# Payment', '@how_to_pay', 'method', 'reference']). Start from the form's current fields listed with its tab and keep everything you weren't asked to change",
       ),
   }),
   z.object({
@@ -364,12 +364,17 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
     entityId is "" (no record type); put a helpful outline in starter (markdown).
   - html: a page the owner designs entirely in their own HTML and CSS ("a custom HTML page", "I have my own landing
     page design", "a fully custom booking page"). Its entityId is "". The owner pastes or uploads the HTML in the
-    page's editor, which starts with a styled template. When they ask you to write or draft the page, put the
-    complete HTML document (short, with inline CSS) in the view's starter; otherwise leave starter empty. When they
-    want it live now, add a second op after the add_view: update_view with that view's id and public true. Only
-    say it's drafted or live when the plan does it. In the reply, say they can open Edit HTML, and that "Connect a
-    form" adds a form that saves to one of
-    their public forms (so a custom booking page still saves real bookings).
+    page's editor, which starts with a styled template. When they ask you to write, draft or design the page (a
+    landing page, a promo), put the complete HTML document with inline CSS in the view's starter; otherwise leave
+    starter empty. When they want it live now, add a second op after the add_view: update_view with that view's id
+    and public true. Only say it's drafted or live when the plan does it.
+    A form on the page that saves real records (a booking form connected to bookings, a sign-up or inquiry form):
+    never write its inputs yourself. Put <div data-everyops-embed="FORM_VIEW_ID"></div> where the form goes, with
+    the id of a public form view; EveryOps fills in the real fields (in steps when that form has steps) and makes
+    it save to that form. If no public form for that record type exists, add one in the same plan (add_view form
+    with public true, its fields with '# Step title' markers for a multi-step form) before the html page. Style it
+    with CSS on form, fieldset, legend, label, input, select, textarea and button.
+    In the reply, say they can open Edit HTML to change the design.
 - Reports and totals pages: add_system with no views and several add_widget on it; a page without views shows
   its widgets as a dashboard. Start with 2 to 4 stat widgets for the totals (metric count/sum/avg, optional
   filter, e.g. revenue from paid bookings, bookings this month), then chart for graphs: over
@@ -415,6 +420,7 @@ can be undone from History or the Undo button, so deleting is fine when asked:
   tabs with renames.
 - Document pages: pageTexts with the page's view id and its complete new markdown (keep what the person didn't ask to
   change). "What the person is looking at" shows the current text.
+- An existing custom HTML page: pageTexts with its view id and its complete new HTML (same embed placeholders).
 - Team (owners and admins): team invite (email and role), set_role for a member or invite by email, revoke_invite.
   Removing a member, deleting the workspace, account, password and email changes can't be undone, so they aren't
   yours to do: say where they are and set goTo (team or settings).
@@ -444,6 +450,10 @@ Public pages and their requests:
 - "a landing page" or "a website": add_system (icon house) and add_view landing with a hero (title, a short
   subheading and a button to the public booking form). EveryOps lays it out in its standard design: highlights,
   what's offered, how it works, payment methods, FAQs and contact are filled in from the data.
+- Moving a form's section into one of its steps ("put the payment methods on step 4", "show the FAQs on the last
+  step"): update_view that form with its complete fields (start from the list shown with its tab) and '@block_id'
+  in the step that should show it. The section then shows inside that step instead of below the form. Never remove
+  a section someone asked to move; if the form has no steps yet, give it steps in the same update.
 - Changing a website's words ("make the headline punchier", "add our phone number", "rewrite the steps"): a renames
   entry with kind section, the section's blockId, and newName holding only the lines that change. A section the person
   clicked is named under "What the person is looking at"; edit that one. To show something new on the page, add_block;

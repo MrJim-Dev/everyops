@@ -264,6 +264,8 @@ describe("tidy add-ons on forms", () => {
     if (form?.type !== "form") throw new Error("no form");
     expect(form.fieldIds).toEqual(["court", "slot", "guest_name", "guest_phone"]);
     expect(form.steps?.map((s) => s.title)).toEqual(["Pick a slot", "Your details", "Payment"]);
+    // The ways to pay show on the payment step, where people need them.
+    expect(form.steps?.at(-1)?.blockIds).toEqual(["how_to_pay"]);
     const via = out.entities.find((e) => e.id === "booking")?.fields.find((f) => f.id === "booked_via");
     expect(via?.required).toBe(false);
     expect(form.blocks?.[0]).toMatchObject({

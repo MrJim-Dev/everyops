@@ -60,14 +60,17 @@ export function PublicBlocks({
   slug,
   preview,
   selection,
+  compact,
 }: {
   blocks: ResolvedBlock[];
   slug: string;
   preview?: boolean;
   selection?: BlockSelection;
+  /** Inside a form step: tighter spacing and no scroll-in animation. */
+  compact?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-20 md:gap-24">
+    <div className={compact ? "flex flex-col gap-6" : "flex flex-col gap-20 md:gap-24"}>
       {blocks.map((b, i) => {
         const node = <BlockView key={b.id} block={b} slug={slug} preview={preview} />;
         if (selection)
@@ -83,7 +86,11 @@ export function PublicBlocks({
             </Selectable>
           );
         // Visitors see each section rise in once as they scroll; the first is there straight away.
-        return preview || i === 0 ? <div key={b.id}>{node}</div> : <Reveal key={b.id}>{node}</Reveal>;
+        return preview || compact || i === 0 ? (
+          <div key={b.id}>{node}</div>
+        ) : (
+          <Reveal key={b.id}>{node}</Reveal>
+        );
       })}
     </div>
   );
@@ -113,7 +120,12 @@ function BlockView({ block: b, slug, preview }: { block: ResolvedBlock; slug: st
       return (
         <section className="mx-auto w-full max-w-[640px]">
           {b.title ? <SectionHeading title={b.title} /> : null}
-          <PublicFormView form={b.form} slug={slug} preview={preview} />
+          <PublicFormView
+            form={b.form}
+            slug={slug}
+            preview={preview}
+            renderBlocks={(blocks) => <PublicBlocks blocks={blocks} slug={slug} preview={preview} compact />}
+          />
         </section>
       );
   }

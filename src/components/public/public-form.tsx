@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { FieldValue } from "@/lib/blueprint/types";
 import { formatDate, formatRange, formatTime, isTimeRange } from "@/lib/format";
-import type { PublicField, PublicForm } from "@/lib/public/resolve";
+import type { PublicField, PublicForm, ResolvedBlock } from "@/lib/public/resolve";
 import type { Slot } from "@/lib/public/slots";
 import { addDays, at, dateKey, todayKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -25,10 +25,13 @@ export function PublicFormView({
   form,
   slug,
   preview,
+  renderBlocks,
 }: {
   form: PublicForm;
   slug: string;
   preview?: boolean;
+  /** Draws the blocks a step shows (payment methods on the payment step); passed in to avoid a module cycle. */
+  renderBlocks?: (blocks: ResolvedBlock[]) => React.ReactNode;
 }) {
   const [values, setValues] = useState<Record<string, FieldValue>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -157,6 +160,9 @@ export function PublicFormView({
             <p className="text-[12.5px] text-muted-foreground">{steps[step].description}</p>
           ) : null}
         </div>
+      ) : null}
+      {steps && !reviewing && steps[step].blocks?.length && renderBlocks ? (
+        <div className="flex flex-col gap-6">{renderBlocks(steps[step].blocks ?? [])}</div>
       ) : null}
       {reviewing && steps ? (
         <dl className="flex flex-col divide-y rounded-lg border text-[13.5px]">
