@@ -47,7 +47,7 @@ export type ChangeOp =
   /**
    * View settings. Forms and landing pages: who can see them, the intro, the button. fieldIds sets which fields
    * a view shows and in what order: a form's questions, a table's columns, a board's card fields or an approval
-   * queue's details.
+   * queue's details, or the extra order fields a Register asks.
    */
   | {
       op: "update_view";
@@ -183,6 +183,9 @@ function setViewFields(view: View, entity: Entity | undefined, fieldIds: string[
     case "approval_queue":
       view.detailFieldIds = ids;
       break;
+    case "checkout":
+      view.fieldIds = ids;
+      break;
   }
 }
 
@@ -264,6 +267,7 @@ function removeField(bp: Blueprint, entityId: string, fieldId: string) {
     }
     if (v.type === "kanban") v.cardFieldIds = keep(v.cardFieldIds);
     if (v.type === "approval_queue") v.detailFieldIds = keep(v.detailFieldIds);
+    if (v.type === "checkout" && v.fieldIds) v.fieldIds = keep(v.fieldIds);
     if (v.type === "notes" && v.metaFieldIds) v.metaFieldIds = keep(v.metaFieldIds);
   }
   for (const w of bp.widgets) if (w.entityId === entityId && w.list) w.list.fieldIds = keep(w.list.fieldIds);

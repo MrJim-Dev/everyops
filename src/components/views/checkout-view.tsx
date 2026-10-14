@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AnimatedValue } from "@/components/motion/animated-value";
 import { SegmentedControl } from "@/components/motion/segmented-control";
+import { FieldInput } from "@/components/records/field-input";
 import { RelationInput } from "@/components/records/relation-input";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
@@ -14,14 +15,25 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useReportView } from "@/lib/assistant/screen-store";
 import { useCurrentUser } from "@/lib/auth/client";
 import { findEntity, getEntity, getField, recordsOf, recordTitle } from "@/lib/blueprint/lookup";
-import type { CheckoutView as CheckoutConfig, DataRecord, Entity, Field } from "@/lib/blueprint/types";
+import type {
+  CheckoutView as CheckoutConfig,
+  DataRecord,
+  Entity,
+  Field,
+  FieldValue,
+  RecordData,
+} from "@/lib/blueprint/types";
 import {
   customerFieldOf,
   isCreditMethod,
   lowStockFieldOf,
+  missingAnswers,
   paymentChoices,
   priceFieldOf,
+  registerDefaults,
+  registerFields,
   saleRecords,
+  stickyField,
   stockFieldOf,
 } from "@/lib/engine/register";
 import { formatMoney } from "@/lib/format";
@@ -94,6 +106,37 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
   const [justSold, setJustSold] = useState<string | null>(null);
   const [customer, setCustomer] = useState<string | null>(null);
 
+  // Everything else the sale needs (a branch, a table, a shift), read from the blueprint. Branch-like answers
+  // stick to this register between sales and reloads; a field with only one possible choice is pre-picked.
+  const asked = useMemo(() => registerFields(blueprint, view), [blueprint, view]);
+  const answersKey = `everyops:register:${workspaceId}:${view.id}`;
+  const [saved, setSaved] = useState<RecordData>({});
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(answersKey) ?? "{}");
+      if (stored && typeof stored === "object" && !Array.isArray(stored)) setSaved(stored);
+    } catch {}
+  }, [answersKey]);
+  const [typed, setTyped] = useState<RecordData>({});
+  const answers = useMemo(
+    () => ({ ...registerDefaults(asked, records, saved), ...typed }),
+    [asked, records, saved, typed],
+  );
+  const missing = missingAnswers(asked, answers);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const answer = (field: Field, value: FieldValue) => {
+    setTyped((t) => ({ ...t, [field.id]: value }));
+    setFieldErrors(({ [field.id]: _, ...rest }) => rest);
+    if (!stickyField(field)) return;
+    setSaved((s) => {
+      const next = { ...s, [field.id]: value };
+      try {
+        localStorage.setItem(answersKey, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
   const products = useMemo(
     () =>
       recordsOf(records, product.id)
@@ -112,7 +155,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
   const isCash = method === "cash" || /\bcash\b/i.test(methodLabel);
   const shortBy = isCash && cash !== "" ? total - cashValue : 0;
   const credit = isCreditMethod(`${method} ${methodLabel}`);
-  const needsCustomer = credit && !!customerField && !customer;
+  const needsCustomer = (credit || !!customerField?.required) && !!customerField && !customer;
   const lowAt = (p: DataRecord) => Number(p.data[lowStockField?.id ?? ""]) || LOW_STOCK;
 
   const add = (productId: string) =>
@@ -159,14 +202,23 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
       status,
       cashier: user?.name || user?.email,
       customer: customer ?? undefined,
+      answers,
     });
     const result = actions.createWithLines(order.id, sale.order, line.id, sale.lines);
     if (!result.ok) {
+      const shown = new Set(asked.map((a) => a.field.id));
+      setFieldErrors(
+        Object.fromEntries(
+          result.errors.flatMap((e) => (e.fieldId && shown.has(e.fieldId) ? [[e.fieldId, e.message]] : [])),
+        ),
+      );
       const first = result.errors[0]?.message;
+      const unasked = result.errors.some((e) => !e.fieldId || !shown.has(e.fieldId));
       toast.error(first ?? "The sale could not be saved", {
-        description: first?.endsWith("is required")
-          ? "The Register doesn't ask for this field. Ask the assistant to give it a default or make it optional."
-          : undefined,
+        description:
+          unasked && first?.endsWith("is required")
+            ? "This field belongs to the order lines. Ask the assistant to give it a default or make it optional."
+            : undefined,
       });
       return;
     }
@@ -195,6 +247,13 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
     setCart([]);
     setCash("");
     setCustomer(null);
+    // The branch stays picked for the next sale; one-off answers (a note) start empty again.
+    setTyped((t) =>
+      Object.fromEntries(
+        Object.entries(t).filter(([id]) => asked.some((a) => a.field.id === id && stickyField(a.field))),
+      ),
+    );
+    setFieldErrors({});
     if (status !== "held") {
       setJustSold(code);
       setTimeout(() => setJustSold(null), 1400);
@@ -340,6 +399,31 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
               className="font-mono text-[22px] font-semibold tabular"
             />
           </div>
+          {asked.map(({ field, on }) => {
+            const id = `sale-${on}-${field.id}`;
+            const error = fieldErrors[field.id];
+            const needed = cart.length > 0 && missing.includes(field);
+            return (
+              <div key={id} className="flex flex-col gap-2">
+                <Label htmlFor={id} className="text-[12px] text-muted-foreground">
+                  {field.name}
+                  {field.required ? (
+                    <span aria-hidden="true" className="text-muted-foreground">
+                      *
+                    </span>
+                  ) : null}
+                </Label>
+                <FieldInput
+                  id={id}
+                  field={field}
+                  value={answers[field.id]}
+                  invalid={!!error || needed}
+                  onChange={(v) => answer(field, v)}
+                />
+                {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+              </div>
+            );
+          })}
           <div className="flex flex-col gap-2">
             <span className="text-[12px] text-muted-foreground">Payment method</span>
             <SegmentedControl
@@ -399,7 +483,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
           ) : null}
           <Button
             size="lg"
-            disabled={cart.length === 0 || shortBy > 0 || needsCustomer || !!justSold}
+            disabled={cart.length === 0 || shortBy > 0 || needsCustomer || missing.length > 0 || !!justSold}
             onClick={() => complete("completed")}
             className={cn("h-11 text-[14px]", justSold && "disabled:opacity-100")}
           >
@@ -418,9 +502,18 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
             </span>
           </Button>
           {orderStatus?.options?.some((o) => o.id === "held") ? (
-            <Button variant="outline" disabled={cart.length === 0} onClick={() => complete("held")}>
+            <Button
+              variant="outline"
+              disabled={cart.length === 0 || missing.length > 0}
+              onClick={() => complete("held")}
+            >
               Hold order
             </Button>
+          ) : null}
+          {cart.length > 0 && missing.length > 0 ? (
+            <p aria-live="polite" className="text-center text-[12px] text-muted-foreground">
+              Choose {missing.map((f) => f.name.toLowerCase()).join(", ")} to complete the sale.
+            </p>
           ) : null}
         </div>
       </section>
