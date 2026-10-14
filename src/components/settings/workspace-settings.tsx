@@ -8,8 +8,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { CATALOG } from "@/lib/catalog";
 import { downloadText, fileSlug } from "@/lib/download";
-import { formatDate, formatNumber } from "@/lib/format";
+import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
 import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
 import { SettingsPage, SettingsSection } from "./settings-section";
@@ -42,14 +43,17 @@ export function WorkspaceSettings() {
     }
   };
   const download = (file: string, data: unknown) => downloadText(file, JSON.stringify(data, null, 2));
+  // The latest change still in effect; version numbers stay out of the product.
+  const lastChange = workspace.changes.find((c) => !c.undoneAt);
+  const source = workspace.source && CATALOG.find((s) => s.id === workspace.source?.systemId);
 
   const details: [string, React.ReactNode][] = [
     ["Owner", workspace.owner?.name ?? "You"],
     ["Created", formatDate(workspace.createdAt, { withYear: true })],
     [
-      "Version",
+      "Last change",
       <Link key="v" href={`${ws.basePath}/history`} className="text-primary hover:underline">
-        v{workspace.currentVersion}, see history
+        {lastChange ? `${formatDateTime(lastChange.appliedAt)}, see history` : "None yet, see history"}
       </Link>,
     ],
     ["Systems", formatNumber(ws.blueprint.systems.length)],
@@ -58,7 +62,7 @@ export function WorkspaceSettings() {
       "Based on",
       workspace.source ? (
         <Link key="s" href={`/preview/${workspace.source.systemId}`} className="hover:underline">
-          Community system v{workspace.source.version}
+          {source ? source.name : "A community system"}
         </Link>
       ) : (
         "Built with Ask EveryOps"
@@ -132,7 +136,7 @@ export function WorkspaceSettings() {
         <div className="divide-y rounded-lg border">
           <ExportRow
             title="Blueprint"
-            detail={`Systems, fields, screens and rules, version ${workspace.currentVersion}`}
+            detail="Systems, fields, screens and rules, as they are now"
             onDownload={() =>
               download(`${fileSlug(ws.name)}-blueprint-v${workspace.currentVersion}.json`, ws.blueprint)
             }
