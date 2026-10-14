@@ -6,7 +6,8 @@ import type { Block, Blueprint, Entity, Field, FormExtras } from "./types";
 export type ValidationError = { path: string; message: string };
 
 const DATE_TYPES = new Set(["date", "datetime", "time_range"]);
-const GROUP_KINDS = new Set(["choice", "status", "relation", "person", "checkbox"]);
+/** What a table can group its rows by. */
+export const GROUP_KINDS = new Set(["choice", "status", "relation", "person", "checkbox"]);
 /** A moment in time with an hour, which heatmaps need. */
 const hasHour = (f: Field | undefined) =>
   !!f && (f.type === "datetime" || (f.type === "time_range" && f.range !== "dates"));

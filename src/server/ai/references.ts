@@ -1,6 +1,6 @@
 import "server-only";
 import type { Blueprint } from "@/lib/blueprint/types";
-import { COMMON_NEEDS, matchPlaybooks, type Playbook } from "@/lib/catalog/playbooks";
+import { BUILD_PRINCIPLES, COMMON_NEEDS, matchPlaybooks, type Playbook } from "@/lib/catalog/playbooks";
 import { type CommunitySystem, listCommunity } from "@/server/community";
 
 /** Community systems change rarely; setup reads them once every few minutes. */
@@ -71,9 +71,16 @@ export async function setupReferences(text: string, limit = 3): Promise<SetupRef
 
 /** The references as prompt text: what businesses like this need, and how similar community systems are built. */
 export function referencesText(refs: SetupReferences): string {
-  const parts = [`What every business that serves customers usually needs:\n${COMMON_NEEDS}`];
+  const parts = [
+    `How to build so the owner can run and grow it without a redesign:\n${BUILD_PRINCIPLES}`,
+    `What every business that serves customers usually needs:\n${COMMON_NEEDS}`,
+  ];
   for (const p of refs.playbooks)
-    parts.push(`What ${p.name.toLowerCase()} usually need:\n${p.needs}\nWorth asking: ${p.ask}`);
+    parts.push(
+      p.kind === "business"
+        ? `What ${p.name.toLowerCase()} usually need:\n${p.needs}\nWorth asking: ${p.ask}`
+        : `What a system for ${p.name.toLowerCase()} usually has (build the parts this business needs):\n${p.needs}\nWorth asking: ${p.ask}`,
+    );
   if (refs.systems.length)
     parts.push(
       `Community systems built for similar businesses (start from them, then add what's missing):\n${refs.systems.map(describeSystem).join("\n")}`,

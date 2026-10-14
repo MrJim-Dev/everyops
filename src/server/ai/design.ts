@@ -1,6 +1,7 @@
 import "server-only";
 import type { Part } from "@google/genai";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
+import { displayKind } from "@/lib/blueprint/field-kind";
 import type {
   Block,
   Blueprint,
@@ -16,7 +17,7 @@ import type {
   Widget,
   WorkspaceData,
 } from "@/lib/blueprint/types";
-import { validateBlueprint } from "@/lib/blueprint/validate";
+import { GROUP_KINDS, validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { computeAll } from "@/lib/engine/compute";
 import { isImagePath } from "@/lib/engine/records";
@@ -429,6 +430,80 @@ export function tidy(bp: Blueprint): Blueprint {
 }
 
 /** Problems the generic validator doesn't catch but would break a screen. */
+const RESULT_TYPE: Partial<Record<Field["type"], NonNullable<Field["formula"]>["resultType"]>> = {
+  money: "money",
+  number: "number",
+  percent: "number",
+  rollup: "number",
+  checkbox: "checkbox",
+  date: "date",
+};
+
+/**
+ * Formulas reach one link away (deal.price), but Gemini keeps writing two (deal.property.price), which fails
+ * validation and costs a repair that rewrites the whole design. Each two-link reference becomes a one-link formula
+ * field on the record in between (deal.property_price = property.price) that the original formula reads instead.
+ * Text in quotes is left alone. Formulas compute, then roll-ups, then formulas again, so the copy is current.
+ */
+export function flattenLinks(bp: Blueprint): Blueprint {
+  const linkOf = (entity: Entity, id: string) => {
+    const f = entity.fields.find((x) => x.id === id && x.relation);
+    return f ? bp.entities.find((e) => e.id === f.relation?.entityId) : undefined;
+  };
+  for (const entity of bp.entities)
+    for (const field of entity.fields) {
+      if (!field.formula?.expr.includes(".")) continue;
+      field.formula.expr = field.formula.expr
+        .split(/('[^']*')/)
+        .map((part, i) =>
+          i % 2
+            ? part
+            : part.replace(
+                /\b([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\b/g,
+                (whole, a, b, c) => {
+                  const middle = linkOf(entity, a);
+                  const far = middle && linkOf(middle, b);
+                  const target = far?.fields.find((x) => x.id === c);
+                  if (!middle || !far || !target) return whole;
+                  const id = `${b}_${c}`;
+                  if (!middle.fields.some((x) => x.id === id))
+                    middle.fields.push({
+                      id,
+                      name: `${middle.fields.find((x) => x.id === b)?.name ?? b} ${target.name.toLowerCase()}`,
+                      type: "formula",
+                      formula: {
+                        expr: `${b}.${c}`,
+                        resultType:
+                          target.type === "formula"
+                            ? (target.formula?.resultType ?? "text")
+                            : (RESULT_TYPE[target.type] ?? "text"),
+                      },
+                    });
+                  return `${a}.${id}`;
+                },
+              ),
+        )
+        .join("");
+    }
+  return bp;
+}
+
+/**
+ * A repair must return the whole design. Gemini sometimes returns only the parts it fixed (two record types of nine),
+ * which validates but loses the workspace, so a repair that drops more than a quarter of the record types or
+ * views is sent back.
+ */
+export function shrunk(
+  previous: { entities: number; views: number } | null,
+  bp: Pick<Blueprint, "entities" | "views">,
+): string[] {
+  if (!previous) return [];
+  if (bp.entities.length >= previous.entities * 0.75 && bp.views.length >= previous.views * 0.75) return [];
+  return [
+    `design: you returned only part of the design (${bp.entities.length} of ${previous.entities} record types, ${bp.views.length} of ${previous.views} views). Return the whole design again with every record type, view, widget, rule and sample, with the problems fixed.`,
+  ];
+}
+
 function extraChecks(bp: Blueprint, brief: string): string[] {
   const errors: string[] = [];
   const entityIds = new Set(bp.entities.map((e) => e.id));
@@ -440,6 +515,14 @@ function extraChecks(bp: Blueprint, brief: string): string[] {
     !bp.views.some((v) => v.type === "form" && v.public)
   )
     errors.push("The brief asks for a public page customers use, but no form view has public true.");
+  // Same for a register: a POS without one is just tables of orders.
+  if (
+    /\bpos\b|point[- ]of[- ]sale|(cash|pos) register|checkout register|cashier/i.test(brief) &&
+    !bp.views.some((v) => v.type === "checkout")
+  )
+    errors.push(
+      "The brief asks for a point of sale, but there is no checkout view (products, orders with line items and a payment field).",
+    );
   for (const e of bp.entities) {
     const primary = e.fields.find((f) => f.id === e.primaryFieldId);
     if (primary && (primary.type === "formula" || primary.type === "rollup"))
@@ -584,21 +667,24 @@ export async function designWorkspace(
       ]
     : context;
   let repairs = 0;
+  /** The last whole design that was rejected: repairs start from it, and one that returns only part of it is caught. */
+  let previous: { entities: number; views: number; data: unknown } | null = null;
   for (let attempt = 0; attempt < 4; attempt++) {
-    // Designs take 8–30 s; a stalled call gets a parallel twin after 35 s instead of a minute's wait, and a call
-    // that runs away (see runawayWatcher) is stopped within seconds and replaced. Real designs are 2–7k tokens.
+    // Designs take 8–40 s; a stalled call gets a parallel twin after 45 s instead of a minute's wait, and a call
+    // that runs away (see runawayWatcher) is stopped within seconds and replaced. Real designs are 2–8k tokens: with
+    // the playbooks' category and status record types, a rental business is about 7.5k, and a repair 7–8k.
     const result = await generateJsonHedged(
       designRequest,
       {
         system: DESIGN_SYSTEM,
         prompt,
         task: "design",
-        timeoutMs: 75_000,
+        timeoutMs: 110_000,
         thinking: "LOW",
         maxOutputTokens: 16_000,
         enumLiterals: true,
       },
-      { hedgeMs: 35_000, attempts: 4 },
+      { hedgeMs: 45_000, attempts: 4 },
     );
     if (!result.ok) return { ok: false, message: result.error };
     const raw = toBlueprint(result.data);
@@ -612,9 +698,11 @@ export async function designWorkspace(
         fileParts.length ? undefined : brief,
       ),
     );
+    const partial = shrunk(previous, bp);
     const errors = [
       ...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`),
       ...extraChecks(bp, brief),
+      ...partial,
     ];
     if (!errors.length) {
       const records = computeAll(bp, toRecords(bp, samples, now), now);
@@ -626,8 +714,10 @@ export async function designWorkspace(
       };
     }
     console.warn(JSON.stringify({ event: "design_rejected", attempt, errors: errors.slice(0, 15) }));
+    if (!partial.length)
+      previous = { entities: bp.entities.length, views: bp.views.length, data: result.data };
     if (++repairs > 2) break;
-    prompt = `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour previous design:\n${JSON.stringify(result.data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\nReturn the full corrected design.`;
+    prompt = `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour previous design:\n${JSON.stringify(previous?.data ?? result.data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\nReturn the full corrected design. Change only what these problems need: keep every other record type, field id, view, widget, rule and sample exactly as it was.`;
   }
   return {
     ok: false,
@@ -1019,15 +1109,28 @@ export function tidyBlocks(
 }
 
 const RESERVED_PAGES: Record<string, string> = { settings: "Setup", history: "Log", search: "Lookup" };
+/** URL segments under /w/[workspace] the app uses itself; a page with one of these ids could never be opened. */
+const RESERVED_IDS = new Set(["settings", "history", "ask"]);
 
 /**
  * Structural slips that would quietly break features: a page named like one of the app's own, bookings without
  * booking settings (no schedule, no double-booking check, no public slots), and line items without a parent.
  */
 export function repairStructure(bp: Blueprint): Blueprint {
+  flattenLinks(bp);
   for (const s of bp.systems) {
     const fix = RESERVED_PAGES[s.name.trim().toLowerCase()];
     if (fix) s.name = fix;
+    if (RESERVED_IDS.has(s.id)) {
+      const base =
+        s.name
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_") || "page";
+      let id = RESERVED_IDS.has(base) ? `${base}_page` : base;
+      while (bp.systems.some((x) => x !== s && x.id === id)) id = `${id}_2`;
+      s.id = id;
+    }
   }
   for (const e of bp.entities) {
     if (!e.booking) {
@@ -1094,6 +1197,21 @@ export function repairStructure(bp: Blueprint): Blueprint {
   }
   // Pages that only list line items go: those show inside their parent record.
   const children = new Set(bp.entities.filter((e) => e.parent).map((e) => e.id));
+  // Two slips that used to cost a whole repair round (and a repair rewrites the whole design, sometimes losing
+  // fields): a table grouped by a date or number, which can't be grouped, and a board on a select instead of the
+  // record type's status.
+  for (const v of bp.views) {
+    const entity = bp.entities.find((e) => e.id === v.entityId);
+    if (!entity) continue;
+    if (v.type === "table" && v.groupByFieldId) {
+      const field = entity.fields.find((f) => f.id === v.groupByFieldId);
+      if (!field || !GROUP_KINDS.has(displayKind(bp, field))) delete v.groupByFieldId;
+    }
+    if (v.type === "kanban" && entity.fields.find((f) => f.id === v.statusFieldId)?.type !== "status") {
+      const status = entity.fields.find((f) => f.type === "status");
+      if (status) v.statusFieldId = status.id;
+    }
+  }
   bp.systems = bp.systems.filter(
     (s) =>
       s.widgetIds.length > 0 ||
