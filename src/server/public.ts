@@ -160,7 +160,13 @@ export async function submitPublicForm(
     )
       return { ok: false, status: 422, message: "Pick a time that hasn't started yet." } as const;
 
-    const result = createRecord({ blueprint: bp, records: doc.records }, entity.id, input, now);
+    // A visitor can only answer what the form asks. Required fields it doesn't show (a player record, an assigned
+    // staff member) stay empty for staff to fill in, instead of refusing every submission.
+    const asked = new Set(publicFieldsOf(bp, view).map((f) => f.id));
+    const notYet = new Set(entity.fields.filter((f) => !asked.has(f.id)).map((f) => f.id));
+    const result = createRecord({ blueprint: bp, records: doc.records }, entity.id, input, now, undefined, {
+      notYet,
+    });
     if (!result.ok)
       return {
         ok: false,
