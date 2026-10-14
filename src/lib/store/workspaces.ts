@@ -19,6 +19,15 @@ import {
   type Workspace,
   workspaceFrom,
 } from "./workspace-model";
+import {
+  afterSave,
+  type Baseline,
+  baselineOf,
+  diffWorkspace,
+  type PatchResult,
+  pullInto,
+  type RecordChanges,
+} from "./workspace-sync";
 
 export * from "./workspace-model";
 
@@ -43,8 +52,10 @@ type State = {
   createWorkspace: (input: NewWorkspace) => string;
   setRecords: (slug: string, records: DataRecord[]) => void;
   setDoc: (slug: string, viewId: string, body: string) => void;
-  /** Pulls in records the server created since this copy was read (public bookings), without saving. */
+  /** Pulls in records others saved since this copy was read (public bookings, teammates). */
   refresh: (slug: string) => Promise<void>;
+  /** Loads a workspace's records and history when it opens (the list only has summaries). False if it failed. */
+  ensureLoaded: (slug: string) => Promise<boolean>;
   saveSetup: (slug: string, progress: SetupProgress) => void;
   finishSetup: (slug: string, data: WorkspaceData, name: string, summary: string) => void;
   /** by: who made it, for invites the plan sends. */
@@ -54,37 +65,73 @@ type State = {
 
 /* ---------- Server sync ---------- */
 
+// Saves are patches against what the server last confirmed (workspace-sync.ts): one edited record sends one record.
 const SAVE_DELAY_MS = 500;
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const pending = new Set<string>();
+const inflight = new Set<string>();
+const baselines = new Map<string, Baseline>();
+const loads = new Map<string, Promise<boolean>>();
 let warned = false;
 
+const url = (slug: string, rest = "") => `/api/workspaces/${encodeURIComponent(slug)}${rest}`;
+
 async function send(slug: string, attempt = 0): Promise<void> {
+  if (inflight.has(slug)) return; // The save in flight checks for more changes when it's done.
   const ws = useWorkspaces.getState().workspaces[slug];
-  if (!ws) return;
+  if (!ws) return void pending.delete(slug);
+  const base = baselines.get(slug);
+  const patch = diffWorkspace(base, ws);
+  if (!patch) return void pending.delete(slug);
+  inflight.add(slug);
+  let retry: (() => void) | null = null;
   try {
-    const res = await fetch(`/api/workspaces/${encodeURIComponent(slug)}`, {
-      method: "PUT",
+    const res = await fetch(url(slug), {
+      method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(ws),
+      body: JSON.stringify(patch),
     });
-    if (res.ok) {
-      pending.delete(slug);
+    const body = (await res.json().catch(() => null)) as PatchResult | null;
+    if (res.ok && body?.ok) {
+      baselines.set(slug, afterSave(base, patch, body.revs));
       warned = false;
+      // Edits made while this save was in flight go out next.
+      retry = () => void send(slug);
       return;
     }
-    const body = (await res.json().catch(() => null)) as { message?: string } | null;
-    if (res.status >= 500 && attempt < 2)
-      return void setTimeout(() => void send(slug, attempt + 1), 2000 * (attempt + 1));
+    const failed = body && !body.ok ? body : null;
+    if (res.status === 409 && failed?.conflicts && attempt < 3) {
+      // Someone saved some of these records first: fold their copies in, then save the merged result.
+      inflight.delete(slug);
+      await pull(slug, true);
+      retry = () => void send(slug, attempt + 1);
+      return;
+    }
+    if (res.status === 409 && failed?.reload) {
+      pending.delete(slug);
+      toast.error("This workspace changed elsewhere", { description: failed.message });
+      inflight.delete(slug);
+      await ensureLoaded(slug, true);
+      return;
+    }
+    if (res.status >= 500 && attempt < 2) {
+      retry = () => void setTimeout(() => void send(slug, attempt + 1), 2000 * (attempt + 1));
+      return;
+    }
     pending.delete(slug);
     toast.error("Couldn't save your change", {
-      description: body?.message ?? "Reload the page and try again.",
+      description: failed?.message ?? "Reload the page and try again.",
     });
   } catch {
-    if (attempt < 3) return void setTimeout(() => void send(slug, attempt + 1), 2000 * (attempt + 1));
-    if (!warned)
-      toast.error("You're offline", { description: "Changes will save when the connection is back." });
-    warned = true;
+    if (attempt < 3) retry = () => void setTimeout(() => void send(slug, attempt + 1), 2000 * (attempt + 1));
+    else {
+      if (!warned)
+        toast.error("You're offline", { description: "Changes will save when the connection is back." });
+      warned = true;
+    }
+  } finally {
+    inflight.delete(slug);
+    if (retry) retry();
   }
 }
 
@@ -100,22 +147,87 @@ function scheduleSave(slug: string) {
   );
 }
 
+/**
+ * Loads a workspace's records, history, page text and every version (the list only has summaries). Returns false
+ * if it couldn't. Force reloads it even when loaded, dropping unsaved edits (the design changed elsewhere).
+ */
+function ensureLoaded(slug: string, force = false): Promise<boolean> {
+  const ws = useWorkspaces.getState().workspaces[slug];
+  if (!ws) return Promise.resolve(false);
+  if (ws.loaded !== false && !force) return Promise.resolve(true);
+  const running = loads.get(slug);
+  if (running) return running;
+  const load = (async () => {
+    const res = await fetch(url(slug), { cache: "no-store" }).catch(() => null);
+    const body = res?.ok
+      ? ((await res.json().catch(() => null)) as {
+          workspace: Workspace;
+          revs: Record<string, number>;
+        } | null)
+      : null;
+    if (!body) return false;
+    baselines.set(slug, baselineOf(body.workspace, body.revs));
+    useWorkspaces.setState((s) => {
+      const local = s.workspaces[slug];
+      if (!local) return s;
+      // Opening it just now is newer than the stored time; it's saved with the next change.
+      const openedAt = local.openedAt > body.workspace.openedAt ? local.openedAt : body.workspace.openedAt;
+      return { workspaces: { ...s.workspaces, [slug]: { ...body.workspace, openedAt, loaded: true } } };
+    });
+    return true;
+  })().finally(() => loads.delete(slug));
+  loads.set(slug, load);
+  return load;
+}
+
+/**
+ * Brings in records others saved since this copy was read (public bookings, teammates), merging them with any
+ * edits here that aren't saved yet. Force runs it even while a save is in flight (after a conflict).
+ */
+async function pull(slug: string, force = false) {
+  const ws = useWorkspaces.getState().workspaces[slug];
+  if (!ws || ws.loaded === false || !ws.syncedAt || (!force && inflight.has(slug))) return;
+  const res = await fetch(url(slug, `/records?since=${encodeURIComponent(ws.syncedAt)}`), {
+    cache: "no-store",
+  }).catch(() => null);
+  const body = res?.ok ? ((await res.json().catch(() => null)) as RecordChanges | null) : null;
+  const base = baselines.get(slug);
+  if (!body || !base?.records) return;
+  let resave = false;
+  useWorkspaces.setState((s) => {
+    const current = s.workspaces[slug];
+    if (!current || current.loaded === false) return s;
+    const merged = pullInto(current.records, base.records ?? new Map(), body);
+    baselines.set(slug, { ...base, records: merged.baseRecords });
+    if (!merged.changed)
+      return { workspaces: { ...s.workspaces, [slug]: { ...current, syncedAt: body.syncedAt } } };
+    if (merged.added.length) markFresh(merged.added);
+    const records = computeAll(blueprintOf(current), merged.records);
+    resave = true;
+    return {
+      workspaces: { ...s.workspaces, [slug]: { ...current, syncedAt: body.syncedAt, records } },
+    };
+  });
+  // Merged edits (and totals recalculated with the new records) still differ from the server: save them.
+  if (resave && diffWorkspace(baselines.get(slug), useWorkspaces.getState().workspaces[slug]))
+    scheduleSave(slug);
+}
+
 async function sendDelete(slug: string) {
   clearTimeout(timers.get(slug));
   pending.delete(slug);
-  const res = await fetch(`/api/workspaces/${encodeURIComponent(slug)}`, { method: "DELETE" }).catch(
-    () => null,
-  );
+  baselines.delete(slug);
+  const res = await fetch(url(slug), { method: "DELETE" }).catch(() => null);
   if (!res?.ok)
     toast.error("Couldn't remove the workspace", { description: "Reload the page and try again." });
 }
 
 /** True while edits are waiting to reach the server. */
-export const hasUnsavedChanges = () => pending.size > 0;
+export const hasUnsavedChanges = () => pending.size > 0 || inflight.size > 0;
 
 if (typeof window !== "undefined") {
   window.addEventListener("beforeunload", (event) => {
-    if (pending.size) event.preventDefault();
+    if (hasUnsavedChanges()) event.preventDefault();
   });
 }
 
@@ -155,6 +267,7 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
         // isn't on the server yet: keep it and save it now instead of dropping it.
         const server = Object.fromEntries(body.workspaces.map((w) => [w.slug, w]));
         const early = Object.values(get().workspaces).filter((w) => !server[w.slug]);
+        for (const w of body.workspaces) baselines.set(w.slug, baselineOf(w));
         rawSet({
           owner,
           status: "ready",
@@ -173,6 +286,10 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
       const ws = get().workspaces[slug];
       const clean = name.trim();
       if (!ws || !clean || clean === ws.name) return;
+      if (ws.loaded === false) {
+        void ensureLoaded(slug).then((ok) => ok && get().renameWorkspace(slug, name));
+        return;
+      }
       // A rename is a change like any other: versioned, in History, and undoable.
       get().applyChange(slug, {
         request: `Rename the workspace to ${clean}`,
@@ -248,36 +365,9 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
 
     setRecords: (slug, records) => update(slug, (ws) => ({ ...ws, records })),
 
-    refresh: async (slug) => {
-      if (pending.has(slug) || !get().workspaces[slug]) return;
-      const res = await fetch(`/api/workspaces/${encodeURIComponent(slug)}`, { cache: "no-store" }).catch(
-        () => null,
-      );
-      if (!res?.ok) return;
-      const body = (await res.json().catch(() => null)) as {
-        records: DataRecord[];
-        syncedAt: string;
-      } | null;
-      if (!body || pending.has(slug)) return;
-      rawSet((s) => {
-        const ws = s.workspaces[slug];
-        if (!ws) return s;
-        const have = new Set(ws.records.map((r) => r.id));
-        const since = ws.syncedAt ?? "";
-        const added = body.records.filter((r) => !have.has(r.id) && r.createdAt > since);
-        if (added.length) markFresh(added.map((r) => r.id));
-        return {
-          workspaces: {
-            ...s.workspaces,
-            [slug]: {
-              ...ws,
-              syncedAt: body.syncedAt,
-              records: added.length ? computeAll(blueprintOf(ws), [...ws.records, ...added]) : ws.records,
-            },
-          },
-        };
-      });
-    },
+    refresh: (slug) => pull(slug),
+
+    ensureLoaded: (slug) => ensureLoaded(slug),
 
     setDoc: (slug, viewId, body) =>
       update(slug, (ws) => ({
@@ -288,7 +378,11 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
     saveSetup: (slug, progress) =>
       update(slug, (ws) => (ws.setup ? { ...ws, setup: { ...ws.setup, progress } } : ws)),
 
-    finishSetup: (slug, data, name, summary) =>
+    finishSetup: (slug, data, name, summary) => {
+      if (get().workspaces[slug]?.loaded === false) {
+        void ensureLoaded(slug).then((ok) => ok && get().finishSetup(slug, data, name, summary));
+        return;
+      }
       update(slug, (ws) => {
         const version = ws.versions.length + 1;
         return {
@@ -300,16 +394,19 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
           records: data.records,
           setup: undefined,
         };
-      }),
+      });
+    },
 
     applyChange: (slug, plan, by) => {
       const ws = get().workspaces[slug];
-      if (!ws) return null;
+      // Plans need the records and every version; workspaces are loaded before anything can plan on them.
+      if (!ws || ws.loaded === false) return null;
       const { workspace, entry } = applyPlan(ws, plan, { by });
       update(slug, () => workspace);
       return entry;
     },
 
-    undoChange: (slug, changeId) => update(slug, (ws) => undoPlan(ws, changeId) ?? ws),
+    undoChange: (slug, changeId) =>
+      update(slug, (ws) => (ws.loaded === false ? ws : (undoPlan(ws, changeId) ?? ws))),
   };
 });

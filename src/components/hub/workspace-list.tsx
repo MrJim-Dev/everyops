@@ -20,7 +20,7 @@ import { ViewEmpty } from "@/components/views/view-empty";
 import { useCurrentUser } from "@/lib/auth/client";
 import { usePublished } from "@/lib/community/published";
 import { useHydrated } from "@/lib/store/use-hydrated";
-import { roleOf } from "@/lib/store/workspace-model";
+import { recordCount, roleOf } from "@/lib/store/workspace-model";
 import { useWorkspaces } from "@/lib/store/workspaces";
 import { WorkspaceCard } from "./workspace-card";
 import { WorkspaceOverview } from "./workspace-overview";
@@ -80,7 +80,7 @@ export function WorkspaceList() {
         sort === "name"
           ? a.name.localeCompare(b.name)
           : sort === "records"
-            ? b.records.length - a.records.length
+            ? recordCount(b) - recordCount(a)
             : 0,
       );
   }, [workspaces, query, filter, sort, user?.id, publicSlugs]);

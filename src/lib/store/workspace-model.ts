@@ -1,7 +1,8 @@
 /**
- * Workspace model shared by the browser store and the server. A workspace is stored as one JSON
- * document (blueprint versions, records, change history, setup conversation); its owner, members
- * and invites live in their own tables so access can be checked in SQL.
+ * Workspace model shared by the browser store and the server. The workspace row holds its settings (name, current
+ * version, setup conversation); records, blueprint versions, history and page text each live in their own table
+ * (see src/server/workspace-data.ts), as do the owner, members and invites, so access is checked in SQL and a change
+ * to one record writes one row.
  */
 
 import type { AttachmentRef } from "@/lib/assistant/attachments";
@@ -92,25 +93,24 @@ export type Workspace = {
   invites?: Invite[];
   /** Set while Ask EveryOps is still setting the workspace up. */
   setup?: { prompt: string; attachments?: AttachmentRef[]; progress?: SetupProgress };
-  /**
-   * Server time when this copy was read. Saves keep records the server created after it (public bookings)
-   * instead of treating them as deleted. Never stored in the document.
-   */
+  /** Server time when the records were last read; an open tab asks for what changed since. Never stored. */
   syncedAt?: string;
+  /**
+   * False for a workspace list summary: its records, history, page text and older versions load when it opens.
+   * Never stored.
+   */
+  loaded?: boolean;
+  /** The current blueprint, sent with list summaries instead of every version. */
+  current?: Blueprint;
+  /** Record counts, sent with list summaries. */
+  stats?: { records: number; recordsThisWeek: number };
 };
 
-/** The parts of a workspace stored in its JSON document. */
-export type WorkspaceDoc = Omit<Workspace, "ownerId" | "owner" | "members" | "invites" | "syncedAt">;
-
-/**
- * Records to save: the browser's copy, plus any record the server created after the browser last read the
- * workspace (a public booking it hasn't seen yet). Anything older that's missing was deleted on purpose.
- */
-export function mergeRecords(stored: DataRecord[], incoming: DataRecord[], syncedAt?: string): DataRecord[] {
-  if (!syncedAt) return incoming;
-  const have = new Set(incoming.map((r) => r.id));
-  return [...incoming, ...stored.filter((r) => !have.has(r.id) && r.createdAt > syncedAt)];
-}
+/** A whole workspace's content (settings, versions, records, history, page text), as the demo snapshot keeps it. */
+export type WorkspaceDoc = Omit<
+  Workspace,
+  "ownerId" | "owner" | "members" | "invites" | "syncedAt" | "loaded" | "current" | "stats"
+>;
 
 export type PageDoc = { body: string; updatedAt: string };
 
@@ -154,9 +154,12 @@ export function roleOf(ws: Workspace | undefined, accountId: string | null | und
 export const canManage = (role: Role | null) => role === "owner" || role === "admin";
 export const canEdit = (role: Role | null) => role === "owner" || role === "admin" || role === "staff";
 
-export function blueprintOf(ws: Workspace): Blueprint {
-  return ws.versions[ws.currentVersion - 1];
+export function blueprintOf(ws: Pick<Workspace, "versions" | "currentVersion" | "current">): Blueprint {
+  return ws.versions[ws.currentVersion - 1] ?? ws.current;
 }
+/** How many records a workspace has, whether its records are loaded or it's a list summary. */
+export const recordCount = (ws: Workspace) =>
+  ws.loaded === false ? (ws.stats?.records ?? 0) : ws.records.length;
 export function dataOf(ws: Workspace): WorkspaceData {
   return { blueprint: blueprintOf(ws), records: ws.records };
 }
@@ -216,6 +219,16 @@ export function demoWorkspaces(now = new Date()): Workspace[] {
 }
 
 export function toDoc(ws: Workspace): WorkspaceDoc {
-  const { ownerId: _o, owner: _p, members: _m, invites: _i, syncedAt: _s, ...doc } = ws;
+  const {
+    ownerId: _o,
+    owner: _p,
+    members: _m,
+    invites: _i,
+    syncedAt: _s,
+    loaded: _l,
+    current: _c,
+    stats: _t,
+    ...doc
+  } = ws;
   return doc;
 }
