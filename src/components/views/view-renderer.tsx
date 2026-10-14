@@ -7,6 +7,7 @@ import { CanvasView } from "./canvas-view";
 import { CheckoutView } from "./checkout-view";
 import { DocumentView } from "./document-view";
 import { FormView } from "./form-view";
+import { HtmlPageView } from "./html-page-view";
 import { KanbanView } from "./kanban-view";
 import { LandingView } from "./landing-view";
 import { NotesView } from "./notes-view";
@@ -38,6 +39,8 @@ export function ViewRenderer({ view }: { view: View }) {
       return <CanvasView key={view.id} view={view} />;
     case "landing":
       return <LandingView key={view.id} view={view} />;
+    case "html":
+      return <HtmlPageView key={view.id} view={view} />;
   }
 }
 

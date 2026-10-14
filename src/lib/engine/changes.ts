@@ -6,6 +6,7 @@ import type {
   Entity,
   Field,
   FieldValue,
+  FormStep,
   RecordData,
   Rule,
   System,
@@ -16,9 +17,12 @@ import type {
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { computeAll } from "./compute";
 import { recordContext } from "./context";
-import { run, truthy } from "./expr";
+import { parseExpr, run, truthy } from "./expr";
 
-/** The only edits a change plan may make to the design. Nothing here deletes data. */
+/**
+ * The only edits a change plan may make to the design. Every one is reversible: a change saves a whole new
+ * blueprint version, so undo goes back to the previous one, and records it removes are kept on its history entry.
+ */
 export type ChangeOp =
   | { op: "add_field"; entityId: string; field: Field }
   | { op: "update_field"; entityId: string; fieldId: string; patch: Partial<Omit<Field, "id">> }
@@ -47,17 +51,48 @@ export type ChangeOp =
   | {
       op: "update_view";
       viewId: string;
-      patch: { public?: boolean; intro?: string; submitLabel?: string; fieldIds?: string[] };
+      /** Forms: steps replace the form's steps (an empty list makes it one page again). */
+      patch: {
+        public?: boolean;
+        intro?: string;
+        submitLabel?: string;
+        fieldIds?: string[];
+        steps?: FormStep[];
+        review?: boolean;
+      };
     }
   /** Adds a block (live data, text, a form) to a form or landing page, optionally before another block. */
-  | { op: "add_block"; viewId: string; block: Block; beforeBlockId?: string };
+  | { op: "add_block"; viewId: string; block: Block; beforeBlockId?: string }
+  /** Removes a record type with everything built on it: its tabs, cards, rules, links to it and line items. */
+  | { op: "remove_entity"; entityId: string }
+  /** Removes a field from a record type and from the columns, cards and blocks that show it. */
+  | { op: "remove_field"; entityId: string; fieldId: string }
+  /** Removes a sidebar page with its tabs and cards. */
+  | { op: "remove_system"; systemId: string }
+  | { op: "remove_view"; viewId: string }
+  | { op: "remove_widget"; widgetId: string }
+  | { op: "remove_rule"; ruleId: string }
+  | { op: "remove_block"; viewId: string; blockId: string }
+  /** Moves a sidebar page to a position (0 is the top). */
+  | { op: "move_system"; systemId: string; index: number };
 
-/** Data edits a plan may make after its design changes: add records or change field values. */
+/** Data edits a plan may make after its design changes: add, change or delete records. */
 export type RecordOp =
   | { op: "create_record"; id: string; entityId: string; data: RecordData }
-  | { op: "update_record"; recordId: string; patch: RecordData };
+  | { op: "update_record"; recordId: string; patch: RecordData }
+  /** Deletes a record and its line items. The history entry keeps them so undo can bring them back. */
+  | { op: "delete_record"; recordId: string };
 
-export type PlanStep = { kind: "add" | "change"; label: string; detail: string };
+/** Text of a document page, by view id. Undo restores the text it replaced. */
+export type DocOp = { viewId: string; body: string };
+
+/** Team changes that can be undone: invites and roles. Removing someone can't be undone, so it isn't here. */
+export type TeamOp =
+  | { op: "invite"; email: string; role: "admin" | "staff" | "viewer" }
+  | { op: "set_role"; email: string; role: "admin" | "staff" | "viewer" }
+  | { op: "revoke_invite"; email: string };
+
+export type PlanStep = { kind: "add" | "change" | "remove"; label: string; detail: string };
 
 export type ChangePlan = {
   request: string;
@@ -68,6 +103,10 @@ export type ChangePlan = {
   ops: ChangeOp[];
   /** Applied after `ops`, through the same validation and rules as editing by hand. */
   recordOps?: RecordOp[];
+  docOps?: DocOp[];
+  teamOps?: TeamOp[];
+  /** The blueprint version the plan was checked against; a design plan can't be applied to a newer one. */
+  baseVersion?: number;
 };
 
 export type RecordChange = {
@@ -102,6 +141,122 @@ function setViewFields(view: View, entity: Entity | undefined, fieldIds: string[
       view.detailFieldIds = ids;
       break;
   }
+}
+
+/* ---------- Removals (on the copy applyOps works on) ---------- */
+
+const dropEmptySystems = (bp: Blueprint) => {
+  bp.systems = bp.systems.filter((s) => s.viewIds.length + s.widgetIds.length > 0);
+};
+
+function removeWidget(bp: Blueprint, widgetId: string) {
+  bp.widgets = bp.widgets.filter((w) => w.id !== widgetId);
+  for (const s of bp.systems) s.widgetIds = s.widgetIds.filter((id) => id !== widgetId);
+  dropEmptySystems(bp);
+}
+
+function removeView(bp: Blueprint, viewId: string) {
+  bp.views = bp.views.filter((v) => v.id !== viewId);
+  for (const s of bp.systems) s.viewIds = s.viewIds.filter((id) => id !== viewId);
+  // Links to it: "View all" on list cards, and buttons or embedded forms on public pages.
+  for (const w of bp.widgets) if (w.list?.viewId === viewId) delete w.list.viewId;
+  for (const v of bp.views)
+    if ((v.type === "form" || v.type === "landing") && v.blocks)
+      v.blocks = v.blocks
+        .filter((b) => !(b.type === "form" && b.viewId === viewId))
+        .map((b) => (b.type === "hero" && b.ctaViewId === viewId ? { ...b, ctaViewId: undefined } : b));
+  dropEmptySystems(bp);
+}
+
+/**
+ * Formula fields that read a field about to go (directly, or through a link into its record type) become plain
+ * fields that keep the values they have now, so nothing breaks and no data is lost. Undo restores the formula.
+ */
+function freezeDependents(bp: Blueprint, entityId: string, fieldId: string) {
+  for (const e of bp.entities)
+    for (const f of e.fields) {
+      if (!f.formula) continue;
+      const parsed = parseExpr(f.formula.expr);
+      if (!parsed.ok) continue;
+      const reads = parsed.refs.some((ref) => {
+        const [head, tail] = ref.split(".");
+        if (e.id === entityId && head === fieldId) return true;
+        const link = e.fields.find((x) => x.id === head);
+        return !!tail && tail === fieldId && link?.relation?.entityId === entityId;
+      });
+      if (!reads) continue;
+      f.type = f.formula.resultType;
+      delete f.formula;
+    }
+}
+
+function removeField(bp: Blueprint, entityId: string, fieldId: string) {
+  const entity = bp.entities.find((e) => e.id === entityId);
+  if (!entity) return;
+  freezeDependents(bp, entityId, fieldId);
+  entity.fields = entity.fields.filter((f) => f.id !== fieldId);
+  const keep = (ids: string[]) => ids.filter((id) => id !== fieldId);
+  for (const v of bp.views) {
+    if (v.entityId !== entityId) continue;
+    if (v.type === "table") {
+      v.fieldIds = keep(v.fieldIds);
+      v.sort = v.sort?.filter((s) => s.fieldId !== fieldId);
+    }
+    if (v.type === "form") {
+      v.fieldIds = keep(v.fieldIds);
+      // Its steps lose the field too; a step left asking nothing (and not holding the add-ons) goes.
+      if (v.steps) {
+        v.steps = v.steps
+          .map((s) => ({ ...s, fieldIds: keep(s.fieldIds) }))
+          .filter((s) => s.fieldIds.length || (s.extras && v.extras));
+        if (!v.steps.length) delete v.steps;
+      }
+      if (v.extras?.lineEntityId === entityId) {
+        if (v.extras.itemFieldId === fieldId) delete v.extras;
+        else if (v.extras.quantityFieldId === fieldId) delete v.extras.quantityFieldId;
+      }
+    }
+    if (v.type === "kanban") v.cardFieldIds = keep(v.cardFieldIds);
+    if (v.type === "approval_queue") v.detailFieldIds = keep(v.detailFieldIds);
+    if (v.type === "notes" && v.metaFieldIds) v.metaFieldIds = keep(v.metaFieldIds);
+  }
+  for (const w of bp.widgets) if (w.entityId === entityId && w.list) w.list.fieldIds = keep(w.list.fieldIds);
+  for (const v of bp.views)
+    if ((v.type === "form" || v.type === "landing") && v.blocks)
+      for (const b of v.blocks)
+        if (b.type === "records" && b.entityId === entityId) b.fieldIds = keep(b.fieldIds);
+  // Anything that can't work without it (a board grouped by it, a formula reading it) is reported by
+  // validation, so the plan removes or changes it on purpose.
+}
+
+/** A record type and everything that only exists because of it, including its line-item types. */
+function removeEntity(bp: Blueprint, entityId: string) {
+  if (!bp.entities.some((e) => e.id === entityId)) return;
+  for (const child of bp.entities.filter((e) => e.parent?.entityId === entityId && e.id !== entityId))
+    removeEntity(bp, child.id);
+  bp.entities = bp.entities.filter((e) => e.id !== entityId);
+  for (const v of bp.views.filter(
+    (v) =>
+      v.entityId === entityId ||
+      (v.type === "checkout" && (v.productEntityId === entityId || v.lineEntityId === entityId)),
+  ))
+    removeView(bp, v.id);
+  for (const w of bp.widgets.filter(
+    (w) => w.entityId === entityId || w.calc?.terms.some((t) => t.entityId === entityId),
+  ))
+    removeWidget(bp, w.id);
+  bp.rules = bp.rules.filter((r) => r.trigger.entityId !== entityId);
+  for (const e of bp.entities)
+    for (const f of e.fields.filter(
+      (f) => f.relation?.entityId === entityId || f.rollup?.childEntityId === entityId,
+    ))
+      removeField(bp, e.id, f.id);
+  for (const v of bp.views)
+    if ((v.type === "form" || v.type === "landing") && v.blocks)
+      v.blocks = v.blocks.filter((b) => !(b.type === "records" && b.entityId === entityId));
+  // A form whose add-ons lived in it offers none now.
+  for (const v of bp.views) if (v.type === "form" && v.extras?.lineEntityId === entityId) delete v.extras;
+  dropEmptySystems(bp);
 }
 
 export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
@@ -149,6 +304,9 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         if (op.patch.calc?.terms[0]) {
           widget.entityId = op.patch.calc.terms[0].entityId;
           if (op.patch.filter === undefined) delete widget.filter;
+          // A formula's totals can span record types, so the period comparison (one date field) no longer applies.
+          delete widget.compare;
+          delete widget.sparkline;
         }
         if (widget.filter === "") delete widget.filter;
         break;
@@ -173,6 +331,42 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         next.systems = next.systems.filter((s) => s.viewIds.length + s.widgetIds.length > 0);
         break;
       }
+      case "remove_entity":
+        removeEntity(next, op.entityId);
+        break;
+      case "remove_field":
+        removeField(next, op.entityId, op.fieldId);
+        break;
+      case "remove_system": {
+        const system = next.systems.find((s) => s.id === op.systemId);
+        if (!system) break;
+        for (const id of system.viewIds) removeView(next, id);
+        for (const id of system.widgetIds) removeWidget(next, id);
+        next.systems = next.systems.filter((s) => s.id !== op.systemId);
+        break;
+      }
+      case "remove_view":
+        removeView(next, op.viewId);
+        break;
+      case "remove_widget":
+        removeWidget(next, op.widgetId);
+        break;
+      case "remove_rule":
+        next.rules = next.rules.filter((r) => r.id !== op.ruleId);
+        break;
+      case "remove_block": {
+        const view = next.views.find((v) => v.id === op.viewId);
+        if ((view?.type === "form" || view?.type === "landing") && view.blocks)
+          view.blocks = view.blocks.filter((b) => b.id !== op.blockId);
+        break;
+      }
+      case "move_system": {
+        const from = next.systems.findIndex((s) => s.id === op.systemId);
+        if (from < 0) break;
+        const [system] = next.systems.splice(from, 1);
+        next.systems.splice(Math.max(0, Math.min(op.index, next.systems.length)), 0, system);
+        break;
+      }
       case "rename_system": {
         const system = next.systems.find((s) => s.id === op.systemId);
         if (system) system.name = op.name;
@@ -186,9 +380,16 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "update_view": {
         const view = next.views.find((v) => v.id === op.viewId);
         if (!view) break;
-        const { fieldIds, ...settings } = op.patch;
-        if (view.type === "form") Object.assign(view, settings);
-        else if (view.type === "landing" && settings.public !== undefined) view.public = settings.public;
+        const { fieldIds, steps, ...settings } = op.patch;
+        if (view.type === "form") {
+          Object.assign(view, settings);
+          if (steps?.length) view.steps = structuredClone(steps);
+          else if (steps) {
+            delete view.steps;
+            delete view.review;
+          }
+        } else if ((view.type === "landing" || view.type === "html") && settings.public !== undefined)
+          view.public = settings.public;
         if (fieldIds) setViewFields(view, findEntity(next, view.entityId), fieldIds);
         break;
       }

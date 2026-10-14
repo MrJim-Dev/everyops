@@ -5,7 +5,7 @@ import { blueprintOf, canEdit, canManage } from "@/lib/store/workspace-model";
 import { assistantTurn } from "@/server/ai/assistant";
 import { takeAiToken } from "@/server/ai/rate-limit";
 import { apiUser, sameOrigin } from "@/server/session-api";
-import { loadWorkspace } from "@/server/workspaces";
+import { loadTeam, loadWorkspace } from "@/server/workspaces";
 
 const body = z.object({
   workspaceId: z.string().min(1),
@@ -23,7 +23,10 @@ const body = z.object({
     .refine((m) => m.reduce((n, t) => n + (t.attachments?.length ?? 0), 0) <= 12, "Too many files"),
 });
 
-/** The workspace assistant. It reads the workspace from the database, so it sees what the person can see. */
+/**
+ * The workspace assistant. It reads the workspace from the database, so it sees what the person can see.
+ * The answer streams as JSON lines: { type: "status", text } while it works, then { type: "result", … }.
+ */
 export async function POST(request: Request) {
   const { user, error } = await apiUser(request);
   if (error) return error;
@@ -38,16 +41,39 @@ export async function POST(request: Request) {
       { ok: false, message: "That's a lot of questions. Wait a few minutes and try again." },
       { status: 429 },
     );
-  const result = await assistantTurn({
-    blueprint: blueprintOf(found.workspace),
-    records: found.workspace.records,
-    messages: parsed.data.messages,
-    screen: parsed.data.screen,
-    docs: found.workspace.docs,
-    canDesign: canManage(found.role),
-    canEditRecords: canEdit(found.role),
-    userId: user.id,
-    workspaceId: parsed.data.workspaceId,
+  const manager = canManage(found.role);
+  const team = manager ? await loadTeam(parsed.data.workspaceId) : undefined;
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (line: object) => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+      try {
+        const result = await assistantTurn({
+          blueprint: blueprintOf(found.workspace),
+          records: found.workspace.records,
+          messages: parsed.data.messages,
+          screen: parsed.data.screen,
+          docs: found.workspace.docs,
+          canDesign: manager,
+          canEditRecords: canEdit(found.role),
+          userId: user.id,
+          workspaceId: parsed.data.workspaceId,
+          team,
+          onStatus: (text) => send({ type: "status", text }),
+        });
+        send({ type: "result", ...result });
+      } catch (e) {
+        console.error(JSON.stringify({ event: "assistant_failed", message: String(e) }));
+        send({ type: "result", ok: false, message: "Something went wrong. Try again." });
+      }
+      controller.close();
+    },
   });
-  return Response.json(result, { status: result.ok ? 200 : 502 });
+  return new Response(stream, {
+    headers: {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-store",
+      "x-accel-buffering": "no",
+    },
+  });
 }

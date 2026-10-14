@@ -10,7 +10,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { workspace, view } = await params;
   const found = await publicPage(workspace, view?.[0]);
   if (!found) return { title: "Page not found" };
-  const title = found.page.type === "landing" ? found.site.name : `${found.page.name} · ${found.site.name}`;
+  const home = found.page.id === found.site.pages[0]?.id;
+  const title =
+    found.page.type === "landing" || (found.page.type === "html" && home)
+      ? found.site.name
+      : `${found.page.name} · ${found.site.name}`;
   return { title: { absolute: title } };
 }
 

@@ -1,8 +1,15 @@
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
-import type { Block, Blueprint, Entity } from "./types";
+import { displayKind } from "./field-kind";
+import type { Block, Blueprint, Entity, Field, FormExtras } from "./types";
 
 export type ValidationError = { path: string; message: string };
+
+const DATE_TYPES = new Set(["date", "datetime", "time_range"]);
+const GROUP_KINDS = new Set(["choice", "status", "relation", "person", "checkbox"]);
+/** A moment in time with an hour, which heatmaps need. */
+const hasHour = (f: Field | undefined) =>
+  !!f && (f.type === "datetime" || (f.type === "time_range" && f.range !== "dates"));
 
 function checkExpr(bp: Blueprint, entity: Entity, src: string, path: string, errors: ValidationError[]) {
   const parsed = parseExpr(src);
@@ -74,7 +81,7 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
 
   bp.views.forEach((view, vi) => {
     const path = `views.${vi}`;
-    if (view.type === "document" || view.type === "canvas") return;
+    if (view.type === "document" || view.type === "canvas" || view.type === "html") return;
     if (view.type === "landing") {
       checkBlocks(bp, view.blocks, path, errors);
       return;
@@ -93,6 +100,14 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
       case "table":
         missing(view.fieldIds);
         if (view.filter) checkExpr(bp, entity, view.filter, path, errors);
+        if (view.groupByFieldId) {
+          const field = entity.fields.find((f) => f.id === view.groupByFieldId);
+          if (!field || !GROUP_KINDS.has(displayKind(bp, field)))
+            errors.push({
+              path,
+              message: `${view.name} can only group by a select, status, relation, person or checkbox field`,
+            });
+        }
         break;
       case "kanban":
         missing([view.statusFieldId, ...view.cardFieldIds]);
@@ -120,6 +135,20 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
       case "form":
         missing(view.fieldIds);
         if (view.blocks) checkBlocks(bp, view.blocks, path, errors);
+        if (view.steps) {
+          const seen = new Set<string>();
+          for (const step of view.steps) {
+            // A step may ask nothing but the add-ons.
+            if (!step.fieldIds.length && !(step.extras && view.extras))
+              errors.push({ path, message: `${view.name}: step "${step.title}" asks nothing` });
+            missing(step.fieldIds);
+            for (const id of step.fieldIds) {
+              if (seen.has(id)) errors.push({ path, message: `${view.name}: "${id}" is asked in two steps` });
+              seen.add(id);
+            }
+          }
+        }
+        if (view.extras) checkExtras(bp, entity, view.extras, path, errors);
         break;
       case "notes":
         missing([view.titleFieldId, view.bodyFieldId, ...(view.metaFieldIds ?? [])]);
@@ -192,6 +221,34 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
       else if (chart.kind === "donut" && !has(chart.groupByFieldId))
         errors.push({ path, message: `${widget.title}: a donut needs a field to group by` });
     }
+    if (entity) {
+      const path = `widgets.${wi}`;
+      const fieldOf = (id?: string) => entity.fields.find((f) => f.id === id);
+      if (widget.compare) {
+        if (widget.type !== "stat")
+          errors.push({ path, message: `${widget.title}: only stats can compare periods` });
+        if (widget.calc)
+          errors.push({ path, message: `${widget.title}: a stat with a formula can't compare periods` });
+        if (!DATE_TYPES.has(fieldOf(widget.compare.dateFieldId)?.type ?? ""))
+          errors.push({
+            path,
+            message: `${widget.title}: compare needs a date, date-time or time range field`,
+          });
+      }
+      if (widget.type === "agenda" && !DATE_TYPES.has(fieldOf(widget.agenda?.dateFieldId)?.type ?? ""))
+        errors.push({
+          path,
+          message: `${widget.title}: an agenda needs a date, date-time or time range field`,
+        });
+      if (widget.type === "agenda")
+        for (const id of widget.agenda?.fieldIds ?? [])
+          if (!fieldOf(id)) errors.push({ path, message: `${widget.title}: field "${id}" does not exist` });
+      if (widget.type === "heatmap" && !hasHour(fieldOf(widget.heatmap?.dateFieldId)))
+        errors.push({
+          path,
+          message: `${widget.title}: a heatmap needs a date-time or time range field with times`,
+        });
+    }
   });
 
   bp.rules.forEach((rule, ri) => {
@@ -204,6 +261,39 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
 }
 
 /** Blocks on public pages: live data must point at real fields, and links at real forms. */
+/** Add-ons on a form: line items under the form's record type, linking to the items offered. */
+function checkExtras(
+  bp: Blueprint,
+  entity: Entity,
+  extras: FormExtras,
+  path: string,
+  errors: ValidationError[],
+) {
+  const line = bp.entities.find((e) => e.id === extras.lineEntityId);
+  if (!line) {
+    errors.push({ path, message: `Add-ons use a missing line-item record type "${extras.lineEntityId}"` });
+    return;
+  }
+  if (line.parent?.entityId !== entity.id)
+    errors.push({
+      path,
+      message: `Add-on line items (${line.name}) must have ${entity.name} as their parent`,
+    });
+  const item = line.fields.find((f) => f.id === extras.itemFieldId);
+  const items = bp.entities.find((e) => e.id === item?.relation?.entityId);
+  if (!item || item.type !== "relation" || !items)
+    errors.push({
+      path,
+      message: `Add-ons need "${extras.itemFieldId}" to be a link on ${line.name} to the items offered`,
+    });
+  else if (extras.filter) checkExpr(bp, items, extras.filter, path, errors);
+  if (extras.quantityFieldId && line.fields.find((f) => f.id === extras.quantityFieldId)?.type !== "number")
+    errors.push({
+      path,
+      message: `Add-on quantity "${extras.quantityFieldId}" must be a number field on ${line.name}`,
+    });
+}
+
 function checkBlocks(bp: Blueprint, blocks: Block[], path: string, errors: ValidationError[]) {
   const ids = new Set<string>();
   const isForm = (id: string | undefined) => !!id && bp.views.some((v) => v.id === id && v.type === "form");

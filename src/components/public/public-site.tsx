@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { PublicPageData, PublicSite } from "@/lib/public/resolve";
 import { sitePath } from "@/lib/public/resolve";
 import { cn } from "@/lib/utils";
+import { HtmlPageFrame } from "./html-page-frame";
 import { PublicBlocks } from "./public-blocks";
 import { PublicFormView } from "./public-form";
 
@@ -17,6 +18,18 @@ export function PublicSiteView({
   page: PublicPageData;
   preview?: boolean;
 }) {
+  // A custom HTML page is the whole page: the owner's design, without the site's header and footer.
+  if (page.type === "html")
+    return (
+      <HtmlPageFrame
+        html={page.html ?? ""}
+        slug={site.slug}
+        forms={page.forms ?? []}
+        preview={preview}
+        title={page.name}
+        className={cn("w-full", preview ? "h-full min-h-[480px]" : "h-dvh")}
+      />
+    );
   return (
     <div className={cn("flex min-h-full flex-col bg-shell", !preview && "min-h-dvh")}>
       <header className="sticky top-0 z-20 border-b bg-shell/85 backdrop-blur">

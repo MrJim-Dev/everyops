@@ -3,14 +3,13 @@
 import { toast } from "sonner";
 import { create } from "zustand";
 import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
-import { applyOps, type ChangePlan, commitChange, revertChange } from "@/lib/engine/changes";
+import type { ChangePlan } from "@/lib/engine/changes";
 import { computeAll } from "@/lib/engine/compute";
-import { applyRecordOps } from "@/lib/engine/records";
 import { markFresh } from "@/lib/motion/fresh";
+import { applyPlan, undoPlan } from "./apply-plan";
 import {
   blueprintOf,
   type ChangeEntry,
-  dataOf,
   type Invite,
   type Member,
   type NewWorkspace,
@@ -48,7 +47,8 @@ type State = {
   refresh: (slug: string) => Promise<void>;
   saveSetup: (slug: string, progress: SetupProgress) => void;
   finishSetup: (slug: string, data: WorkspaceData, name: string, summary: string) => void;
-  applyChange: (slug: string, plan: ChangePlan) => ChangeEntry | null;
+  /** by: who made it, for invites the plan sends. */
+  applyChange: (slug: string, plan: ChangePlan, by?: string) => ChangeEntry | null;
   undoChange: (slug: string, changeId: string) => void;
 };
 
@@ -302,58 +302,14 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
         };
       }),
 
-    applyChange: (slug, plan) => {
+    applyChange: (slug, plan, by) => {
       const ws = get().workspaces[slug];
       if (!ws) return null;
-      const redesign = plan.ops.length > 0;
-      const current = blueprintOf(ws);
-      const next = redesign ? { ...applyOps(current, plan.ops), version: ws.versions.length + 1 } : current;
-      const { data, changes } = redesign ? commitChange(dataOf(ws), next) : { data: dataOf(ws), changes: [] };
-      const edits = plan.recordOps?.length ? applyRecordOps(data, plan.recordOps) : null;
-      const entry: ChangeEntry = {
-        id: `change_${Date.now().toString(36)}`,
-        request: plan.request,
-        title: plan.title,
-        steps: plan.steps,
-        fromVersion: ws.currentVersion,
-        toVersion: next.version,
-        recordChanges: changes,
-        appliedAt: new Date().toISOString(),
-        ...(edits ? { createdRecordIds: edits.created, replacedRecords: edits.replaced } : {}),
-      };
-      update(slug, (w) => ({
-        ...w,
-        name: next.workspaceName,
-        versions: redesign ? [...w.versions, next] : w.versions,
-        currentVersion: next.version,
-        records: (edits?.data ?? data).records,
-        changes: [entry, ...w.changes],
-      }));
+      const { workspace, entry } = applyPlan(ws, plan, { by });
+      update(slug, () => workspace);
       return entry;
     },
 
-    undoChange: (slug, changeId) =>
-      update(slug, (ws) => {
-        const entry = ws.changes.find((c) => c.id === changeId);
-        if (!entry || entry.undoneAt || ws.currentVersion !== entry.toVersion) return ws;
-        // Data edits first: drop the records it added and put back the ones it changed.
-        const created = new Set(entry.createdRecordIds ?? []);
-        const before = new Map((entry.replacedRecords ?? []).map((r) => [r.id, r]));
-        const records = ws.records.filter((r) => !created.has(r.id)).map((r) => before.get(r.id) ?? r);
-        const previous = ws.versions[entry.fromVersion - 1];
-        const restored =
-          entry.fromVersion !== entry.toVersion
-            ? revertChange({ blueprint: blueprintOf(ws), records }, previous, entry.recordChanges)
-            : { blueprint: previous, records: computeAll(previous, records) };
-        return {
-          ...ws,
-          name: previous.workspaceName,
-          currentVersion: entry.fromVersion,
-          records: restored.records,
-          changes: ws.changes.map((c) =>
-            c.id === changeId ? { ...c, undoneAt: new Date().toISOString() } : c,
-          ),
-        };
-      }),
+    undoChange: (slug, changeId) => update(slug, (ws) => undoPlan(ws, changeId) ?? ws),
   };
 });

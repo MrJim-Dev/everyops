@@ -2,11 +2,15 @@ import "server-only";
 import { sql, type Transaction } from "kysely";
 import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { freshSample } from "@/lib/catalog/shift";
+import { htmlDocKeys } from "@/lib/public/html-page";
 import {
+  blueprintOf,
+  type ChangeEntry,
   type Invite,
   type Member,
   type MemberRole,
   mergeRecords,
+  mergeStaffChanges,
   newWorkspaceId,
   type Role,
   toDoc,
@@ -69,6 +73,47 @@ async function seedIfNew(userId: string) {
       db,
     );
   }
+}
+
+/** One workspace's team and pending invites, for owners and admins (the assistant uses it for team changes). */
+export async function loadTeam(workspaceId: string): Promise<{ members: Member[]; invites: Invite[] }> {
+  const members = await sql<{
+    user_id: string;
+    role: MemberRole;
+    joined_at: Date;
+    name: string;
+    email: string;
+  }>`
+    select m.user_id, m.role, m.joined_at, u.name, u.email
+    from workspace_member m join "user" u on u.id = m.user_id where m.workspace_id = ${workspaceId}`.execute(
+    db,
+  );
+  const invites = await sql<{
+    token: string;
+    email: string;
+    role: MemberRole;
+    invited_by: string;
+    invited_at: Date;
+  }>`
+    select token, email, role, invited_by, invited_at from workspace_invite where workspace_id = ${workspaceId}`.execute(
+    db,
+  );
+  return {
+    members: members.rows.map((m) => ({
+      accountId: m.user_id,
+      name: m.name,
+      email: m.email,
+      role: m.role,
+      joinedAt: m.joined_at.toISOString(),
+    })),
+    invites: invites.rows.map((i) => ({
+      token: i.token,
+      email: i.email,
+      role: i.role,
+      invitedBy: i.invited_by,
+      invitedAt: i.invited_at.toISOString(),
+    })),
+  };
 }
 
 /** Everything the account can open: its own workspaces and the ones it was invited to. */
@@ -178,11 +223,26 @@ export async function saveWorkspace(
   if (access.role === "viewer") return { ok: false, status: 403, message: "Viewers can't make changes." };
 
   if (access.role === "staff") {
-    // Staff edit records and page text only; the blueprint, history and settings stay as the owner left them.
-    const docs = doc.docs && typeof doc.docs === "object" ? doc.docs : {};
+    // Staff edit records and page text only; the blueprint and settings stay as the owner left them. History
+    // takes their data-only changes (an assistant plan that deletes a record), so those can be undone later.
+    // Custom HTML (pages and HTML blocks) is code shown to the public, so it stays as owners and admins left it.
+    const incoming = doc.docs && typeof doc.docs === "object" ? doc.docs : {};
     await db.transaction().execute(async (trx) => {
       const records = mergeRecords(await lockedRecords(trx, ws.slug), doc.records, ws.syncedAt);
-      await sql`update workspace set doc = jsonb_set(jsonb_set(doc, '{records}', ${JSON.stringify(records)}::jsonb), '{docs}', ${JSON.stringify(docs)}::jsonb), updated_at = now()
+      const docs = await withStoredHtml(trx, ws.slug, incoming);
+      const stored = (
+        await sql<{
+          changes: ChangeEntry[] | null;
+          version: number;
+        }>`select doc->'changes' as changes, (doc->>'currentVersion')::int as version
+          from workspace where id = ${ws.slug}`.execute(trx)
+      ).rows[0];
+      const changes = mergeStaffChanges(
+        stored?.changes ?? [],
+        Array.isArray(doc.changes) ? doc.changes : [],
+        stored?.version ?? 0,
+      );
+      await sql`update workspace set doc = jsonb_set(jsonb_set(jsonb_set(doc, '{records}', ${JSON.stringify(records)}::jsonb), '{docs}', ${JSON.stringify(docs)}::jsonb), '{changes}', ${JSON.stringify(changes)}::jsonb), updated_at = now()
         where id = ${ws.slug}`.execute(trx);
     });
     return { ok: true };
@@ -331,4 +391,22 @@ export async function lockedRecords(trx: Transaction<Database>, id: string): Pro
   const { rows } = await sql<{ records: DataRecord[] | null }>`
     select doc->'records' as records from workspace where id = ${id} for update`.execute(trx);
   return rows[0]?.records ?? [];
+}
+
+/** A staff member's docs with every HTML doc (pages and HTML blocks) put back to what's stored. */
+async function withStoredHtml(
+  trx: Transaction<Database>,
+  id: string,
+  incoming: NonNullable<WorkspaceDoc["docs"]>,
+): Promise<NonNullable<WorkspaceDoc["docs"]>> {
+  const { rows } = await sql<{ doc: WorkspaceDoc }>`select doc from workspace where id = ${id}`.execute(trx);
+  const stored = rows[0]?.doc;
+  if (!stored) return incoming;
+  const docs = { ...incoming };
+  for (const key of htmlDocKeys(blueprintOf(stored))) {
+    const kept = stored.docs?.[key];
+    if (kept) docs[key] = kept;
+    else delete docs[key];
+  }
+  return docs;
 }

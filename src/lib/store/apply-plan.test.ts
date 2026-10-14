@@ -1,0 +1,192 @@
+import { describe, expect, it } from "vitest";
+import { validateBlueprint } from "@/lib/blueprint/validate";
+import { posSample } from "@/lib/catalog/canteen-pos";
+import { courtBookingsSample } from "@/lib/catalog/court-bookings";
+import type { ChangePlan } from "@/lib/engine/changes";
+import { applyPlan, undoPlan } from "./apply-plan";
+import { blueprintOf, mergeStaffChanges, type Workspace, workspaceFrom } from "./workspace-model";
+
+const NOW = new Date("2026-10-14T03:00:00Z");
+const court = () => {
+  const ws = workspaceFrom(
+    { name: "Court House", summary: "", data: courtBookingsSample(NOW) },
+    "court-house",
+    NOW.toISOString(),
+  );
+  return {
+    ...ws,
+    docs: { notes: { body: "Old text", updatedAt: NOW.toISOString() } },
+    members: [
+      {
+        accountId: "u1",
+        name: "Ana",
+        email: "ana@example.com",
+        role: "staff" as const,
+        joinedAt: NOW.toISOString(),
+      },
+    ],
+    invites: [],
+  } satisfies Workspace;
+};
+const plan = (p: Partial<ChangePlan>): ChangePlan => ({
+  request: "test",
+  title: "Test",
+  facts: [],
+  steps: [],
+  ops: [],
+  ...p,
+});
+const sameData = (a: Workspace, b: Workspace) => {
+  const sort = (w: Workspace) => [...w.records].sort((x, y) => x.id.localeCompare(y.id));
+  expect(sort(a).map((r) => [r.id, r.data])).toEqual(sort(b).map((r) => [r.id, r.data]));
+  expect(blueprintOf(a)).toEqual(blueprintOf(b));
+};
+
+describe("every assistant change can be undone", () => {
+  it("removing a record type takes its records, pages and links, and undo brings all of it back", () => {
+    const before = court();
+    const { workspace, entry } = applyPlan(
+      before,
+      plan({ ops: [{ op: "remove_entity", entityId: "player" }] }),
+      { now: NOW },
+    );
+    const bp = blueprintOf(workspace);
+    expect(bp.entities.some((e) => e.id === "player")).toBe(false);
+    expect(bp.systems.some((s) => s.id === "players")).toBe(false);
+    expect(
+      bp.entities.find((e) => e.id === "booking")?.fields.some((f) => f.relation?.entityId === "player"),
+    ).toBe(false);
+    expect(validateBlueprint(bp)).toEqual([]);
+    expect(workspace.records.some((r) => r.entityId === "player")).toBe(false);
+    expect(entry.removedRecords?.length).toBe(before.records.filter((r) => r.entityId === "player").length);
+    const undone = undoPlan(workspace, entry.id, NOW);
+    expect(undone).not.toBeNull();
+    sameData(undone as Workspace, before);
+  });
+
+  it("deleting a record also deletes its line items, and undo restores both", () => {
+    const sample = posSample(NOW);
+    const before = workspaceFrom(
+      { name: "Canteen", summary: "", data: sample },
+      "canteen",
+      NOW.toISOString(),
+    );
+    const order = before.records.find(
+      (r) => r.entityId === "order" && before.records.some((l) => l.data.order === r.id),
+    );
+    if (!order) throw new Error("sample has no order with lines");
+    const lines = before.records.filter((r) => r.data.order === order.id);
+    const { workspace, entry } = applyPlan(
+      before,
+      plan({ recordOps: [{ op: "delete_record", recordId: order.id }] }),
+      { now: NOW },
+    );
+    expect(workspace.records.some((r) => r.id === order.id || r.data.order === order.id)).toBe(false);
+    expect(entry.removedRecords?.map((r) => r.id).sort()).toEqual(
+      [order.id, ...lines.map((l) => l.id)].sort(),
+    );
+    sameData(undoPlan(workspace, entry.id, NOW) as Workspace, before);
+  });
+
+  it("removing a field hides it everywhere and undo shows its values again", () => {
+    const before = court();
+    const { workspace, entry } = applyPlan(
+      before,
+      plan({ ops: [{ op: "remove_field", entityId: "booking", fieldId: "method" }] }),
+      { now: NOW },
+    );
+    const bp = blueprintOf(workspace);
+    expect(bp.views.flatMap((v) => (v.type === "table" ? v.fieldIds : []))).not.toContain("method");
+    expect(validateBlueprint(bp)).toEqual([]);
+    sameData(undoPlan(workspace, entry.id, NOW) as Workspace, before);
+  });
+
+  it("removes and reorders pages, tabs and cards, and undo restores the design", () => {
+    const before = court();
+    const card = blueprintOf(before).widgets[0].id;
+    const { workspace, entry } = applyPlan(
+      before,
+      plan({
+        ops: [
+          { op: "remove_view", viewId: "booking_calendar" },
+          { op: "remove_widget", widgetId: card },
+          { op: "move_system", systemId: "players", index: 0 },
+          { op: "remove_system", systemId: "courts" },
+        ],
+      }),
+      { now: NOW },
+    );
+    const bp = blueprintOf(workspace);
+    expect(bp.systems.map((s) => s.id)).toEqual(["players", "overview", "bookings"]);
+    expect(bp.views.some((v) => v.id === "booking_calendar" || v.id === "courts_table")).toBe(false);
+    expect(bp.widgets.some((w) => w.id === card)).toBe(false);
+    expect(validateBlueprint(bp)).toEqual([]);
+    sameData(undoPlan(workspace, entry.id, NOW) as Workspace, before);
+  });
+
+  it("restores page text and the team on undo", () => {
+    const before = court();
+    const { workspace, entry } = applyPlan(
+      before,
+      plan({
+        docOps: [
+          { viewId: "notes", body: "New text" },
+          { viewId: "fresh", body: "Brand new" },
+        ],
+        teamOps: [
+          { op: "invite", email: "Ben@Example.com", role: "viewer" },
+          { op: "set_role", email: "ana@example.com", role: "admin" },
+        ],
+      }),
+      { now: NOW, by: "James" },
+    );
+    expect(workspace.docs?.notes.body).toBe("New text");
+    expect(workspace.invites).toMatchObject([
+      { email: "ben@example.com", role: "viewer", invitedBy: "James" },
+    ]);
+    expect(workspace.members?.[0].role).toBe("admin");
+    const undone = undoPlan(workspace, entry.id, NOW) as Workspace;
+    expect(undone.docs).toEqual(before.docs);
+    expect(undone.invites).toEqual([]);
+    expect(undone.members?.[0].role).toBe("staff");
+  });
+
+  it("undoes newest first", () => {
+    const first = applyPlan(court(), plan({ recordOps: [{ op: "delete_record", recordId: "booking_1" }] }), {
+      now: NOW,
+    });
+    const second = applyPlan(
+      first.workspace,
+      plan({ recordOps: [{ op: "delete_record", recordId: "booking_2" }] }),
+      {
+        now: new Date(NOW.getTime() + 1000),
+      },
+    );
+    expect(undoPlan(second.workspace, first.entry.id, NOW)).toBeNull();
+    const back = undoPlan(second.workspace, second.entry.id, NOW) as Workspace;
+    expect(undoPlan(back, first.entry.id, NOW)?.records.some((r) => r.id === "booking_1")).toBe(true);
+  });
+});
+
+describe("history a staff save may write", () => {
+  it("adds data-only changes at the current version and their undo, nothing else", () => {
+    const ws = court();
+    const dataOnly = applyPlan(ws, plan({ recordOps: [{ op: "delete_record", recordId: "booking_1" }] }), {
+      now: NOW,
+    }).entry;
+    const design = applyPlan(ws, plan({ ops: [{ op: "remove_view", viewId: "booking_calendar" }] }), {
+      now: NOW,
+    }).entry;
+    const team = applyPlan(ws, plan({ teamOps: [{ op: "invite", email: "x@example.com", role: "admin" }] }), {
+      now: NOW,
+    }).entry;
+    const merged = mergeStaffChanges([], [dataOnly, design, team], ws.currentVersion);
+    expect(merged.map((c) => c.id)).toEqual([dataOnly.id]);
+    const undone = mergeStaffChanges(
+      merged,
+      [{ ...dataOnly, undoneAt: NOW.toISOString() }],
+      ws.currentVersion,
+    );
+    expect(undone[0].undoneAt).toBe(NOW.toISOString());
+  });
+});

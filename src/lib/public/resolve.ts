@@ -5,6 +5,7 @@
  * or record types a public block already shows), never, say, the list of customers.
  */
 import { displayKind, editableFields } from "@/lib/blueprint/field-kind";
+import { formSteps, placeExtras } from "@/lib/blueprint/form-steps";
 import { findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type {
   Block,
@@ -14,6 +15,7 @@ import type {
   FieldType,
   FieldValue,
   FormView,
+  HtmlPageView,
   LandingView,
   Tone,
   View,
@@ -28,6 +30,7 @@ import {
   formatRange,
   isTimeRange,
 } from "@/lib/format";
+import { pageHtml } from "./html-page";
 
 export type PageDocs = Record<string, { body: string } | undefined>;
 
@@ -68,7 +71,15 @@ export type PublicForm = {
   choices: Record<string, { id: string; title: string }[]>;
   /** Booking forms pick a resource, a day and a free slot instead of typing times. */
   booking?: { resourceFieldId: string; timeFieldId: string; resources: PublicResource[] };
+  /** Multi-step forms: the fields of each step, in order. */
+  steps?: { title: string; description?: string; fieldIds: string[]; extras?: boolean }[];
+  /** With steps: a summary to check before sending. */
+  review?: boolean;
+  /** Add-ons people pick with a quantity; only their name and price are shown. */
+  extras?: { title: string; items: PublicExtraItem[] };
 };
+
+export type PublicExtraItem = { id: string; title: string; price?: number; priceText?: string };
 
 export type ResolvedBlock =
   | { id: string; type: "hero"; heading: string; subheading?: string; ctaLabel?: string; ctaHref?: string }
@@ -87,36 +98,41 @@ export type ResolvedBlock =
 export type PublicPageData = {
   id: string;
   name: string;
-  type: "landing" | "form";
+  type: "landing" | "form" | "html";
   blocks: ResolvedBlock[];
   /** Form pages: the form itself, shown before their blocks. */
   form?: PublicForm;
+  /** HTML pages: the owner's page, and the public forms it may send to (by view id). */
+  html?: string;
+  forms?: PublicForm[];
 };
 
 export type PublicSite = {
   slug: string;
   name: string;
-  pages: { id: string; name: string; type: "landing" | "form" }[];
+  pages: { id: string; name: string; type: "landing" | "form" | "html" }[];
 };
 
 export const sitePath = (slug: string, viewId?: string) => (viewId ? `/s/${slug}/${viewId}` : `/s/${slug}`);
 export const docKey = (viewId: string, blockId: string) => `${viewId}:${blockId}`;
 
 export function isPublic(view: View): boolean {
-  return (view.type === "landing" && view.public !== false) || (view.type === "form" && view.public === true);
+  return (
+    (view.type === "landing" && view.public !== false) ||
+    ((view.type === "form" || view.type === "html") && view.public === true)
+  );
 }
 
-export function publicViews(bp: Blueprint): (LandingView | FormView)[] {
-  return bp.views.filter((v): v is LandingView | FormView => isPublic(v));
+export function publicViews(bp: Blueprint): (LandingView | FormView | HtmlPageView)[] {
+  return bp.views.filter((v): v is LandingView | FormView | HtmlPageView => isPublic(v));
 }
 
-/** The site's pages in sidebar order: landing pages first, then public forms. */
+/** The site's pages in sidebar order: landing and custom HTML pages first (the first is the home page), then forms. */
 export function siteOf(slug: string, name: string, bp: Blueprint): PublicSite | null {
   const order = bp.systems.flatMap((s) => s.viewIds);
   const views = publicViews(bp).sort(
     (a, b) =>
-      Number(b.type === "landing") - Number(a.type === "landing") ||
-      order.indexOf(a.id) - order.indexOf(b.id),
+      Number(b.type !== "form") - Number(a.type !== "form") || order.indexOf(a.id) - order.indexOf(b.id),
   );
   return views.length
     ? { slug, name, pages: views.map((v) => ({ id: v.id, name: v.name, type: v.type })) }
@@ -186,7 +202,8 @@ export function formatCell(
 function publishedEntities(bp: Blueprint): Set<string> {
   const ids = new Set(bp.entities.filter((e) => e.resource).map((e) => e.id));
   for (const view of publicViews(bp))
-    for (const block of view.blocks ?? []) if (block.type === "records") ids.add(block.entityId);
+    if (view.type !== "html")
+      for (const block of view.blocks ?? []) if (block.type === "records") ids.add(block.entityId);
   return ids;
 }
 
@@ -245,6 +262,31 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
     };
     choices[b.resourceFieldId] ??= booking.resources.map((r) => ({ id: r.id, title: r.title }));
   }
+  const extras = publicExtras(bp, records, view);
+  let steps: PublicForm["steps"];
+  if (view.steps?.length) {
+    steps = placeExtras(
+      formSteps(
+        entity,
+        view,
+        fields.map((f) => f.id),
+      ),
+      extras?.title,
+    ).map(({ title, description, fieldIds, extras: picker }) => ({
+      title,
+      description,
+      fieldIds,
+      ...(picker ? { extras: true } : {}),
+    }));
+    // The slot is picked under the resource, so it always belongs to the resource's step.
+    if (booking) {
+      const { resourceFieldId, timeFieldId } = booking;
+      steps = steps.map((s) => ({ ...s, fieldIds: s.fieldIds.filter((id) => id !== timeFieldId) }));
+      const home = steps.find((s) => s.fieldIds.includes(resourceFieldId)) ?? steps[0];
+      home.fieldIds.push(timeFieldId);
+      steps = steps.filter((s) => s.fieldIds.length || s.extras);
+    }
+  }
   return {
     viewId: view.id,
     title: view.name,
@@ -261,7 +303,36 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
     })),
     choices,
     booking,
+    steps,
+    review: steps ? !!view.review : undefined,
+    ...(extras ? { extras } : {}),
   };
+}
+
+/** The items a form offers as add-ons, each with its price when the item has one. */
+export function publicExtras(
+  bp: Blueprint,
+  records: DataRecord[],
+  view: FormView,
+  now = new Date(),
+): PublicForm["extras"] | undefined {
+  const extras = view.extras;
+  const line = extras && bp.entities.find((e) => e.id === extras.lineEntityId);
+  const itemField = line?.fields.find((f) => f.id === extras?.itemFieldId);
+  const items = bp.entities.find((e) => e.id === itemField?.relation?.entityId);
+  if (!extras || !line || line.parent?.entityId !== view.entityId || !items) return undefined;
+  const priceField = items.fields.find((f) => displayKind(bp, f) === "money");
+  const offered = applyFilter(bp, items, records, extras.filter, now).map((r) => {
+    const price = priceField ? Number(r.data[priceField.id]) : Number.NaN;
+    return {
+      id: r.id,
+      title: recordTitle(items, r),
+      ...(Number.isFinite(price) ? { price, priceText: formatMoney(price) } : {}),
+    };
+  });
+  return offered.length
+    ? { title: extras.title ?? items.pluralName, items: offered.slice(0, 40) }
+    : undefined;
 }
 
 function textOf(docs: PageDocs, viewId: string, block: Block): string | undefined {
@@ -348,11 +419,27 @@ export function resolvePage(
   now = new Date(),
 ): PublicPageData | null {
   const view = bp.views.find((v) => v.id === viewId);
-  if (!view || !isPublic(view) || (view.type !== "landing" && view.type !== "form")) return null;
+  if (!view || !isPublic(view)) return null;
+  if (view.type === "html") return htmlPage(bp, records, docs, view);
+  if (view.type !== "landing" && view.type !== "form") return null;
   const blocks = resolveBlocks(bp, records, docs, slug, view, now);
   if (view.type === "landing") return { id: view.id, name: view.name, type: "landing", blocks };
   const form = publicForm(bp, records, view);
   return form ? { id: view.id, name: view.name, type: "form", blocks, form } : null;
+}
+
+/** A custom HTML page with the public forms it may send to; the bridge refuses any other form. */
+export function htmlPage(
+  bp: Blueprint,
+  records: DataRecord[],
+  docs: PageDocs,
+  view: HtmlPageView,
+): PublicPageData {
+  const forms = bp.views
+    .filter((v): v is FormView => v.type === "form" && v.public === true)
+    .map((v) => publicForm(bp, records, v))
+    .filter((f): f is PublicForm => !!f);
+  return { id: view.id, name: view.name, type: "html", blocks: [], html: pageHtml(view, docs), forms };
 }
 
 /** Hero text has to fit a hero. */

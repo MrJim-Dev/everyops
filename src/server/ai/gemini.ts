@@ -43,22 +43,88 @@ type Input = {
   signal?: AbortSignal;
   /** Caps the answer. A looping answer then fails fast (and is retried) instead of running for a minute. */
   maxOutputTokens?: number;
+  /** Longest text value the answer may hold before it counts as a runaway (default 3,000 characters). */
+  maxStringChars?: number;
+  /**
+   * Sends literals as one-value enums, which Vertex enforces (it ignores const). It makes the schema count for more
+   * against Gemini's structural limit, so it's on only where it was needed and fits: the designer.
+   */
+  enumLiterals?: boolean;
 };
 
-/** JSON Schema for Gemini's structured output, without the keywords it doesn't need. */
-function responseSchema(schema: z.ZodType) {
+/**
+ * JSON Schema for Gemini's structured output, without the keywords it doesn't need. Literals become one-value
+ * enums: Vertex enforces enum but not const, and without it Gemini wrote view types that don't exist
+ * ("approval" for approval_queue) and lost the shape of the answer from there.
+ */
+function responseSchema(schema: z.ZodType, enumLiterals = false) {
   const { $schema: _drop, ...rest } = z.toJSONSchema(schema, {
     target: "draft-2020-12",
     io: "output",
   }) as Record<string, unknown>;
-  return rest;
+  return enumLiterals ? (constToEnum(rest) as Record<string, unknown>) : rest;
+}
+
+function constToEnum(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(constToEnum);
+  if (!node || typeof node !== "object") return node;
+  return Object.fromEntries(
+    Object.entries(node as Record<string, unknown>).map(([key, value]) =>
+      key === "const" ? ["enum", [value]] : [key, constToEnum(value)],
+    ),
+  );
+}
+
+/**
+ * Watches streamed JSON for a runaway: Gemini sometimes stops closing a string and repeats filler ("Go! Go! Go!",
+ * "…_done_now_perfectly_setup…") or writes a number that never ends, until it hits the token limit a minute later.
+ * Spotted within seconds, the call is stopped and a fresh one starts. Returns why, or null while all is well.
+ */
+export function runawayWatcher(maxStringChars = 3000) {
+  let inString = false;
+  let escaped = false;
+  let length = 0;
+  let unbroken = 0;
+  let digits = 0;
+  return (chunk: string): string | null => {
+    for (const ch of chunk) {
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") {
+          escaped = true;
+          continue;
+        } else if (ch === '"') {
+          inString = false;
+          continue;
+        }
+        length++;
+        unbroken = ch === " " || ch === "\n" ? 0 : unbroken + 1;
+        if (length > maxStringChars) return "a text value that never ends";
+        if (unbroken > 160) return "text with no spaces that never ends";
+      } else if (ch === '"') {
+        inString = true;
+        length = 0;
+        unbroken = 0;
+        digits = 0;
+      } else if (/[0-9.eE+-]/.test(ch)) {
+        if (++digits > 40) return "a number that never ends";
+      } else digits = 0;
+    }
+    return null;
+  };
 }
 
 /** Asks Gemini for JSON that matches `schema`, then parses it with the same schema. */
 export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promise<GenerateResult<T>> {
   const started = Date.now();
+  // Our own controller stops a runaway; the caller's signal (a hedged twin answered) and the timeout stop it too.
+  const stop = new AbortController();
+  const signals = [AbortSignal.timeout(input.timeoutMs ?? 20_000), stop.signal];
+  if (input.signal) signals.push(input.signal);
+  let runaway: string | null = null;
+  let text = "";
   try {
-    const response = await gemini().models.generateContent({
+    const stream = await gemini().models.generateContentStream({
       model: GEMINI_MODEL,
       contents: [
         { role: "user", parts: typeof input.prompt === "string" ? [{ text: input.prompt }] : input.prompt },
@@ -67,23 +133,46 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
         systemInstruction: input.system,
         ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
         responseMimeType: "application/json",
-        responseJsonSchema: responseSchema(schema),
+        responseJsonSchema: responseSchema(schema, input.enumLiterals),
         ...(input.maxOutputTokens ? { maxOutputTokens: input.maxOutputTokens } : {}),
         ...(input.thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel[input.thinking] } } : {}),
-        abortSignal: input.signal
-          ? AbortSignal.any([AbortSignal.timeout(input.timeoutMs ?? 20_000), input.signal])
-          : AbortSignal.timeout(input.timeoutMs ?? 20_000),
+        abortSignal: AbortSignal.any(signals),
       },
     });
+    const watch = runawayWatcher(input.maxStringChars);
+    let usage:
+      | { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
+      | undefined;
+    for await (const chunk of stream) {
+      const part = chunk.text ?? "";
+      text += part;
+      if (chunk.usageMetadata) usage = chunk.usageMetadata;
+      runaway = watch(part);
+      if (runaway) {
+        stop.abort();
+        break;
+      }
+    }
     const ms = Date.now() - started;
-    const usage = response.usageMetadata;
+    if (runaway) {
+      console.warn(
+        JSON.stringify({
+          event: "gemini_runaway",
+          task: input.task,
+          model: GEMINI_MODEL,
+          ms,
+          why: runaway,
+          chars: text.length,
+        }),
+      );
+      return { ok: false, error: "Gemini got stuck repeating itself.", retryable: true };
+    }
     const tokens = {
       input: usage?.promptTokenCount ?? 0,
       output: usage?.candidatesTokenCount ?? 0,
       thinking: usage?.thoughtsTokenCount ?? 0,
     };
     console.info(JSON.stringify({ event: "gemini", task: input.task, model: GEMINI_MODEL, ms, ...tokens }));
-    const text = response.text;
     if (!text) return { ok: false, error: "Gemini returned an empty answer.", retryable: true };
     let json: unknown;
     try {
@@ -113,6 +202,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (input.signal?.aborted) return { ok: false, error: "Cancelled.", retryable: false };
+    if (runaway) return { ok: false, error: "Gemini got stuck repeating itself.", retryable: true };
     console.error(JSON.stringify({ event: "gemini_error", task: input.task, model: GEMINI_MODEL, message }));
     const timedOut = /abort|timeout/i.test(message);
     return {

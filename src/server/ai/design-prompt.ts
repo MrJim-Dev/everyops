@@ -141,6 +141,14 @@ export const block = z.union([
 ]);
 
 // One shape per view type, so Gemini only writes the settings that view uses.
+/** One step of a multi-step form. The designer's steps can also hold the add-ons; the assistant's can't. */
+export const formStep = z.object({
+  id: z.string(),
+  title: z.string().describe("Short, e.g. Court and time, Your details"),
+  description: z.string().optional(),
+  fieldIds: z.array(z.string()).describe("This step's fields; each field in one step"),
+});
+
 export const view = z.union([
   z.object({
     ...viewBase,
@@ -148,6 +156,16 @@ export const view = z.union([
     fieldIds: z.array(z.string()).describe("Columns"),
     filter,
     sort: z.array(sort).optional(),
+    groupByFieldId: z
+      .string()
+      .optional()
+      .describe(
+        "Rows grouped by this select, status, relation, person or checkbox field, e.g. payment status",
+      ),
+    totals: z
+      .boolean()
+      .optional()
+      .describe("A totals row for money and number columns, with group subtotals"),
   }),
   z.object({
     ...viewBase,
@@ -186,10 +204,30 @@ export const view = z.union([
     ...viewBase,
     type: z.literal("form"),
     fieldIds: z.array(z.string()).describe("The fields asked, in order"),
+    steps: z
+      .array(
+        formStep.extend({
+          extras: z.boolean().optional().describe("This step shows the add-ons picker; it may ask no fields"),
+        }),
+      )
+      .optional()
+      .describe("A multi-step form: 2 to 4 steps asking a few fields each"),
+    review: z.boolean().optional().describe("With steps: a summary to check before submitting"),
     intro: z.string().optional(),
     submitLabel: z.string().optional().describe("e.g. Book court"),
     public: z.boolean().optional().describe("Anyone with the link can submit it (a public booking page)"),
     blocks: z.array(block).optional().describe("Shown with the form, e.g. active payment methods, FAQs"),
+    extras: z
+      .object({
+        lineEntityId: z
+          .string()
+          .describe("Line items whose parent is this form's record type, e.g. booking_addon"),
+        itemFieldId: z.string().describe("Their relation to the item picked, e.g. add_on"),
+        quantityFieldId: z.string().optional().describe("Their number field for how many"),
+        filter: z.string().optional().describe("Which items are offered, e.g. active == true"),
+      })
+      .optional()
+      .describe("Add-ons people pick with a quantity (paddle rental, balls); each becomes a line item"),
   }),
   z.object({
     ...viewBase,
@@ -204,6 +242,17 @@ export const view = z.union([
     starter: z.string().optional().describe("Starting markdown"),
   }),
   z.object({ ...viewBase, type: z.literal("canvas") }),
+  z.object({
+    ...viewBase,
+    type: z.literal("html"),
+    public: z.boolean().optional().describe("true only when the person wants it live now"),
+    html: z
+      .string()
+      .optional()
+      .describe(
+        "A short starting page only when asked to draft one; the owner pastes or uploads their own design",
+      ),
+  }),
   z.object({
     ...viewBase,
     type: z.literal("landing"),
@@ -236,7 +285,7 @@ export const widget = z.object({
   title: z.string(),
   entityId: z.string(),
   filter: z.string().optional(),
-  type: z.enum(["stat", "chart", "progress", "list"]),
+  type: z.enum(["stat", "chart", "progress", "list", "agenda", "heatmap"]),
   metric: z.object({ op: z.enum(["count", "sum", "avg"]), fieldId: z.string().optional() }),
   chart: z
     .object({
@@ -260,6 +309,35 @@ export const widget = z.object({
       sort: z.array(sort).optional(),
     })
     .optional(),
+  compare: z
+    .object({
+      dateFieldId: z.string().describe("A date, datetime or time_range field of the record type"),
+      period: z
+        .enum(["day", "week", "month"])
+        .describe("today vs yesterday, last 7 or last 30 days vs the ones before"),
+    })
+    .optional()
+    .describe("stat only (not with calc): the current period's value and the change from the period before"),
+  sparkline: z.boolean().optional().describe("stat with compare: a small trend line of daily values"),
+  agenda: z
+    .object({
+      dateFieldId: z.string().describe("A date, datetime or time_range field"),
+      days: z.number().optional().describe("How many days ahead, today included; default 1"),
+      fieldIds: z.array(z.string()).optional().describe("Up to 3 details shown per item"),
+    })
+    .optional()
+    .describe("agenda only: today's schedule as a timeline"),
+  heatmap: z
+    .object({
+      dateFieldId: z.string().describe("A datetime or time_range field with times"),
+      weeks: z.number().optional().describe("Weeks to look back; default 8"),
+    })
+    .optional()
+    .describe("heatmap only: weekday by hour, e.g. when courts or the shop are busiest"),
+  width: z
+    .enum(["third", "half", "two_thirds", "full"])
+    .optional()
+    .describe("Width on a dashboard with a layout; usually leave it to the layout"),
   span: z.enum(["main", "side"]).optional(),
 });
 
@@ -292,6 +370,12 @@ export const system = z.object({
   icon: z.enum(ICONS),
   viewIds: z.array(z.string()),
   widgetIds: z.array(z.string()),
+  layout: z
+    .enum(["overview", "operations", "reports"])
+    .optional()
+    .describe(
+      "Dashboard arrangement: overview (numbers, a wide trend, lists beside it), operations (today's agenda and queues first), reports (charts two to a row)",
+    ),
 });
 
 export const design = z.object({
@@ -326,6 +410,46 @@ export const design = z.object({
     ),
 });
 export type Design = z.infer<typeof design>;
+
+/*
+ * What the designer is actually asked for: the same design without the optional decoration Gemini kept running away
+ * in (a hero subheading, a form's button text, approval button labels and details, a target on a chart). It wrote
+ * them as endless filler until the call timed out. The app fills them in when it tidies the design, and people can
+ * change them afterwards.
+ */
+type Shape = z.ZodObject<z.ZodRawShape>;
+const typeOf = (o: unknown) => ((o as Shape).shape.type as z.ZodLiteral<string>).value;
+const lean = (
+  options: readonly unknown[],
+  drop: Record<string, Record<string, true>>,
+  extend?: (t: string, o: Shape) => Shape,
+) =>
+  z.union(
+    options.map((o) => {
+      const t = typeOf(o);
+      const slim = drop[t] ? (o as Shape).omit(drop[t]) : (o as Shape);
+      return extend ? extend(t, slim) : slim;
+    }) as unknown as [Shape, Shape, ...Shape[]],
+  );
+const designBlock = lean(block.options, { hero: { subheading: true } });
+const designView = lean(
+  view.options,
+  {
+    approval_queue: { approveLabel: true, rejectLabel: true, detailFieldIds: true },
+    form: { submitLabel: true },
+  },
+  (t, o) =>
+    t === "form"
+      ? o.extend({ blocks: z.array(designBlock).optional() })
+      : t === "landing"
+        ? o.extend({ blocks: z.array(designBlock).describe("The public page, top to bottom") })
+        : o,
+);
+const designWidget = (widget as unknown as Shape).omit({ target: true });
+export const designRequest = (design as unknown as Shape).extend({
+  views: z.array(designView),
+  widgets: z.array(designWidget),
+}) as unknown as typeof design;
 
 /** How public pages, payments and FAQs are built. Shared by the designer and the workspace assistant. */
 export const PUBLIC_PAGES_GUIDE = `Public pages (customers use them without an account, at /s/<workspace>/<view>):
@@ -381,16 +505,28 @@ Rules for a valid blueprint:
 - "A calendar page" means a page with a calendar view (people switch it between month, week and day); a booking
   schedule (slot_grid) is the day-by-court grid. Booking businesses usually want both.
 - checkout needs product, order and line-item types (line items have parent set to the order). Only for selling.
-- form views are a page that is just the form to add one record type (fieldIds, intro, submitLabel). notes views
+- form views are a page that is just the form to add one record type (fieldIds, intro). notes views
   are a notebook over a record type with a text title and a long_text body (titleFieldId, bodyFieldId).
   document views are one free markdown page with entityId "" and a starter outline. canvas views are a free
   whiteboard (shapes, text, sticky notes, arrows, pictures) with entityId "", for a floor plan, mood board,
-  layout or process map. Use them when asked.
+  layout or process map. html views are a page the owner designs in their own HTML (entityId ""); add one only
+  when asked for a custom HTML page. Use them when asked.
 - Charts plot over time (dateFieldId, bucket; kind line, area or bar) or by category (groupByFieldId; kind bar
   or donut). A reports page is a system with only widgets: stats for totals and several charts.
 - A stat that combines record types or needs arithmetic (total income = bookings + other income, profit,
   collection rate) uses calc: named terms (count/sum/avg of one record type with its own filter) and expr over
   their ids, e.g. "bookings + other_income"; format percent for rates.
+- Dashboards: give every system that holds widgets a layout: overview for the Overview page, operations for a
+  front desk or daily-work page, reports for a page of charts. Stats on an Overview usually compare periods
+  (compare with the record's date field, period day for daily work, week or month otherwise) with sparkline true;
+  their filter then leaves out the date, e.g. status == 'paid' rather than is_today(slot) && status == 'paid'.
+  Businesses with a schedule (bookings, shifts, appointments, posts) get an agenda widget of today, and businesses
+  with times of day (bookings, sales, orders) get a heatmap of busy hours.
+- Tables of money (bookings, orders, expenses) set totals true; a list that people sort into states (payment,
+  approval, stage) can set groupByFieldId to that field.
+- Forms that ask more than 5 fields, every public booking form and every form with add-ons use steps (e.g. Court
+  and time, Add-ons with extras true and no fields, Your details, Payment) with review true. Each field goes in
+  exactly one step.
 - Systems are the sidebar pages. Put an Overview system first with 3 to 6 widgets, then one page per area the
   owner manages day to day, usually 3 to 6 pages: each main record type (bookings, courts, players, clients,
   products, tasks…) gets its own page with its own views, e.g. "Bookings" (schedule and list), "Courts" (all
@@ -399,11 +535,22 @@ Rules for a valid blueprint:
   the view as a tab elsewhere. Line-item record types stay inside their parent's page.
   Every system lists at least one view or widget, and page names are short nouns.
 - Money is PHP. Use realistic Filipino business details in samples, dated around today.
+- Keep every text short: names and labels a few words, intros one sentence, text blocks and starter pages under
+  120 words. Never repeat yourself.
 - Booking businesses: every amount on a booking is a money formula, never a field people type: the court fee is
   the rate times duration_hours(time) (e.g. hour(time.start) >= 17 ? court.evening_rate : court.day_rate), add-ons
   come from the add-on records, and the total adds them up. Public visitors never see or enter prices. Overview stats for a booking business: booked value (sum of amount, not cancelled),
   bookings (count), average booking value (avg of amount), paid (sum of amount where paid), outstanding (sum where
   unpaid); charts of booking value and booking volume over time.
+- Add-ons and things sold with a booking or order (paddle rental, balls, towels, extra hour): an add-ons record type
+  (name, price, unit such as per hour or per piece, active checkbox) and booking add-ons line items with parent the
+  booking: a relation to the booking, a relation to the add-on, qty (number, required) and line_total (money
+  formula add_on.price * qty). The booking gets add_ons_total (rollup sum of line_total) and its total adds it. The
+  public form sets extras (lineEntityId booking_addon, itemFieldId add_on, quantityFieldId qty, filter
+  "active == true") so visitors pick add-ons with quantities.
+- Think ahead like a consultant who has set up many businesses like this one: build what they will need on day one
+  even when the brief doesn't spell it out (a public booking page, payment methods, add-ons, a customer list,
+  reports), guided by the references that follow the brief. Never build more than the business can use.
 
 ${PUBLIC_PAGES_GUIDE}
 

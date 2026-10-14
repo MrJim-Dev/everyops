@@ -8,6 +8,7 @@ import type {
   Entity,
   Field,
   FieldValue,
+  FormStep,
   IconName,
   NotesView,
   Rule,
@@ -19,10 +20,12 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { computeAll } from "@/lib/engine/compute";
 import { isImagePath } from "@/lib/engine/records";
+import { MAX_HTML_BYTES } from "@/lib/public/html-page";
 import { hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
-import { DESIGN_SYSTEM, type Design, design } from "./design-prompt";
+import { DESIGN_SYSTEM, type Design, designRequest } from "./design-prompt";
 import { generateJsonHedged } from "./gemini";
+import { referencesText, setupReferences } from "./references";
 
 const SLOT_MINUTES = [15, 30, 60, 90, 120] as const;
 const pick = <T extends object>(source: T, keys: (keyof T)[]) =>
@@ -33,7 +36,15 @@ export function toView(v: Design["views"][number]): View {
   const base = { id: v.id, entityId: v.entityId, name: v.name };
   switch (v.type) {
     case "table":
-      return { ...base, type: "table", fieldIds: v.fieldIds ?? [], filter: v.filter, sort: v.sort };
+      return {
+        ...base,
+        type: "table",
+        fieldIds: v.fieldIds ?? [],
+        filter: v.filter,
+        sort: v.sort,
+        ...(v.groupByFieldId ? { groupByFieldId: v.groupByFieldId } : {}),
+        ...(v.totals ? { totals: true } : {}),
+      };
     case "kanban":
       return {
         ...base,
@@ -81,6 +92,9 @@ export function toView(v: Design["views"][number]): View {
         ...(v.submitLabel ? { submitLabel: v.submitLabel } : {}),
         ...(v.public ? { public: true } : {}),
         ...(v.blocks?.length ? { blocks: v.blocks as Block[] } : {}),
+        ...(v.steps?.length ? { steps: v.steps } : {}),
+        ...(v.steps?.length && v.review ? { review: true } : {}),
+        ...(v.extras ? { extras: { ...v.extras } } : {}),
       };
     case "notes":
       return {
@@ -94,12 +108,20 @@ export function toView(v: Design["views"][number]): View {
       return { ...base, entityId: "", type: "document", ...(v.starter ? { starter: v.starter } : {}) };
     case "canvas":
       return { ...base, entityId: "", type: "canvas" };
+    case "html":
+      return {
+        ...base,
+        entityId: "",
+        type: "html",
+        ...(v.public ? { public: true } : {}),
+        ...(v.html ? { html: v.html.slice(0, MAX_HTML_BYTES) } : {}),
+      };
     case "landing":
       return {
         ...base,
         entityId: "",
         type: "landing",
-        blocks: v.blocks as Block[],
+        blocks: (v.blocks ?? []) as Block[],
         ...(v.public === false ? { public: false } : {}),
       };
   }
@@ -267,11 +289,13 @@ export function tidy(bp: Blueprint): Blueprint {
   const fieldsOf = (entityId: string) =>
     new Set(bp.entities.find((e) => e.id === entityId)?.fields.map((x) => x.id) ?? []);
   bp.views = bp.views.filter((v) =>
-    v.type === "document" || v.type === "canvas" || v.type === "landing" ? true : entityIds.has(v.entityId),
+    v.type === "document" || v.type === "canvas" || v.type === "html" || v.type === "landing"
+      ? true
+      : entityIds.has(v.entityId),
   );
   const formIds = new Set(bp.views.filter((v) => v.type === "form").map((v) => v.id));
   for (const v of bp.views) {
-    if (v.type === "document" || v.type === "canvas" || v.type === "landing") {
+    if (v.type === "document" || v.type === "canvas" || v.type === "html" || v.type === "landing") {
       v.entityId = "";
       if (v.type === "landing") v.blocks = tidyBlocks(v.blocks, resolve, fieldsOf, formIds);
       continue;
@@ -280,6 +304,25 @@ export function tidy(bp: Blueprint): Blueprint {
     if (v.type === "form") {
       v.fieldIds = v.fieldIds.filter((id) => has.has(id));
       if (v.blocks) v.blocks = tidyBlocks(v.blocks, resolve, fieldsOf, formIds);
+      tidyFormExtras(bp, v, resolve);
+      if (v.public) tidyPublicForm(bp, v);
+      if (v.steps) {
+        // Each field in one step, only real fields (tidyPublicForm may have added guest details), and no empty
+        // steps except the one holding the add-ons.
+        const real = fieldsOf(v.entityId);
+        const seen = new Set<string>();
+        v.steps = v.steps
+          .map((s) => ({
+            ...s,
+            fieldIds: s.fieldIds.filter((id) => real.has(id) && !seen.has(id) && seen.add(id)),
+          }))
+          .map(({ extras, ...s }): FormStep => (extras && v.extras ? { ...s, extras } : s))
+          .filter((s) => s.fieldIds.length || s.extras);
+        if (v.steps.length < 2) {
+          delete v.steps;
+          delete v.review;
+        }
+      }
     }
     if (v.type === "notes") {
       const entity = bp.entities.find((e) => e.id === v.entityId);
@@ -289,11 +332,40 @@ export function tidy(bp: Blueprint): Blueprint {
       v.fieldIds = v.fieldIds.filter((id) => has.has(id));
       if (!v.fieldIds.length) v.fieldIds = [...has].slice(0, 5);
       v.sort = v.sort?.filter((x) => has.has(x.fieldId));
+      if (v.groupByFieldId && !has.has(v.groupByFieldId)) delete v.groupByFieldId;
     }
     if (v.type === "kanban") v.cardFieldIds = v.cardFieldIds.filter((id) => has.has(id));
-    if (v.type === "approval_queue") v.detailFieldIds = v.detailFieldIds.filter((id) => has.has(id));
+    if (v.type === "approval_queue") {
+      // The designer isn't asked for these (they were where Gemini ran away), so they come from the record type:
+      // button labels from its status options, details from its first plain fields.
+      const entity = bp.entities.find((e) => e.id === v.entityId);
+      const status = entity?.fields.find((f) => f.id === v.statusFieldId);
+      const label = (id: string, fallback: string) => {
+        const name =
+          status?.options
+            ?.find((o) => o.id === id)
+            ?.label.toLowerCase()
+            .trim() ?? "";
+        return BUTTON_VERBS[name] ?? fallback;
+      };
+      if (v.approveLabel === "Approve") v.approveLabel = label(v.approve, "Approve");
+      if (v.rejectLabel === "Decline") v.rejectLabel = label(v.reject, "Decline");
+      v.detailFieldIds = v.detailFieldIds.filter((id) => has.has(id));
+      if (!v.detailFieldIds.length && entity)
+        v.detailFieldIds = entity.fields
+          .filter(
+            (f) =>
+              f.id !== entity.primaryFieldId &&
+              f.id !== v.statusFieldId &&
+              !["long_text", "rollup"].includes(f.type),
+          )
+          .slice(0, 4)
+          .map((f) => f.id);
+    }
   }
   bp.widgets = bp.widgets.filter((w) => {
+    // A progress bar needs a target, which the designer isn't asked for: it shows as a total instead.
+    if (w.type === "progress" && !w.target) w.type = "stat";
     if (w.calc) {
       // A formula card keeps only totals that point at real record types and fields.
       w.calc.terms = w.calc.terms.filter(
@@ -319,6 +391,26 @@ export function tidy(bp: Blueprint): Blueprint {
     }
     if (w.list) w.list.fieldIds = w.list.fieldIds.filter((id) => has.has(id));
     if (w.type === "list" && !w.list?.fieldIds.length) return false;
+    const fieldOf = (id: string) =>
+      bp.entities.find((e) => e.id === w.entityId)?.fields.find((f) => f.id === id);
+    const dated = (id: string) => ["date", "datetime", "time_range"].includes(fieldOf(id)?.type ?? "");
+    const timed = (id: string) => {
+      const f = fieldOf(id);
+      return !!f && (f.type === "datetime" || (f.type === "time_range" && f.range !== "dates"));
+    };
+    if (w.compare && (w.type !== "stat" || w.calc || !dated(w.compare.dateFieldId))) {
+      delete w.compare;
+      delete w.sparkline;
+    }
+    // A sparkline draws the comparison's daily values, so it means nothing without one.
+    if (!w.compare) delete w.sparkline;
+    if (w.type === "agenda") {
+      if (!w.agenda || !dated(w.agenda.dateFieldId)) return false;
+      w.agenda.fieldIds = w.agenda.fieldIds?.filter((id) => has.has(id)).slice(0, 3);
+    } else delete w.agenda;
+    if (w.type === "heatmap") {
+      if (!w.heatmap || !timed(w.heatmap.dateFieldId)) return false;
+    } else delete w.heatmap;
     return true;
   });
   const viewIds = new Set(bp.views.map((v) => v.id));
@@ -336,11 +428,17 @@ export function tidy(bp: Blueprint): Blueprint {
 }
 
 /** Problems the generic validator doesn't catch but would break a screen. */
-function extraChecks(bp: Blueprint): string[] {
+function extraChecks(bp: Blueprint, brief: string): string[] {
   const errors: string[] = [];
   const entityIds = new Set(bp.entities.map((e) => e.id));
   const viewIds = new Set(bp.views.map((v) => v.id));
   if (!bp.systems.length) errors.push("The workspace has no systems.");
+  // The brief is the plan the owner agreed to; a public booking page it lists can't be left out.
+  if (
+    /public (booking|order|request|inquiry|reservation|form)|booking page|book online/i.test(brief) &&
+    !bp.views.some((v) => v.type === "form" && v.public)
+  )
+    errors.push("The brief asks for a public page customers use, but no form view has public true.");
   for (const e of bp.entities) {
     const primary = e.fields.find((f) => f.id === e.primaryFieldId);
     if (primary && (primary.type === "formula" || primary.type === "rollup"))
@@ -470,7 +568,11 @@ export async function designWorkspace(
   files?: { userId: string; attachments: AttachmentRef[] },
 ): Promise<DesignResult> {
   const now = new Date();
-  const context = `Examples:\n${EXAMPLES}\n\nToday in Manila: ${todayKey(now)}\nWorkspace name: ${workspaceName || "choose one"}\n\nBrief:\n${brief}`;
+  // What businesses like this one need and how similar community systems are built; the designer fills gaps from it.
+  const references = referencesText(
+    await setupReferences(brief).catch(() => ({ playbooks: [], systems: [] })),
+  );
+  const context = `Examples:\n${EXAMPLES}\n\nToday in Manila: ${todayKey(now)}\nWorkspace name: ${workspaceName || "choose one"}\n\nBrief:\n${brief}\n\nReferences:\n${references}`;
   // The owner's files go with the first request; a repair works from the previous design, which already used them.
   const fileParts = files ? await attachmentParts(files.userId, files.attachments) : [];
   let prompt: string | Part[] = fileParts.length
@@ -482,17 +584,29 @@ export async function designWorkspace(
     : context;
   let repairs = 0;
   for (let attempt = 0; attempt < 4; attempt++) {
-    // Designs take 8–30 s; a stalled call gets a parallel twin after 35 s instead of a minute's wait.
+    // Designs take 8–30 s; a stalled call gets a parallel twin after 35 s instead of a minute's wait, and a call
+    // that runs away (see runawayWatcher) is stopped within seconds and replaced. Real designs are 2–7k tokens.
     const result = await generateJsonHedged(
-      design,
-      { system: DESIGN_SYSTEM, prompt, task: "design", timeoutMs: 75_000, thinking: "LOW" },
-      { hedgeMs: 35_000 },
+      designRequest,
+      {
+        system: DESIGN_SYSTEM,
+        prompt,
+        task: "design",
+        timeoutMs: 75_000,
+        thinking: "LOW",
+        maxOutputTokens: 16_000,
+        enumLiterals: true,
+      },
+      { hedgeMs: 35_000, attempts: 4 },
     );
     if (!result.ok) return { ok: false, message: result.error };
     const raw = toBlueprint(result.data);
     const samples = mergeDateAndSlot(raw, result.data.samples);
     const bp = ensurePages(repairStructure(tidy(raw)));
-    const errors = [...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`), ...extraChecks(bp)];
+    const errors = [
+      ...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`),
+      ...extraChecks(bp, brief),
+    ];
     if (!errors.length) {
       const records = computeAll(bp, toRecords(bp, samples, now), now);
       return {
@@ -511,6 +625,181 @@ export async function designWorkspace(
     message: "I couldn't design a valid workspace for that yet. Add a detail or two and try again.",
   };
 }
+
+/**
+ * A public form is used by strangers, so it must say who they are, can't demand what they can't know, and should
+ * show how to pay. Gemini forgets each of these now and then: a booking page without a name or phone, a required
+ * "Booked via" dropdown, a GCash QR code the brief asked for but the page doesn't show.
+ */
+function tidyPublicForm(bp: Blueprint, v: Extract<View, { type: "form" }>) {
+  const entity = bp.entities.find((e) => e.id === v.entityId);
+  if (!entity) return;
+  const field = (id: string) => entity.fields.find((f) => f.id === id);
+  // Who is booking (a name) and how to reach them (a phone or email), asked as plain text.
+  const asked = (pattern: RegExp) =>
+    v.fieldIds.filter((id) => {
+      const f = field(id);
+      return f?.type === "text" && pattern.test(f.id);
+    });
+  const names = asked(/name|guest|customer|client|player/);
+  const reach = asked(/phone|mobile|cell|email|contact/);
+  const added = [
+    ...(names.length ? [] : [{ id: "guest_name", name: "Your name", type: "text" as const, required: true }]),
+    ...(reach.length
+      ? []
+      : [{ id: "guest_phone", name: "Mobile number", type: "text" as const, required: true }]),
+  ];
+  if (added.length) {
+    const ids = added.map((f) => f.id);
+    for (const f of added) if (!field(f.id)) entity.fields.push(f);
+    v.fieldIds.push(...ids);
+    if (v.steps?.length) {
+      // Next to the details already asked, else in a details step before the last one.
+      const known = [...names, ...reach];
+      const last = v.steps[v.steps.length - 1];
+      const home =
+        v.steps.find((s) => s.fieldIds.some((id) => known.includes(id))) ??
+        (/detail|contact|info|you/i.test(last.title) ? last : undefined);
+      if (home) home.fieldIds.push(...ids);
+      else
+        v.steps.splice(v.steps.length - 1, 0, { id: "your_details", title: "Your details", fieldIds: ids });
+    }
+  }
+  if (!names.length) {
+    // Staff see who booked on the page in the list as well.
+    const table = bp.views.find((x) => x.type === "table" && x.entityId === entity.id);
+    if (table?.type === "table" && !table.fieldIds.includes("guest_name"))
+      table.fieldIds.unshift("guest_name");
+  }
+  // Required fields the page doesn't ask for are added to it; a choice the business makes (Booked via) or a link
+  // to a private list (players) can't be answered by a visitor, so it stops being required.
+  const booking = entity.booking;
+  for (const f of entity.fields)
+    if (
+      f.required &&
+      !v.fieldIds.includes(f.id) &&
+      (f.type === "select" || f.type === "multi_select" || f.type === "relation") &&
+      f.id !== booking?.resourceFieldId
+    )
+      f.required = false;
+  // The ways to pay, shown on the form when the workspace keeps them.
+  const pay = bp.entities.find(
+    (e) =>
+      e.id !== entity.id &&
+      !e.parent &&
+      !e.resource &&
+      /payment|pay_/.test(e.id) &&
+      e.fields.some((f) => f.type === "image" || /account|qr|instruction/.test(f.id)),
+  );
+  if (pay && !v.blocks?.some((b) => b.type === "records" && b.entityId === pay.id)) {
+    const shown = [
+      pay.primaryFieldId,
+      ...pay.fields
+        .filter(
+          (f) =>
+            f.id !== pay.primaryFieldId && /type|method|provider|account|number|instruction|qr/.test(f.id),
+        )
+        .map((f) => f.id),
+    ].slice(0, 7);
+    const active = pay.fields.find((f) => /active|enabled|status/.test(f.id));
+    const filter =
+      active?.type === "checkbox"
+        ? `${active.id} == true`
+        : active?.type === "status" && active.options?.some((o) => o.id === "active")
+          ? `${active.id} == 'active'`
+          : undefined;
+    v.blocks = [
+      ...(v.blocks ?? []),
+      {
+        id: "how_to_pay",
+        type: "records",
+        title: "How to pay",
+        entityId: pay.id,
+        fieldIds: shown,
+        layout: "cards",
+        ...(filter ? { filter } : {}),
+      },
+    ];
+  }
+}
+
+/**
+ * A form's add-ons point at a line-item record type under the form's record type and its link to the items offered.
+ * Near misses are mended (a loose id, a missing parent, the wrong link or quantity field); anything else is dropped,
+ * since the form works without add-ons.
+ */
+function tidyFormExtras(
+  bp: Blueprint,
+  v: Extract<View, { type: "form" }>,
+  resolve: (id: string) => string | undefined,
+) {
+  // Gemini often plans an add-ons step without saying where the add-ons live; a form with that step, or a public
+  // form whose record type has add-on line items (add-ons, rentals, products), gets them anyway.
+  const wantsExtras = v.steps?.some((s) => s.extras);
+  if (!v.extras && (v.public || wantsExtras)) {
+    const line = bp.entities.find(
+      (e) =>
+        (e.parent
+          ? e.parent.entityId === v.entityId
+          : e.fields.some((f) => f.type === "relation" && f.relation?.entityId === v.entityId)) &&
+        e.fields.some((f) => f.type === "relation" && f.relation?.entityId !== v.entityId),
+    );
+    const item = line?.fields.find((f) => f.type === "relation" && f.relation?.entityId !== v.entityId);
+    const items = bp.entities.find((e) => e.id === item?.relation?.entityId);
+    const addOnLike = /add|extra|rental|equipment|gear|product|merch|upsell|inclusion/;
+    if (line && item && items && !items.resource && (wantsExtras || addOnLike.test(items.id))) {
+      const active = items.fields.find((f) => /active|available|in_stock/.test(f.id));
+      const filter =
+        active?.type === "checkbox"
+          ? `${active.id} == true`
+          : active?.type === "status" && active.options?.some((o) => o.id === "active")
+            ? `${active.id} == 'active'`
+            : undefined;
+      v.extras = { lineEntityId: line.id, itemFieldId: item.id, ...(filter ? { filter } : {}) };
+    }
+  }
+  const extras = v.extras;
+  if (!extras) return;
+  const line = bp.entities.find((e) => e.id === (resolve(extras.lineEntityId) ?? extras.lineEntityId));
+  const toParent = line?.fields.find((f) => f.type === "relation" && f.relation?.entityId === v.entityId);
+  if (line && !line.parent && toParent) line.parent = { entityId: v.entityId, fieldId: toParent.id };
+  const links =
+    line?.fields.filter((f) => f.type === "relation" && f.relation?.entityId !== v.entityId) ?? [];
+  const item = links.find((f) => f.id === extras.itemFieldId) ?? (links.length === 1 ? links[0] : undefined);
+  const items = bp.entities.find((e) => e.id === item?.relation?.entityId);
+  if (!line || line.parent?.entityId !== v.entityId || !item || !items) {
+    delete v.extras;
+    return;
+  }
+  extras.lineEntityId = line.id;
+  extras.itemFieldId = item.id;
+  const numbers = line.fields.filter((f) => f.type === "number");
+  const qty =
+    numbers.find((f) => f.id === extras.quantityFieldId) ??
+    numbers.find((f) => /qty|quantity|count|pcs/.test(f.id));
+  if (qty) extras.quantityFieldId = qty.id;
+  else delete extras.quantityFieldId;
+  // A filter may only name the items' own fields (active == true); one that names anything else is dropped.
+  const known = new Set(items.fields.map((f) => f.id));
+  const words = (extras.filter ?? "").replace(/'[^']*'/g, "").match(/[a-z_][a-z0-9_.]*\s*\(?/gi) ?? [];
+  const plain = words.filter((w) => !w.endsWith("(")).map((w) => w.trim());
+  if (plain.some((w) => !known.has(w) && !["true", "false", "null"].includes(w))) delete extras.filter;
+}
+
+/** Approval buttons say what they do: a status called "Confirmed" gets a "Confirm" button. */
+const BUTTON_VERBS: Record<string, string> = {
+  confirmed: "Confirm",
+  approved: "Approve",
+  accepted: "Accept",
+  verified: "Verify",
+  paid: "Mark as paid",
+  completed: "Complete",
+  cancelled: "Cancel",
+  canceled: "Cancel",
+  rejected: "Reject",
+  declined: "Decline",
+  denied: "Deny",
+};
 
 const PAGE_ICONS: [RegExp, IconName][] = [
   [/court|room|venue|table|space|resource/, "court"],
@@ -564,7 +853,11 @@ export function ensurePages(bp: Blueprint): Blueprint {
   for (const v of bp.views) {
     if (
       listed.has(v.id) ||
-      (v.type !== "landing" && v.type !== "form" && v.type !== "document" && v.type !== "canvas")
+      (v.type !== "landing" &&
+        v.type !== "form" &&
+        v.type !== "document" &&
+        v.type !== "canvas" &&
+        v.type !== "html")
     )
       continue;
     bp.systems.push({
