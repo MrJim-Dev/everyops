@@ -19,6 +19,7 @@ import type {
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { computeAll } from "@/lib/engine/compute";
+import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
 import { isImagePath } from "@/lib/engine/records";
 import { repairRules } from "@/lib/engine/rule-repair";
 import { MAX_HTML_BYTES } from "@/lib/public/html-page";
@@ -427,6 +428,13 @@ export function tidy(bp: Blueprint): Blueprint {
     .filter((sys) => sys.viewIds.length + sys.widgetIds.length > 0);
   bp.rules = bp.rules.filter((r) => entityIds.has(r.trigger.entityId));
   bp.rules = repairRules(bp);
+  // A dashboard of only numbers gets the charts and lists an owner looks at first.
+  const board = dashboardSystem(bp);
+  if (board) {
+    const extra = suggestWidgets(bp, board);
+    bp.widgets.push(...extra);
+    board.widgetIds.push(...extra.map((w) => w.id));
+  }
   return bp;
 }
 

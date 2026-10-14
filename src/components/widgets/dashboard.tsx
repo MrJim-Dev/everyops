@@ -5,6 +5,7 @@ import type { DashboardLayout, System, Widget, WidgetWidth } from "@/lib/bluepri
 import { cn } from "@/lib/utils";
 import { AgendaWidget } from "./agenda-widget";
 import { ChartWidget } from "./chart-widget";
+import { DashboardSuggestions } from "./dashboard-suggestions";
 import { HeatmapWidget } from "./heatmap-widget";
 import { ListWidget } from "./list-widget";
 import { ProgressWidget } from "./progress-widget";
@@ -89,6 +90,7 @@ export function Dashboard({ system }: { system: System }) {
       .sort((a, b) => a.order - b.order || a.i - b.i);
     return (
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <DashboardSuggestions system={system} />
         {stats.length ? <StatStrip widgets={stats} /> : null}
         {placed.length ? (
           <div className="grid grid-flow-row-dense grid-cols-1 gap-px border-b bg-border lg:grid-cols-6">
@@ -107,6 +109,7 @@ export function Dashboard({ system }: { system: System }) {
   const side = rest.filter((w) => spanOf(w) === "side");
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
+      <DashboardSuggestions system={system} />
       {stats.length ? <StatStrip widgets={stats} /> : null}
       <div
         className={cn(
