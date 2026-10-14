@@ -28,7 +28,8 @@ export function SystemCard({
     <button
       type="button"
       onClick={onSelect}
-      aria-pressed={selected}
+      aria-haspopup="dialog"
+      aria-expanded={selected}
       style={index === undefined ? undefined : ({ "--i": index } as React.CSSProperties)}
       className={cn(
         "group flex h-full flex-col rounded-2xl p-1.5 text-left outline-none transition-[background-color,transform] duration-200 hover:bg-card/60 focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.99]",
