@@ -3,7 +3,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { posSample } from "@/lib/catalog/canteen-pos";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import type { ChangePlan } from "@/lib/engine/changes";
-import { applyPlan, canRedo, redoPlan, undoPlan } from "./apply-plan";
+import { applyPlan, canRedo, redoPlan, revertChanges, undoPlan } from "./apply-plan";
 import { blueprintOf, mergeStaffChanges, type Workspace, workspaceFrom } from "./workspace-model";
 
 const NOW = new Date("2026-10-14T03:00:00Z");
@@ -198,6 +198,54 @@ describe("every assistant change can be undone", () => {
     expect(undoPlan(second.workspace, first.entry.id, NOW)).toBeNull();
     const back = undoPlan(second.workspace, second.entry.id, NOW) as Workspace;
     expect(undoPlan(back, first.entry.id, NOW)?.records.some((r) => r.id === "booking_1")).toBe(true);
+  });
+});
+
+describe("reverting a conversation from one message on", () => {
+  const at = (s: number) => new Date(NOW.getTime() + s * 1000);
+  const three = () => {
+    const before = court();
+    const a = applyPlan(before, plan({ ops: [{ op: "remove_view", viewId: "booking_calendar" }] }), {
+      now: at(1),
+    });
+    const b = applyPlan(a.workspace, plan({ recordOps: [{ op: "delete_record", recordId: "booking_1" }] }), {
+      now: at(2),
+    });
+    const c = applyPlan(b.workspace, plan({ recordOps: [{ op: "delete_record", recordId: "booking_2" }] }), {
+      now: at(3),
+    });
+    return { before, a, b, c };
+  };
+
+  it("undoes design and data changes together, newest first, back to how it was", () => {
+    const { before, a, b, c } = three();
+    const result = revertChanges(c.workspace, [a.entry.id, b.entry.id, c.entry.id], at(4));
+    if (!result.ok) throw new Error("expected the revert to work");
+    expect(result.undone.map((e) => e.id)).toEqual([c.entry.id, b.entry.id, a.entry.id]);
+    sameData(result.workspace, before);
+    expect(result.workspace.changes.every((e) => e.undoneAt)).toBe(true);
+  });
+
+  it("reverts only from the chosen change on", () => {
+    const { a, b, c } = three();
+    const result = revertChanges(c.workspace, [b.entry.id, c.entry.id], at(4));
+    if (!result.ok) throw new Error("expected the revert to work");
+    sameData(result.workspace, a.workspace);
+  });
+
+  it("refuses, changing nothing, when a newer change from elsewhere is in the way", () => {
+    const { a, b, c } = three();
+    const result = revertChanges(c.workspace, [a.entry.id, b.entry.id], at(4));
+    expect(result).toEqual({ ok: false, blocking: [c.entry] });
+  });
+
+  it("skips changes already undone", () => {
+    const { a, b, c } = three();
+    const later = undoPlan(c.workspace, c.entry.id, at(4)) as Workspace;
+    const result = revertChanges(later, [b.entry.id, c.entry.id], at(5));
+    if (!result.ok) throw new Error("expected the revert to work");
+    expect(result.undone.map((e) => e.id)).toEqual([b.entry.id]);
+    sameData(result.workspace, a.workspace);
   });
 });
 

@@ -23,7 +23,21 @@ export async function POST(request: Request) {
       { status: 429 },
     );
   const name = file instanceof File ? file.name : "file";
-  const ref = await saveAttachment(user.id, new Uint8Array(await file.arrayBuffer()), name, file.type);
+  let ref: Awaited<ReturnType<typeof saveAttachment>>;
+  try {
+    ref = await saveAttachment(user.id, new Uint8Array(await file.arrayBuffer()), name, file.type);
+  } catch (e) {
+    // Storage is down or refused the write: say so instead of a blank 500 the chat can only call "Try again".
+    console.error(JSON.stringify({ event: "attachment_save_failed", message: String(e).slice(0, 300) }));
+    return Response.json(
+      {
+        ok: false,
+        message:
+          "File storage isn't available right now, so the file couldn't be saved. Try again in a minute.",
+      },
+      { status: 503 },
+    );
+  }
   if (!ref)
     return Response.json(
       {

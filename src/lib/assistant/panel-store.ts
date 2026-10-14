@@ -26,6 +26,8 @@ export type AssistantTurn = {
   stopped?: boolean;
   /** The website section this message was about, e.g. "Hero". */
   ref?: string;
+  /** The person reverted every change made from this message on. */
+  reverted?: { count: number; at: string };
 };
 
 /** A request on its way: when it started, what it's doing, and the steps reported so far. */

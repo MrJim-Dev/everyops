@@ -6,7 +6,7 @@ import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import type { ChangePlan } from "@/lib/engine/changes";
 import { computeAll } from "@/lib/engine/compute";
 import { markFresh } from "@/lib/motion/fresh";
-import { applyPlan, redoPlan, undoPlan } from "./apply-plan";
+import { applyPlan, type RevertResult, redoPlan, revertChanges, undoPlan } from "./apply-plan";
 import {
   blueprintOf,
   type ChangeEntry,
@@ -64,6 +64,8 @@ type State = {
   undoChange: (slug: string, changeId: string) => void;
   /** Puts back the latest undone design change. */
   redoChange: (slug: string, changeId: string) => void;
+  /** Undoes several changes at once, newest first, in one save (a conversation's changes from a message on). */
+  revertChanges: (slug: string, changeIds: string[]) => RevertResult;
 };
 
 /* ---------- Server sync ---------- */
@@ -462,5 +464,13 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
       update(slug, (ws) => (ws.loaded === false ? ws : (undoPlan(ws, changeId) ?? ws))),
     redoChange: (slug, changeId) =>
       update(slug, (ws) => (ws.loaded === false ? ws : (redoPlan(ws, changeId) ?? ws))),
+
+    revertChanges: (slug, changeIds) => {
+      const ws = get().workspaces[slug];
+      if (!ws || ws.loaded === false) return { ok: false };
+      const result = revertChanges(ws, changeIds);
+      if (result.ok && result.undone.length) update(slug, () => result.workspace);
+      return result;
+    },
   };
 });

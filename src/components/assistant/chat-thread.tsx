@@ -1,16 +1,23 @@
 "use client";
 
-import { ArrowClockwiseIcon, ArrowDownIcon, ArrowRightIcon } from "@phosphor-icons/react";
+import {
+  ArrowClockwiseIcon,
+  ArrowCounterClockwiseIcon,
+  ArrowDownIcon,
+  ArrowRightIcon,
+} from "@phosphor-icons/react";
 import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MessageFiles } from "@/components/ai/composer-tools";
 import { LogoMark } from "@/components/brand/logo";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Navigation } from "@/lib/assistant/screen";
 import type { ChangePlan } from "@/lib/engine/changes";
 import { cn } from "@/lib/utils";
 import { PlanCard } from "./plan-card";
 import { ActivityLog, type Link, Linked, recordName, SourceLinks } from "./reply-extras";
+import { RevertDialog } from "./revert-dialog";
 import { Thinking } from "./thinking";
-import type { AssistantChat } from "./use-assistant-chat";
+import type { AssistantChat, RevertPreview } from "./use-assistant-chat";
 
 /** "**bold**" inside a line of a reply. */
 function Inline({ text, links }: { text: string; links: Link[] }) {
@@ -94,6 +101,31 @@ function newPageOf(plan: ChangePlan): Navigation | undefined {
 const chip =
   "cursor-pointer rounded-full border px-3 py-1 text-left text-[12.5px] text-muted-foreground outline-none transition-colors duration-150 hover:border-foreground/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50";
 
+/**
+ * Beside a message of yours: reverts everything the assistant changed from there on. Shown on hover or focus
+ * (always on touch screens), so the thread stays quiet until you reach for it.
+ */
+function RevertButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Revert changes from here"
+            onClick={onClick}
+            disabled={disabled}
+            className="mb-0.5 flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-[opacity,color,background-color] duration-150 ease-out group-hover/turn:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-0 data-popup-open:opacity-100 [@media(hover:none)]:opacity-100"
+          >
+            <ArrowCounterClockwiseIcon className="size-3.5" />
+          </button>
+        }
+      />
+      <TooltipContent side="left">Revert changes from here</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function Suggestions({
   items,
   onPick,
@@ -135,6 +167,12 @@ export function ChatThread({
   const { turns, pending } = chat;
   const scroller = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
+  // The message a revert would start from, and what it would undo (checked when the dialog opens).
+  const [reverting, setReverting] = useState<{ index: number; preview: RevertPreview } | null>(null);
+  const startRevert = (index: number) => {
+    const preview = chat.previewRevert(index);
+    if (preview) setReverting({ index, preview });
+  };
   // Turns already there when the thread opens don't animate; only new ones do.
   const firstCount = useRef(turns.length);
   if (turns.length < firstCount.current) firstCount.current = turns.length;
@@ -172,10 +210,11 @@ export function ChatThread({
           {!turns.length ? empty : null}
           {turns.map((t, i) => {
             const fresh = i >= firstCount.current;
+            const userRow = cn("group/turn flex flex-col items-end gap-1.5", fresh && "enter-up");
             if (t.role === "user")
               return (
                 // biome-ignore lint/suspicious/noArrayIndexKey: turns only grow
-                <div key={i} className={cn("flex flex-col items-end gap-1.5", fresh && "enter-up")}>
+                <div key={i} className={userRow}>
                   {t.ref ? (
                     <span className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/8 px-1.5 py-0.5 text-[11.5px] text-muted-foreground">
                       <span className="size-1.5 rounded-full bg-primary" />
@@ -183,15 +222,26 @@ export function ChatThread({
                     </span>
                   ) : null}
                   <MessageFiles files={t.attachments} />
-                  {t.text ? (
-                    <p
-                      className={cn(
-                        "max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-3.5 py-2 leading-relaxed whitespace-pre-line",
-                        page ? "text-[14.5px]" : "text-[13.5px]",
-                      )}
-                    >
-                      {t.text}
-                    </p>
+                  <div className="flex w-full items-end justify-end gap-1">
+                    {chat.canRevertFrom(i) ? (
+                      <RevertButton onClick={() => startRevert(i)} disabled={!!pending} />
+                    ) : null}
+                    {t.text ? (
+                      <p
+                        className={cn(
+                          "max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-3.5 py-2 leading-relaxed whitespace-pre-line",
+                          page ? "text-[14.5px]" : "text-[13.5px]",
+                        )}
+                      >
+                        {t.text}
+                      </p>
+                    ) : null}
+                  </div>
+                  {t.reverted ? (
+                    <span className="enter-up inline-flex items-center gap-1 text-[11.5px] text-muted-foreground">
+                      <ArrowCounterClockwiseIcon className="size-3" />
+                      Reverted {t.reverted.count} {t.reverted.count === 1 ? "change" : "changes"}
+                    </span>
                   ) : null}
                 </div>
               );
@@ -290,6 +340,19 @@ export function ChatThread({
           <ArrowDownIcon className="size-4" />
         </button>
       ) : null}
+      <RevertDialog
+        preview={reverting?.preview ?? null}
+        message={reverting ? (turns[reverting.index]?.text ?? "") : ""}
+        onClose={() => setReverting(null)}
+        onConfirm={() => {
+          if (reverting) chat.revertFrom(reverting.index);
+          setReverting(null);
+        }}
+        onOpenHistory={() => {
+          setReverting(null);
+          chat.go({ path: "/history", label: "History", open: true });
+        }}
+      />
     </div>
   );
 }

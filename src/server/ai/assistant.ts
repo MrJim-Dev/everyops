@@ -41,7 +41,14 @@ import { isPublic, publicFieldsOf, publicForm } from "@/lib/public/resolve";
 import { copyFromBlocks, mainForm, standardBlocks } from "@/lib/public/site-template";
 import { type Invite, type Member, randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
-import { ASSISTANT_SYSTEM, type AssistantAnswer, assistantAnswer, designOp } from "./assistant-prompt";
+import {
+  ASSISTANT_RETRY_NOTE,
+  ASSISTANT_SYSTEM,
+  ASSISTANT_TEXT_LIMITS,
+  type AssistantAnswer,
+  assistantAnswer,
+  designOp,
+} from "./assistant-prompt";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
 import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
 import { view } from "./design-prompt";
@@ -402,11 +409,6 @@ function toDesignOps(
         const patch = {
           ...(o.public !== undefined ? { public: o.public } : {}),
           ...(o.intro ? { intro: o.intro } : {}),
-          // A button says a few words; a run-on label ("Book Court & Pay Later/Now via GCash/Maya details below…")
-          // is dropped rather than shown.
-          ...(o.submitLabel && o.submitLabel.trim().length <= 40
-            ? { submitLabel: o.submitLabel.trim() }
-            : {}),
           ...(fieldIds?.length ? { fieldIds } : {}),
           // Steps keep the form's own review setting; a form getting steps for the first time ends with one.
           ...(split?.steps
@@ -491,6 +493,16 @@ function toDesignOps(
       if (Object.keys(patch).length)
         ops.push({ op: "update_block", viewId: view.id, blockId: block.id, patch });
       else errors.push(`renames[${i}]: nothing to change on the ${block.type} section`);
+    } else if (r.kind === "button") {
+      // A form's button words travel as a rename: inside ops, Gemini looped on them.
+      const form = [...bp.views, ...ops.flatMap((x) => (x.op === "add_view" ? [x.view] : []))].find(
+        (v) => v.id === r.id,
+      );
+      if (form?.type !== "form") errors.push(`renames[${i}]: "${r.id}" isn't a form`);
+      // A button says a few words; a run-on label ("Book Court & Pay Later/Now via GCash/Maya details below…")
+      // is dropped rather than shown.
+      else if (name.length <= 40)
+        ops.push({ op: "update_view", viewId: form.id, patch: { submitLabel: name } });
     } else if (r.kind === "page") ops.push({ op: "rename_system", systemId: r.id, name });
     else ops.push({ op: "rename_view", viewId: r.id, name });
   }
@@ -1023,8 +1035,9 @@ ${input.messages
         maxOutputTokens: 12_000,
         // A drafted HTML page is one long text value (4–15k characters), not a runaway.
         maxStringChars: 24_000,
+        textLimits: ASSISTANT_TEXT_LIMITS,
       },
-      { hedgeMs: 28_000 },
+      { hedgeMs: 28_000, retryNote: ASSISTANT_RETRY_NOTE },
     );
     if (!result.ok) {
       // Every hedged try went wrong (a loop, a cut-off answer): start over once before telling the person.
