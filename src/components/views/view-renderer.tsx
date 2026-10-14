@@ -1,5 +1,6 @@
 "use client";
 
+import { LayoutView } from "@/components/layout-page/layout-view";
 import type { View } from "@/lib/blueprint/types";
 import { ApprovalQueueView } from "./approval-queue-view";
 import { CalendarView } from "./calendar-view";
@@ -41,6 +42,8 @@ export function ViewRenderer({ view }: { view: View }) {
       return <LandingView key={view.id} view={view} />;
     case "html":
       return <HtmlPageView key={view.id} view={view} />;
+    case "layout":
+      return <LayoutView key={view.id} view={view} />;
   }
 }
 

@@ -238,6 +238,28 @@ export type HtmlPageView = ViewBase & {
   html?: string;
 };
 
+/**
+ * One part of a layout page: a component from the component library (src/lib/components/registry.ts) with its
+ * settings. span is how many of the section's columns it covers on wide screens; on phones everything stacks.
+ */
+export type LayoutItem = { id: string; component: string; span?: number; props: Record<string, unknown> };
+
+/** A row of a layout page: an optional heading, then its items in a grid of 1 to 4 columns. */
+export type LayoutSection = {
+  id: string;
+  title?: string;
+  description?: string;
+  columns: number;
+  items: LayoutItem[];
+};
+
+/**
+ * A page composed from the component library: stats, charts, tables, lists, calendars, cards, tabs, blocks and the
+ * workspace's own views and dashboard cards, arranged in sections. entityId is "": each component names its own
+ * record type. Validated against the registry like every other part of the blueprint.
+ */
+export type LayoutView = ViewBase & { type: "layout"; sections: LayoutSection[] };
+
 /** A short titled point: a highlight ("Open until 11 PM") or a step ("Pick a court and time"). */
 export type BlockItem = { title: string; body: string };
 
@@ -290,9 +312,19 @@ export type View =
   | DocumentView
   | CanvasView
   | LandingView
-  | HtmlPageView;
+  | HtmlPageView
+  | LayoutView;
 
 export type ViewType = View["type"];
+
+/** Pages with no record type of their own (entityId ""). */
+export const FREE_PAGE_TYPES: ReadonlySet<string> = new Set([
+  "document",
+  "canvas",
+  "html",
+  "landing",
+  "layout",
+]);
 
 /** A named total a summary card's formula uses: one record type, counted or added up, with its own filter. */
 export type WidgetTerm = {

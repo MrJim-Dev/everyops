@@ -17,6 +17,7 @@ import type {
   Widget,
   WorkspaceData,
 } from "@/lib/blueprint/types";
+import { FREE_PAGE_TYPES } from "@/lib/blueprint/types";
 import { GROUP_KINDS, validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { samplesThisYear } from "@/lib/catalog/shift";
@@ -298,14 +299,10 @@ export function tidy(bp: Blueprint): Blueprint {
   }
   const fieldsOf = (entityId: string) =>
     new Set(bp.entities.find((e) => e.id === entityId)?.fields.map((x) => x.id) ?? []);
-  bp.views = bp.views.filter((v) =>
-    v.type === "document" || v.type === "canvas" || v.type === "html" || v.type === "landing"
-      ? true
-      : entityIds.has(v.entityId),
-  );
+  bp.views = bp.views.filter((v) => FREE_PAGE_TYPES.has(v.type) || entityIds.has(v.entityId));
   const formIds = new Set(bp.views.filter((v) => v.type === "form").map((v) => v.id));
   for (const v of bp.views) {
-    if (v.type === "document" || v.type === "canvas" || v.type === "html" || v.type === "landing") {
+    if (FREE_PAGE_TYPES.has(v.type)) {
       v.entityId = "";
       if (v.type === "landing") v.blocks = tidyBlocks(v.blocks, resolve, fieldsOf, formIds);
       continue;
@@ -1237,7 +1234,8 @@ export function ensurePages(bp: Blueprint): Blueprint {
         v.type !== "form" &&
         v.type !== "document" &&
         v.type !== "canvas" &&
-        v.type !== "html")
+        v.type !== "html" &&
+        v.type !== "layout")
     )
       continue;
     bp.systems.push({

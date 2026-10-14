@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { catalogText } from "@/lib/components/registry";
 import { FUNCTIONS } from "@/lib/engine/expr";
 import {
   block,
@@ -31,15 +32,26 @@ const assistantBlock = z.union(
   ) as unknown as [AnyObject, AnyObject, ...AnyObject[]],
 );
 // Free pages (a markdown document, a canvas, a custom HTML page) share one shape: one union branch instead of three.
+/** Indents every line, so a list sits under its bullet in the prompt. */
+function indent(text: string, spaces: number) {
+  const pad = " ".repeat(spaces);
+  return text
+    .split("\n")
+    .map((l) => pad + l)
+    .join("\n");
+}
+
 const freePage = z.object({
   id: z.string(),
   entityId: z.string().describe('Always ""'),
   name: z.string(),
-  type: z.string().describe("document, canvas or html"),
+  type: z.string().describe("document, canvas, html or layout"),
   starter: z
     .string()
     .optional()
-    .describe("document: starting markdown; html: a short starting page only when asked to draft one"),
+    .describe(
+      'document: starting markdown; html: a short starting page only when asked to draft one; layout: the page as JSON {"sections":[...]}',
+    ),
 });
 const assistantView = z.union(
   [
@@ -444,6 +456,20 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
     target "_top") opens EveryOps's own form with its live calendar; prefer it to embedding a booking form.
     ${HTML_DESIGN_GUIDE}
     In the reply, say they can open Edit HTML to change the design.
+  - layout: a page composed from EveryOps's component library ("a custom dashboard", "a page with the revenue chart
+    next to today's bookings", "an overview with tabs for this week and this month", "make the courts page look like
+    a dashboard"). Prefer it to add_widget when the person asks for a custom layout, a mix of numbers, charts, tables,
+    lists and cards, tabs, or something a dashboard can't arrange. Its entityId is "" and starter holds the whole
+    page as JSON: {"sections":[{"title":"Today","description":"optional line","columns":3,"items":[{"component":
+    "stat","span":1,"props":{"title":"Bookings today","entityId":"booking","op":"count","filter":"..."}}]}]}.
+    columns is 1 to 4; span (1 to 4) widens an item inside its section; wide components (tables, stat cards, tabs,
+    alerts, workspace views) fill the row unless given a span. Use only this workspace's record type and field ids;
+    filters are the same formulas as views. Start with the key numbers (stat_cards), then charts and lists side by
+    side, then tables; 2 to 5 sections, each with a short title. To show an existing tab or dashboard card inside
+    the layout, use the view or widget component with its id. To change an existing layout page, use pageTexts with
+    its view id and its complete new layout JSON (keep what the person didn't ask to change); its current layout is
+    listed with the page. Components (settings marked ? are optional):
+${indent(catalogText(), 4)}
 - Reports and totals pages: add_system with no views and several add_widget on it; a page without views shows
   its widgets as a dashboard. Start with 2 to 4 stat widgets for the totals (metric count/sum/avg, optional
   filter, e.g. revenue from paid bookings, bookings this month), then chart for graphs: over
