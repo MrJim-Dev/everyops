@@ -1,8 +1,6 @@
 "use client";
 
 import { PlusIcon, RowsIcon, SquaresFourIcon } from "@phosphor-icons/react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { SegmentedControl } from "@/components/motion/segmented-control";
 import { Button } from "@/components/ui/button";
@@ -22,6 +20,7 @@ import { usePublished } from "@/lib/community/published";
 import { useHydrated } from "@/lib/store/use-hydrated";
 import { recordCount, roleOf } from "@/lib/store/workspace-model";
 import { useWorkspaces } from "@/lib/store/workspaces";
+import { useNewWorkspace } from "./create-prompt";
 import { WorkspaceCard } from "./workspace-card";
 import { WorkspaceOverview } from "./workspace-overview";
 import { WorkspaceRow } from "./workspace-row";
@@ -42,7 +41,7 @@ const fold = (s: string) =>
 export function WorkspaceList() {
   const hydrated = useHydrated();
   const user = useCurrentUser();
-  const router = useRouter();
+  const newWorkspace = useNewWorkspace();
   const all = useWorkspaces((s) => s.workspaces);
   const listings = usePublished((s) => s.systems);
   const loadCommunity = usePublished((s) => s.load);
@@ -103,7 +102,7 @@ export function WorkspaceList() {
               : "Workspaces you own or were invited to."}
           </p>
         </div>
-        <Button className="h-9 px-3.5" render={<Link href="/" />} nativeButton={false}>
+        <Button className="h-9 px-3.5" onClick={newWorkspace}>
           <PlusIcon data-icon="inline-start" />
           New workspace
         </Button>
@@ -116,7 +115,7 @@ export function WorkspaceList() {
           title="No workspaces yet"
           description="Describe your business and EveryOps builds your first workspace."
           actionLabel="New workspace"
-          onAction={() => router.push("/")}
+          onAction={newWorkspace}
         />
       ) : (
         <div className="flex flex-col gap-6">
@@ -183,7 +182,7 @@ export function WorkspaceList() {
                   now={now}
                 />
               ))}
-              <NewWorkspaceTile index={visible.length + 3} />
+              <NewWorkspaceTile index={visible.length + 3} onClick={newWorkspace} />
             </div>
           ) : (
             <ul key="list" className="animate-rise divide-y overflow-hidden rounded-xl border">
@@ -198,12 +197,13 @@ export function WorkspaceList() {
   );
 }
 
-function NewWorkspaceTile({ index }: { index: number }) {
+function NewWorkspaceTile({ index, onClick }: { index: number; onClick: () => void }) {
   return (
-    <Link
-      href="/"
+    <button
+      type="button"
+      onClick={onClick}
       style={{ "--i": Math.min(index, 8) } as React.CSSProperties}
-      className="animate-rise stagger group flex min-h-[118px] flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed text-center outline-none transition-[border-color,background-color] duration-200 hover:border-primary/40 hover:bg-primary/[0.03] focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="animate-rise stagger group flex min-h-[118px] cursor-pointer flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed text-center outline-none transition-[border-color,background-color] duration-200 hover:border-primary/40 hover:bg-primary/[0.03] focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       <span className="flex size-10 items-center justify-center rounded-xl border border-dashed text-muted-foreground transition-colors duration-200 group-hover:border-primary/40 group-hover:text-primary">
         <PlusIcon className="size-4.5" />
@@ -214,7 +214,7 @@ function NewWorkspaceTile({ index }: { index: number }) {
           Describe your business and we'll build it
         </span>
       </span>
-    </Link>
+    </button>
   );
 }
 

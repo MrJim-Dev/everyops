@@ -2,6 +2,7 @@
 
 import { CaretUpDownIcon, CheckIcon, PlusIcon, SquaresFourIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
+import { useNewWorkspace } from "@/components/hub/create-prompt";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +19,7 @@ import { WorkspaceTile } from "./workspace-tile";
 export function WorkspaceSwitcher() {
   const ws = useWorkspace();
   const router = useRouter();
+  const newWorkspace = useNewWorkspace();
   const recent = useRecentWorkspaces();
 
   return (
@@ -40,7 +42,7 @@ export function WorkspaceSwitcher() {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => router.push("/")}>
+          <DropdownMenuItem onClick={newWorkspace}>
             <PlusIcon />
             Create a workspace
           </DropdownMenuItem>

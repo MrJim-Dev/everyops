@@ -10,6 +10,8 @@ import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState 
 import { MessageFiles } from "@/components/ai/composer-tools";
 import { LogoMark } from "@/components/brand/logo";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useFollowBottom } from "@/hooks/use-follow-bottom";
+import { typingMs, useTypewriter } from "@/hooks/use-typewriter";
 import { replyBlocks } from "@/lib/assistant/reply-format";
 import type { Navigation } from "@/lib/assistant/screen";
 import type { Blueprint } from "@/lib/blueprint/types";
@@ -74,6 +76,11 @@ export function Rich({ text, links = [] }: { text: string; links?: Link[] }) {
       )}
     </div>
   );
+}
+
+/** A reply that types itself out when it has just arrived (`typing`); older replies show whole. */
+export function TypedRich({ text, typing, links }: { text: string; typing: boolean; links?: Link[] }) {
+  return <Rich text={useTypewriter(text, typing)} links={links} />;
 }
 
 /** The first page or tab a plan adds (or swaps in), so it can be opened once the plan is applied. */
@@ -158,6 +165,7 @@ export function ChatThread({
 }) {
   const { turns, pending } = chat;
   const scroller = useRef<HTMLDivElement>(null);
+  useFollowBottom(scroller);
   const [atBottom, setAtBottom] = useState(true);
   // The message a revert would start from, and what it would undo (checked when the dialog opens).
   const [reverting, setReverting] = useState<{ index: number; preview: RevertPreview } | null>(null);
@@ -259,47 +267,54 @@ export function ChatThread({
                       t.stopped && "text-muted-foreground",
                     )}
                   >
-                    <Rich
+                    <TypedRich
                       text={t.text}
+                      typing={fresh && !failed}
                       links={(t.sources ?? [])
                         .filter((s) => s.recordId)
                         .map((s) => ({ label: recordName(s), onGo: () => chat.go(s) }))}
                     />
                   </div>
-                  {t.sources?.length ? <SourceLinks sources={t.sources} onGo={chat.go} /> : null}
-                  {failed && i === turns.length - 1 && !pending ? (
-                    <button
-                      type="button"
-                      onClick={chat.retry}
-                      className="mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[12.5px] text-muted-foreground outline-none transition-colors hover:border-foreground/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
-                    >
-                      <ArrowClockwiseIcon className="size-3.5" />
-                      {t.stopped ? "Send again" : "Try again"}
-                    </button>
-                  ) : null}
-                  {t.navigate ? (
-                    <button
-                      type="button"
-                      onClick={() => chat.go(t.navigate as Navigation)}
-                      className="mt-2 inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[12.5px] text-muted-foreground outline-none transition-colors hover:border-foreground/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
-                    >
-                      <ArrowRightIcon className="size-3.5 shrink-0" />
-                      <span className="truncate">{t.navigate.label}</span>
-                    </button>
-                  ) : null}
-                  {t.plan ? (
-                    <PlanCard
-                      plan={t.plan}
-                      state={chat.planStateOf(t)}
-                      onApply={() => chat.apply(i, t.plan as ChangePlan)}
-                      onDismiss={() => chat.dismiss(i)}
-                      onUndo={() => chat.undo(i, t.changeId)}
-                      onOpenPage={(() => {
-                        const target = newPageOf(t.plan, chat.ws.blueprint);
-                        return target ? () => chat.go(target) : undefined;
-                      })()}
-                    />
-                  ) : null}
+                  {/* Links, the plan card and buttons arrive once the reply has finished typing. */}
+                  <div
+                    className={cn(fresh && !failed && "animate-rise")}
+                    style={fresh && !failed ? { animationDelay: `${typingMs(t.text)}ms` } : undefined}
+                  >
+                    {t.sources?.length ? <SourceLinks sources={t.sources} onGo={chat.go} /> : null}
+                    {failed && i === turns.length - 1 && !pending ? (
+                      <button
+                        type="button"
+                        onClick={chat.retry}
+                        className="mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[12.5px] text-muted-foreground outline-none transition-colors hover:border-foreground/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                      >
+                        <ArrowClockwiseIcon className="size-3.5" />
+                        {t.stopped ? "Send again" : "Try again"}
+                      </button>
+                    ) : null}
+                    {t.navigate ? (
+                      <button
+                        type="button"
+                        onClick={() => chat.go(t.navigate as Navigation)}
+                        className="mt-2 inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[12.5px] text-muted-foreground outline-none transition-colors hover:border-foreground/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                      >
+                        <ArrowRightIcon className="size-3.5 shrink-0" />
+                        <span className="truncate">{t.navigate.label}</span>
+                      </button>
+                    ) : null}
+                    {t.plan ? (
+                      <PlanCard
+                        plan={t.plan}
+                        state={chat.planStateOf(t)}
+                        onApply={() => chat.apply(i, t.plan as ChangePlan)}
+                        onDismiss={() => chat.dismiss(i)}
+                        onUndo={() => chat.undo(i, t.changeId)}
+                        onOpenPage={(() => {
+                          const target = newPageOf(t.plan, chat.ws.blueprint);
+                          return target ? () => chat.go(target) : undefined;
+                        })()}
+                      />
+                    ) : null}
+                  </div>
                 </div>
               </div>
             );

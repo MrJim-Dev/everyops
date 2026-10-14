@@ -26,6 +26,14 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   // The full Ask EveryOps page is the same conversation: the panel never opens beside it.
   const pathname = usePathname();
   const onAsk = pathname === `${ws.basePath}/ask`;
+  // Arriving from a screen that faded out (home prompt, Create workspace): the page settles back in on the next
+  // frame, through the same transition it left on.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-checked on every page change
+  useEffect(() => {
+    if (!("eoLeaving" in document.documentElement.dataset)) return;
+    const frame = requestAnimationFrame(() => delete document.documentElement.dataset.eoLeaving);
+    return () => cancelAnimationFrame(frame);
+  }, [pathname]);
   useEffect(() => {
     const state = useAssistant.getState();
     if (onAsk && state.open) setAssistantOpen(false);
