@@ -12,37 +12,9 @@ import {
 } from "@/components/ui/card";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { getEntity } from "@/lib/blueprint/lookup";
-import type { Blueprint, DataRecord, Sort, Widget } from "@/lib/blueprint/types";
-import { metricFormatter } from "@/lib/engine/metric-format";
+import type { DataRecord, Sort } from "@/lib/blueprint/types";
 import { applyFilter, sortRecords } from "@/lib/engine/query";
-import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
-
-/** A total over one record type, as layout components describe it. */
-export type Metric = { entityId: string; op: "count" | "sum" | "avg"; fieldId?: string; filter?: string };
-
-/**
- * Layout components reuse the dashboard engine (chartData, widgetValue, compareStat, metricFormatter), so a number on
- * a layout page is worked out exactly like the same number on a dashboard card.
- */
-export function metricWidget(title: string, m: Metric, extra: Partial<Widget> = {}): Widget {
-  return {
-    id: "layout_part",
-    title,
-    entityId: m.entityId,
-    ...(m.filter ? { filter: m.filter } : {}),
-    type: "stat",
-    metric: { op: m.op, ...(m.fieldId ? { fieldId: m.fieldId } : {}) },
-    ...extra,
-  };
-}
-
-export function formatterFor(bp: Blueprint, widget: Widget, format?: "money" | "number" | "percent") {
-  if (format === "money") return (v: number) => formatMoney(Math.round(v));
-  if (format === "percent") return (v: number) => formatPercent(Math.round(v * 10) / 10);
-  if (format === "number") return (v: number) => formatNumber(Math.round(v * 10) / 10);
-  return metricFormatter(bp, widget);
-}
 
 export const CHART_COLORS = [
   "var(--chart-1)",

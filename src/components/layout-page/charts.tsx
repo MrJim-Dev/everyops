@@ -24,54 +24,47 @@ import {
 } from "recharts";
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { useWorkspace } from "@/components/workspace/workspace-context";
-import type { Widget } from "@/lib/blueprint/types";
-import { chartData, widgetValue } from "@/lib/engine/aggregate";
+import {
+  type ChartData,
+  type ChartProps,
+  chartOf,
+  formatValue,
+  type GoalData,
+  goalOf,
+  type Metric,
+} from "@/lib/components/compute";
 import { formatNumber, formatPercent } from "@/lib/format";
-import { chartColor, formatterFor, type Metric, metricWidget, Nothing, PartCard } from "./shared";
+import { chartColor, Nothing, PartCard } from "./shared";
 
 type P<T> = { props: T };
-type ChartProps = Metric & {
-  title: string;
-  description?: string;
-  dateFieldId?: string;
-  bucket: "day" | "week" | "month";
-  groupByFieldId?: string;
-  splitByFieldId?: string;
-  stacked?: boolean;
-};
+type Head = { title: string; description?: string };
 
 const compact = (v: number) =>
   Math.abs(v) >= 1000 ? `${formatNumber(Math.round(v / 100) / 10)}k` : formatNumber(v);
+const isEmpty = (d: ChartData) => !d.points.some((pt) => d.series.some((s) => Number(pt[s.key] ?? 0) !== 0));
+const configOf = (d: ChartData): ChartConfig =>
+  Object.fromEntries(d.series.map((s, i) => [s.key, { label: s.label, color: chartColor(i) }]));
 
-function useChart(p: ChartProps, kind: "line" | "bar" | "area" | "donut") {
-  const { blueprint, records } = useWorkspace();
-  const widget: Widget = metricWidget(p.title, p, {
-    type: "chart",
-    chart: {
-      kind,
-      bucket: p.bucket ?? "day",
-      ...(p.dateFieldId ? { dateFieldId: p.dateFieldId } : {}),
-      ...(p.groupByFieldId ? { groupByFieldId: p.groupByFieldId } : {}),
-      ...(p.splitByFieldId ? { splitByFieldId: p.splitByFieldId } : {}),
-    },
-  });
-  const { points, series } = chartData(blueprint, widget, records);
-  const config: ChartConfig = Object.fromEntries(
-    series.map((s, i) => [s.key, { label: s.label, color: chartColor(i) }]),
-  );
-  const empty = !points.some((pt) => series.some((s) => Number(pt[s.key] ?? 0) !== 0));
-  return { points, series, config, format: formatterFor(blueprint, widget), empty };
-}
-
-/** Area, bar and line charts: the shadcn chart look over the dashboard engine's buckets. */
-export function CartesianPart({ props, kind }: P<ChartProps> & { kind: "area" | "bar" | "line" }) {
-  const { points, series, config, format, empty } = useChart(props, kind);
+/** Area, bar and line charts: the shadcn chart look over points worked out by the dashboard engine. */
+export function CartesianView({
+  head,
+  data,
+  shape,
+  stacked,
+}: {
+  head: Head;
+  data: ChartData;
+  shape: "area" | "bar" | "line";
+  stacked?: boolean;
+}) {
+  const config = configOf(data);
+  const format = (v: number) => formatValue(data.kind, v);
   const tooltip = (
     <ChartTooltip
-      cursor={kind === "bar" ? { fill: "var(--muted)" } : true}
+      cursor={shape === "bar" ? { fill: "var(--muted)" } : true}
       content={
         <ChartTooltipContent
-          indicator={kind === "line" ? "line" : "dot"}
+          indicator={shape === "line" ? "line" : "dot"}
           formatter={(v, name) => (
             <div className="flex w-full items-center justify-between gap-4">
               <span className="text-muted-foreground">{config[String(name)]?.label}</span>
@@ -90,12 +83,13 @@ export function CartesianPart({ props, kind }: P<ChartProps> & { kind: "area" | 
       {tooltip}
     </>
   );
-  const stack = props.stacked ? "a" : undefined;
+  const stack = stacked ? "a" : undefined;
+  const empty = isEmpty(data);
   // Several series (split by an option) get a legend, so each colour reads as its option.
   const legend =
-    series.length > 1 ? (
+    data.series.length > 1 && !empty ? (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
-        {series.map((s, i) => (
+        {data.series.map((s, i) => (
           <span key={s.key} className="inline-flex items-center gap-1.5">
             <span aria-hidden="true" className="size-2 rounded-full" style={{ background: chartColor(i) }} />
             {s.label}
@@ -104,15 +98,15 @@ export function CartesianPart({ props, kind }: P<ChartProps> & { kind: "area" | 
       </div>
     ) : undefined;
   return (
-    <PartCard title={props.title} description={props.description} footer={empty ? undefined : legend}>
+    <PartCard title={head.title} description={head.description} footer={legend}>
       {empty ? (
         <Nothing>No data in this period yet.</Nothing>
       ) : (
         <ChartContainer config={config} className="aspect-auto h-[240px] w-full">
-          {kind === "bar" ? (
-            <BarChart data={points} margin={{ left: 0, right: 4 }}>
+          {shape === "bar" ? (
+            <BarChart data={data.points} margin={{ left: 0, right: 4 }}>
               {axes}
-              {series.map((s, i) => (
+              {data.series.map((s, i) => (
                 <Bar
                   key={s.key}
                   dataKey={s.key}
@@ -122,10 +116,10 @@ export function CartesianPart({ props, kind }: P<ChartProps> & { kind: "area" | 
                 />
               ))}
             </BarChart>
-          ) : kind === "line" ? (
-            <LineChart data={points} margin={{ left: 0, right: 8 }}>
+          ) : shape === "line" ? (
+            <LineChart data={data.points} margin={{ left: 0, right: 8 }}>
               {axes}
-              {series.map((s, i) => (
+              {data.series.map((s, i) => (
                 <Line
                   key={s.key}
                   dataKey={s.key}
@@ -137,9 +131,9 @@ export function CartesianPart({ props, kind }: P<ChartProps> & { kind: "area" | 
               ))}
             </LineChart>
           ) : (
-            <AreaChart data={points} margin={{ left: 0, right: 8 }}>
+            <AreaChart data={data.points} margin={{ left: 0, right: 8 }}>
               <defs>
-                {series.map((s, i) => (
+                {data.series.map((s, i) => (
                   <linearGradient key={s.key} id={`fill-${s.key}`} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={chartColor(i)} stopOpacity={0.5} />
                     <stop offset="95%" stopColor={chartColor(i)} stopOpacity={0.05} />
@@ -147,7 +141,7 @@ export function CartesianPart({ props, kind }: P<ChartProps> & { kind: "area" | 
                 ))}
               </defs>
               {axes}
-              {series.map((s, i) => (
+              {data.series.map((s, i) => (
                 <Area
                   key={s.key}
                   dataKey={s.key}
@@ -165,18 +159,33 @@ export function CartesianPart({ props, kind }: P<ChartProps> & { kind: "area" | 
   );
 }
 
-export function PiePart({ props }: P<ChartProps & { groupByFieldId: string; donut: boolean }>) {
-  const { points, format, empty } = useChart(props, "donut");
-  const data = points
+export function CartesianPart({
+  props,
+  kind,
+}: P<ChartProps & { stacked?: boolean }> & { kind: "area" | "bar" | "line" }) {
+  const { blueprint, records } = useWorkspace();
+  return (
+    <CartesianView
+      head={props}
+      data={chartOf(blueprint, records, props, kind)}
+      shape={kind}
+      stacked={props.stacked}
+    />
+  );
+}
+
+export function PieView({ head, data, donut }: { head: Head; data: ChartData; donut: boolean }) {
+  const format = (v: number) => formatValue(data.kind, v);
+  const slices = data.points
     .map((p, i) => ({ label: p.label, value: Number(p.value ?? 0), fill: chartColor(i) }))
     .filter((d) => d.value > 0);
-  const total = data.reduce((a, d) => a + d.value, 0);
+  const total = slices.reduce((a, d) => a + d.value, 0);
   const config: ChartConfig = Object.fromEntries(
-    data.map((d) => [d.label, { label: d.label, color: d.fill }]),
+    slices.map((d) => [d.label, { label: d.label, color: d.fill }]),
   );
   return (
-    <PartCard title={props.title} description={props.description}>
-      {empty ? (
+    <PartCard title={head.title} description={head.description}>
+      {!slices.length ? (
         <Nothing />
       ) : (
         <div className="flex flex-col items-center gap-4 sm:flex-row">
@@ -185,17 +194,11 @@ export function PiePart({ props }: P<ChartProps & { groupByFieldId: string; donu
               <ChartTooltip
                 content={<ChartTooltipContent hideLabel formatter={(v, n) => `${n}: ${format(Number(v))}`} />}
               />
-              <Pie
-                data={data}
-                dataKey="value"
-                nameKey="label"
-                innerRadius={props.donut ? 56 : 0}
-                strokeWidth={2}
-              >
-                {data.map((d) => (
+              <Pie data={slices} dataKey="value" nameKey="label" innerRadius={donut ? 56 : 0} strokeWidth={2}>
+                {slices.map((d) => (
                   <Cell key={d.label} fill={d.fill} />
                 ))}
-                {props.donut ? (
+                {donut ? (
                   <Label
                     content={({ viewBox }) =>
                       viewBox && "cx" in viewBox ? (
@@ -223,7 +226,7 @@ export function PiePart({ props }: P<ChartProps & { groupByFieldId: string; donu
             </PieChart>
           </ChartContainer>
           <ul className="flex w-full min-w-0 flex-col gap-1.5 text-[12.5px]">
-            {data.map((d) => (
+            {slices.map((d) => (
               <li key={d.label} className="flex items-center gap-2">
                 <span
                   aria-hidden="true"
@@ -243,16 +246,22 @@ export function PiePart({ props }: P<ChartProps & { groupByFieldId: string; donu
   );
 }
 
-export function RadarPart({ props }: P<ChartProps & { groupByFieldId: string }>) {
-  const { points, config, format, empty } = useChart(props, "bar");
+export function PiePart({ props }: P<ChartProps & { donut: boolean }>) {
+  const { blueprint, records } = useWorkspace();
+  return <PieView head={props} data={chartOf(blueprint, records, props, "donut")} donut={props.donut} />;
+}
+
+export function RadarView({ head, data }: { head: Head; data: ChartData }) {
   return (
-    <PartCard title={props.title} description={props.description}>
-      {empty ? (
+    <PartCard title={head.title} description={head.description}>
+      {isEmpty(data) ? (
         <Nothing />
       ) : (
-        <ChartContainer config={config} className="mx-auto aspect-square h-[240px]">
-          <RadarChart data={points}>
-            <ChartTooltip content={<ChartTooltipContent formatter={(v) => format(Number(v))} />} />
+        <ChartContainer config={configOf(data)} className="mx-auto aspect-square h-[240px]">
+          <RadarChart data={data.points}>
+            <ChartTooltip
+              content={<ChartTooltipContent formatter={(v) => formatValue(data.kind, Number(v))} />}
+            />
             <PolarAngleAxis dataKey="label" />
             <PolarGrid />
             <Radar dataKey="value" fill={chartColor(0)} fillOpacity={0.5} stroke={chartColor(0)} />
@@ -263,18 +272,20 @@ export function RadarPart({ props }: P<ChartProps & { groupByFieldId: string }>)
   );
 }
 
-export function RadialPart({ props }: P<Metric & { title: string; description?: string; target: number }>) {
+export function RadarPart({ props }: P<ChartProps>) {
   const { blueprint, records } = useWorkspace();
-  const widget = metricWidget(props.title, props);
-  const value = widgetValue(blueprint, widget, records);
-  const format = formatterFor(blueprint, widget);
-  const ratio = Math.max(0, Math.min(1, value / props.target));
-  const config: ChartConfig = { value: { label: props.title, color: chartColor(0) } };
+  return <RadarView head={props} data={chartOf(blueprint, records, props, "bar")} />;
+}
+
+export function RadialView({ data }: { data: GoalData }) {
+  const ratio = Math.max(0, Math.min(1, data.value / data.target));
+  const format = (v: number) => formatValue(data.kind, v);
+  const config: ChartConfig = { value: { label: data.title, color: chartColor(0) } };
   return (
     <PartCard
-      title={props.title}
-      description={props.description}
-      footer={`${Math.round(ratio * 100)}% of ${format(props.target)}`}
+      title={data.title}
+      description={data.description}
+      footer={`${Math.round(ratio * 100)}% of ${format(data.target)}`}
     >
       <ChartContainer config={config} className="mx-auto aspect-square h-[200px]">
         <RadialBarChart
@@ -302,14 +313,14 @@ export function RadialPart({ props }: P<Metric & { title: string; description?: 
                       y={viewBox.cy}
                       className="fill-foreground text-[20px] font-semibold"
                     >
-                      {format(value)}
+                      {format(data.value)}
                     </tspan>
                     <tspan
                       x={viewBox.cx}
                       y={(viewBox.cy ?? 0) + 20}
                       className="fill-muted-foreground text-[11px]"
                     >
-                      of {format(props.target)}
+                      of {format(data.target)}
                     </tspan>
                   </text>
                 ) : null
@@ -320,4 +331,9 @@ export function RadialPart({ props }: P<Metric & { title: string; description?: 
       </ChartContainer>
     </PartCard>
   );
+}
+
+export function RadialPart({ props }: P<Metric & { title: string; description?: string; target: number }>) {
+  const { blueprint, records } = useWorkspace();
+  return <RadialView data={goalOf(blueprint, records, props)} />;
 }

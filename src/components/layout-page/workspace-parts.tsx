@@ -26,6 +26,23 @@ export function ViewPart({ props }: { props: { viewId: string; height: number } 
   );
 }
 
+/** A form of this workspace in place: in the app, the form itself (team members add records with it). */
+export function FormPart({ props }: { props: { viewId: string; title?: string } }) {
+  const { blueprint } = useWorkspace();
+  const view = blueprint.views.find((v) => v.id === props.viewId);
+  if (view?.type !== "form") return null;
+  return (
+    <Card className="gap-0 overflow-hidden py-0">
+      <div className="flex h-10 items-center border-b px-4 text-[13px] font-medium">
+        {props.title ?? view.name}
+      </div>
+      <div className="flex min-h-0 flex-col">
+        <ViewRenderer view={view} />
+      </div>
+    </Card>
+  );
+}
+
 /** An existing dashboard card, drawn by the same component as on its dashboard. */
 export function WidgetPart({ props }: { props: { widgetId: string } }) {
   const { blueprint } = useWorkspace();

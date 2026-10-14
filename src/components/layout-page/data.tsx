@@ -2,7 +2,7 @@
 
 import { ArrowDownRightIcon, ArrowUpRightIcon } from "@phosphor-icons/react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { FieldValue } from "@/components/records/field-value";
 import { useRecordPanels } from "@/components/records/record-panels";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage } from "@/components/ui/avatar";
@@ -29,30 +29,26 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
 import type { DataRecord, Sort } from "@/lib/blueprint/types";
-import { chartData, widgetValue } from "@/lib/engine/aggregate";
-import { compareStat, startOf } from "@/lib/engine/dashboard";
+import {
+  type Counted,
+  countsOf,
+  daysOf,
+  formatValue,
+  type GoalData,
+  goalOf,
+  type Metric,
+  type StatData,
+  type StatProps,
+  statOf,
+} from "@/lib/components/compute";
 import { isImagePath } from "@/lib/engine/records";
 import { valueText } from "@/lib/engine/value-text";
 import { formatDate, formatNumber, initials } from "@/lib/format";
 import { dateKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import { formatterFor, type Metric, metricWidget, Nothing, PartCard, useRows, useViewHref } from "./shared";
+import { Nothing, PartCard, useRows, useViewHref } from "./shared";
 
 type P<T> = { props: T };
-type StatProps = Metric & {
-  title: string;
-  compare?: { dateFieldId: string; period: "day" | "week" | "month" };
-  format?: "money" | "number" | "percent";
-};
-
-/** A stat's number and, with compare, its change: shared by the stat component and the stat cards block. */
-export function useStat(p: StatProps) {
-  const { blueprint, records } = useWorkspace();
-  const widget = metricWidget(p.title, p, p.compare ? { compare: p.compare } : {});
-  const comparison = compareStat(blueprint, widget, records);
-  const value = comparison ? comparison.current : widgetValue(blueprint, widget, records);
-  return { value, comparison, format: formatterFor(blueprint, widget, p.format) };
-}
 
 export function Trend({ change, against }: { change: number | null; against: string }) {
   if (change === null) return <span className="text-muted-foreground">Nothing {against} to compare</span>;
@@ -73,35 +69,84 @@ export function Trend({ change, against }: { change: number | null; against: str
   );
 }
 
-export function StatPart({ props }: P<StatProps>) {
-  const { value, comparison, format } = useStat(props);
+/** One key number, from data worked out in the app or on the server. */
+export function StatView({ data }: { data: StatData }) {
   return (
-    <PartCard description={props.title} footer={comparison ? <Trend {...comparison} /> : undefined}>
+    <PartCard description={data.title} footer={data.comparison ? <Trend {...data.comparison} /> : undefined}>
       <span
         className={cn(
           "text-[26px] font-semibold tracking-[-0.02em] tabular-nums",
-          value < 0 && "text-destructive",
+          data.value < 0 && "text-destructive",
         )}
       >
-        {format(value)}
+        {formatValue(data.kind, data.value)}
       </span>
+    </PartCard>
+  );
+}
+
+export function StatPart({ props }: P<StatProps>) {
+  const { blueprint, records } = useWorkspace();
+  return <StatView data={statOf(blueprint, records, props)} />;
+}
+
+export function GoalBarView({ data }: { data: GoalData }) {
+  const pct = Math.max(0, Math.min(100, (data.value / data.target) * 100));
+  return (
+    <PartCard title={data.title} footer={`${Math.round(pct)}% of ${formatValue(data.kind, data.target)}`}>
+      <div className="flex flex-col gap-3">
+        <span className="text-[22px] font-semibold tabular-nums">{formatValue(data.kind, data.value)}</span>
+        <Progress value={pct} aria-label={data.title} />
+      </div>
     </PartCard>
   );
 }
 
 export function ProgressPart({ props }: P<Metric & { title: string; target: number }>) {
   const { blueprint, records } = useWorkspace();
-  const widget = metricWidget(props.title, props);
-  const value = widgetValue(blueprint, widget, records);
-  const format = formatterFor(blueprint, widget);
-  const pct = Math.max(0, Math.min(100, (value / props.target) * 100));
+  return <GoalBarView data={goalOf(blueprint, records, props)} />;
+}
+
+export function BadgesView({ title, items }: { title: string; items: Counted }) {
   return (
-    <PartCard title={props.title} footer={`${Math.round(pct)}% of ${format(props.target)}`}>
-      <div className="flex flex-col gap-3">
-        <span className="text-[22px] font-semibold tabular-nums">{format(value)}</span>
-        <Progress value={pct} aria-label={props.title} />
-      </div>
+    <PartCard title={title}>
+      {items.length ? (
+        <div className="flex flex-wrap gap-2">
+          {items.map((p) => (
+            <Badge
+              key={p.label}
+              variant={
+                p.tone === "danger"
+                  ? "destructive"
+                  : p.tone === "accent" || p.tone === "success"
+                    ? "default"
+                    : "secondary"
+              }
+              className="gap-1.5"
+            >
+              {p.label}
+              <span className="tabular-nums opacity-80">{formatNumber(p.count)}</span>
+            </Badge>
+          ))}
+        </div>
+      ) : (
+        <Nothing />
+      )}
     </PartCard>
+  );
+}
+
+export function BadgesPart({
+  props,
+}: P<{ title?: string; entityId: string; fieldId: string; filter?: string }>) {
+  const { blueprint, records } = useWorkspace();
+  const entity = getEntity(blueprint, props.entityId);
+  const field = getField(entity, props.fieldId);
+  return (
+    <BadgesView
+      title={props.title ?? `${entity.pluralName} by ${field.name.toLowerCase()}`}
+      items={countsOf(blueprint, records, props)}
+    />
   );
 }
 
@@ -308,47 +353,6 @@ export function AvatarsPart({
   );
 }
 
-export function BadgesPart({
-  props,
-}: P<{ title?: string; entityId: string; fieldId: string; filter?: string }>) {
-  const { blueprint, records } = useWorkspace();
-  const entity = getEntity(blueprint, props.entityId);
-  const field = getField(entity, props.fieldId);
-  const widget = metricWidget(props.title ?? field.name, props as Metric & { op: "count" }, {
-    type: "chart",
-    metric: { op: "count" },
-    chart: { kind: "bar", bucket: "day", groupByFieldId: props.fieldId },
-  });
-  const { points } = chartData(blueprint, widget, records);
-  const tone = (key: string) => field.options?.find((o) => o.id === key)?.tone;
-  return (
-    <PartCard title={props.title ?? `${entity.pluralName} by ${field.name.toLowerCase()}`}>
-      {points.length ? (
-        <div className="flex flex-wrap gap-2">
-          {points.map((p) => (
-            <Badge
-              key={p.bucket}
-              variant={
-                tone(p.bucket) === "danger"
-                  ? "destructive"
-                  : tone(p.bucket) === "accent" || tone(p.bucket) === "success"
-                    ? "default"
-                    : "secondary"
-              }
-              className="gap-1.5"
-            >
-              {p.label}
-              <span className="tabular-nums opacity-80">{formatNumber(Number(p.value ?? 0))}</span>
-            </Badge>
-          ))}
-        </div>
-      ) : (
-        <Nothing />
-      )}
-    </PartCard>
-  );
-}
-
 const keyToDate = (key: string) => {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d);
@@ -356,32 +360,27 @@ const keyToDate = (key: string) => {
 const dateToKey = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-export function CalendarPart({
-  props,
-}: P<{ title?: string; entityId: string; dateFieldId: string; filter?: string }>) {
-  const { blueprint } = useWorkspace();
-  const { openRecord } = useRecordPanels();
-  const entity = getEntity(blueprint, props.entityId);
-  const rows = useRows(props.entityId, props.filter);
-  const byDay = useMemo(() => {
-    const map = new Map<string, DataRecord[]>();
-    for (const r of rows) {
-      const start = startOf(r.data[props.dateFieldId]);
-      if (!start) continue;
-      const key = dateKey(start);
-      map.set(key, [...(map.get(key) ?? []), r]);
-    }
-    return map;
-  }, [rows, props.dateFieldId]);
+/** A month calendar marking the days that have records; the picked day lists them (in the app) or counts them. */
+export function CalendarView({
+  title,
+  plural,
+  counts,
+  listFor,
+}: {
+  title: string;
+  plural: { one: string; many: string };
+  counts: Record<string, number>;
+  listFor?: (day: string) => ReactNode;
+}) {
   const [day, setDay] = useState<string>(() => dateKey(new Date()));
-  const onDay = byDay.get(day) ?? [];
+  const n = counts[day] ?? 0;
   return (
-    <PartCard title={props.title ?? entity.pluralName} contentClassName="flex flex-col gap-3">
+    <PartCard title={title} contentClassName="flex flex-col gap-3">
       <Calendar
         mode="single"
         selected={keyToDate(day)}
         onSelect={(d) => d && setDay(dateToKey(d))}
-        modifiers={{ busy: [...byDay.keys()].map(keyToDate) }}
+        modifiers={{ busy: Object.keys(counts).map(keyToDate) }}
         modifiersClassNames={{
           busy: "[&>button]:font-semibold [&>button]:underline [&>button]:decoration-primary [&>button]:decoration-2 [&>button]:underline-offset-4",
         }}
@@ -389,10 +388,29 @@ export function CalendarPart({
       />
       <div className="flex flex-col gap-1">
         <p className="text-[12.5px] text-muted-foreground">
-          {formatDate(day)} · {onDay.length}{" "}
-          {onDay.length === 1 ? entity.name.toLowerCase() : entity.pluralName.toLowerCase()}
+          {formatDate(day)} · {n} {n === 1 ? plural.one : plural.many}
         </p>
-        {onDay.slice(0, 5).map((r) => (
+        {listFor?.(day)}
+      </div>
+    </PartCard>
+  );
+}
+
+export function CalendarPart({
+  props,
+}: P<{ title?: string; entityId: string; dateFieldId: string; filter?: string }>) {
+  const { blueprint, records } = useWorkspace();
+  const { openRecord } = useRecordPanels();
+  const entity = getEntity(blueprint, props.entityId);
+  const byDay = daysOf(blueprint, records, props);
+  const counts = Object.fromEntries([...byDay].map(([k, v]) => [k, v.length]));
+  return (
+    <CalendarView
+      title={props.title ?? entity.pluralName}
+      plural={{ one: entity.name.toLowerCase(), many: entity.pluralName.toLowerCase() }}
+      counts={counts}
+      listFor={(day) =>
+        (byDay.get(day) ?? []).slice(0, 5).map((r) => (
           <button
             key={r.id}
             type="button"
@@ -401,40 +419,38 @@ export function CalendarPart({
           >
             {recordTitle(entity, r)}
           </button>
-        ))}
-      </div>
-    </PartCard>
+        ))
+      }
+    />
   );
 }
 
-export function CarouselPart({
-  props,
-}: P<{ title?: string; entityId: string; imageFieldId: string; filter?: string; limit: number }>) {
-  const { blueprint } = useWorkspace();
-  const { openRecord } = useRecordPanels();
-  const entity = getEntity(blueprint, props.entityId);
-  const rows = useRows(props.entityId, props.filter)
-    .filter((r) => isImagePath(r.data[props.imageFieldId]))
-    .slice(0, props.limit);
+/** Pictures to swipe through; each opens its record in the app, or is just a picture on a public page. */
+export function CarouselView({
+  title,
+  items,
+  onOpen,
+}: {
+  title: string;
+  items: { id: string; title: string; image: string }[];
+  onOpen?: (id: string) => void;
+}) {
   return (
-    <PartCard title={props.title ?? entity.pluralName}>
-      {rows.length ? (
+    <PartCard title={title}>
+      {items.length ? (
         <Carousel opts={{ align: "start" }} className="px-10">
           <CarouselContent>
-            {rows.map((r) => (
-              <CarouselItem key={r.id} className="basis-1/2 lg:basis-1/3">
+            {items.map((it) => (
+              <CarouselItem key={it.id} className="basis-1/2 lg:basis-1/3">
                 <button
                   type="button"
-                  onClick={() => openRecord(r.id)}
-                  className="flex w-full flex-col gap-1.5 text-left"
+                  disabled={!onOpen}
+                  onClick={() => onOpen?.(it.id)}
+                  className="flex w-full flex-col gap-1.5 text-left disabled:cursor-default"
                 >
                   {/* biome-ignore lint/performance/noImgElement: uploads are served by our own route */}
-                  <img
-                    src={String(r.data[props.imageFieldId])}
-                    alt=""
-                    className="aspect-[4/3] w-full rounded-md border object-cover"
-                  />
-                  <span className="truncate text-[12.5px]">{recordTitle(entity, r)}</span>
+                  <img src={it.image} alt="" className="aspect-[4/3] w-full rounded-md border object-cover" />
+                  <span className="truncate text-[12.5px]">{it.title}</span>
                 </button>
               </CarouselItem>
             ))}
@@ -447,4 +463,17 @@ export function CarouselPart({
       )}
     </PartCard>
   );
+}
+
+export function CarouselPart({
+  props,
+}: P<{ title?: string; entityId: string; imageFieldId: string; filter?: string; limit: number }>) {
+  const { blueprint } = useWorkspace();
+  const { openRecord } = useRecordPanels();
+  const entity = getEntity(blueprint, props.entityId);
+  const items = useRows(props.entityId, props.filter)
+    .filter((r) => isImagePath(r.data[props.imageFieldId]))
+    .slice(0, props.limit)
+    .map((r) => ({ id: r.id, title: recordTitle(entity, r), image: String(r.data[props.imageFieldId]) }));
+  return <CarouselView title={props.title ?? entity.pluralName} items={items} onOpen={openRecord} />;
 }

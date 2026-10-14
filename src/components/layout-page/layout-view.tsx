@@ -1,8 +1,15 @@
 "use client";
 
+import { GlobeIcon, LockSimpleIcon } from "@phosphor-icons/react";
 import { Component, type ReactNode } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { PublicBar } from "@/components/views/public-bar";
+import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { LayoutItem, LayoutSection, LayoutView as LayoutViewType } from "@/lib/blueprint/types";
+import { layoutPublicProblems } from "@/lib/components/public-safety";
 import { componentDef } from "@/lib/components/registry";
+import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 import {
   AccordionPart,
@@ -32,7 +39,7 @@ import {
   StatPart,
   TablePart,
 } from "./data";
-import { ViewPart, WidgetPart } from "./workspace-parts";
+import { FormPart, ViewPart, WidgetPart } from "./workspace-parts";
 
 // biome-ignore lint/suspicious/noExplicitAny: each renderer gets the settings its registry schema produced
 type Renderer = (props: { props: any; renderItem: (item: LayoutItem) => ReactNode }) => ReactNode;
@@ -66,6 +73,7 @@ export const RENDERERS: Record<string, Renderer> = {
   data_table: DataTablePart,
   leaderboard: LeaderboardPart,
   status_overview: StatusOverviewPart,
+  form: FormPart,
   view: ViewPart,
   widget: WidgetPart,
 };
@@ -148,12 +156,47 @@ function Section({ section }: { section: LayoutSection }) {
 
 /** A page composed from the component library, section by section. On phones every part stacks. */
 export function LayoutView({ view }: { view: LayoutViewType }) {
+  const ws = useWorkspace();
+  const applyChange = useWorkspaces((s) => s.applyChange);
+  const manager = ws.mode === "live" && canManage(ws.role);
+  // Publishing checks the page first: parts that would show people or the team's own screens stay team-only.
+  const publish = () => {
+    const problems = layoutPublicProblems(ws.blueprint, view);
+    if (problems.length) {
+      toast.error("This page can't be public yet", {
+        description: `${problems[0]}${problems.length > 1 ? ` (and ${problems.length - 1} more)` : ""}. Ask EveryOps to make a public version.`,
+      });
+      return;
+    }
+    const entry = applyChange(ws.id, {
+      request: `Publish ${view.name}`,
+      title: `Publish ${view.name}`,
+      facts: [],
+      steps: [{ kind: "change", label: view.name, detail: "Team only → Public" }],
+      ops: [{ op: "update_view", viewId: view.id, patch: { public: true } }],
+    });
+    if (entry) toast.success(`${view.name} is public`);
+  };
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 p-4 sm:p-6">
-        {view.sections.map((s) => (
-          <Section key={s.id} section={s} />
-        ))}
+    <div className="flex min-h-0 flex-1 flex-col">
+      {view.public ? (
+        <PublicBar view={view} />
+      ) : manager ? (
+        <div className="flex items-center justify-end gap-2 border-b px-4 py-1.5 text-[12.5px] text-muted-foreground">
+          <LockSimpleIcon aria-hidden="true" className="size-3.5" />
+          <span className="mr-auto">Only your team can see this page.</span>
+          <Button size="sm" variant="ghost" onClick={publish}>
+            <GlobeIcon data-icon="inline-start" />
+            Make public
+          </Button>
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 p-4 sm:p-6">
+          {view.sections.map((s) => (
+            <Section key={s.id} section={s} />
+          ))}
+        </div>
       </div>
     </div>
   );

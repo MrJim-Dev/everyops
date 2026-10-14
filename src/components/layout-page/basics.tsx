@@ -102,12 +102,12 @@ export function AccordionPart({
   const body = props.entityId ? (
     <RecordAccordion {...props} entityId={props.entityId} />
   ) : (
-    <ItemsAccordion items={props.items ?? []} />
+    <AccordionItems items={props.items ?? []} />
   );
   return props.title ? <PartCard title={props.title}>{body}</PartCard> : body;
 }
 
-function ItemsAccordion({ items }: { items: { title: string; body: string }[] }) {
+export function AccordionItems({ items }: { items: { title: string; body: string }[] }) {
   if (!items.length) return <Nothing />;
   return (
     <Accordion>
@@ -138,7 +138,7 @@ function RecordAccordion({
   const entity = getEntity(blueprint, entityId);
   const rows = useRows(entityId, filter);
   return (
-    <ItemsAccordion
+    <AccordionItems
       items={rows.map((r) => ({
         title: titleFieldId ? String(r.data[titleFieldId] ?? "") : recordTitle(entity, r),
         body: bodyFieldId ? String(r.data[bodyFieldId] ?? "") : "",
