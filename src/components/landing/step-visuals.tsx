@@ -40,7 +40,7 @@ function Screen({
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-foreground/10 bg-card/70 shadow-[0_30px_80px_-40px_rgba(0,0,0,0.9)]">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b px-4 text-[12px] text-muted-foreground">
-        <LogoMark className="size-3 text-foreground" />
+        <LogoMark className="size-3" />
         <span className="font-medium text-foreground">{title}</span>
         {aside ? <span className="ml-auto flex items-center gap-2">{aside}</span> : null}
       </div>
@@ -236,7 +236,7 @@ export function AnswerVisual({ active }: StepVisualProps) {
         </Appear>
       </div>
       <Appear on={stage >= 6} className="flex items-center gap-2.5 text-[13px]">
-        <LogoMarkThinking className="size-3.5 text-primary" />
+        <LogoMarkThinking className="size-3.5" />
         <span className="shimmer-text animate-shimmer bg-clip-text font-medium text-transparent motion-reduce:animate-none">
           Designing your system
         </span>

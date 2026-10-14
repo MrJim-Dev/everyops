@@ -1,27 +1,53 @@
+import { useId } from "react";
 import { cn } from "@/lib/utils";
 
-/**
- * EveryOps mark: a stacked "E" of three rounded bars with a shorter middle bar.
- * Drawn in the current text color so it follows the theme. Matches public/brand/everyops-mark.svg.
+/*
+ * EveryOps mark: a stacked "E" of three pill bars with a shorter middle bar, lit top to bottom in the brand's
+ * green (mint into teal). Matches public/brand/everyops-mark.svg.
  */
-export function LogoMark({ className }: { className?: string }) {
+const BARS = [
+  { y: 0, width: 92 },
+  { y: 37, width: 60 },
+  { y: 74, width: 92 },
+] as const;
+const H = 26;
+
+/** The brand green, top to bottom. Kept in one place so the app, icons and brand files match. */
+export const MARK_STOPS = [
+  ["0", "#7ef0d2"],
+  ["0.5", "#34c3a6"],
+  ["1", "#14a08a"],
+] as const;
+
+export function LogoMark({ className, mono = false }: { className?: string; mono?: boolean }) {
+  // Each mark has its own gradient id, so a hidden copy elsewhere on the page can't break it.
+  const id = `eo-mark-${useId().replace(/:/g, "")}`;
   return (
     <svg
       viewBox="0 0 92 100"
-      fill="currentColor"
+      fill={mono ? "currentColor" : `url(#${id})`}
       aria-hidden="true"
       className={cn("size-4 shrink-0", className)}
     >
-      <rect x="0" y="0" width="92" height="26" rx="11" />
-      <rect x="0" y="37" width="60" height="26" rx="11" />
-      <rect x="0" y="74" width="92" height="26" rx="11" />
+      {mono ? null : (
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="0" y2="100" gradientUnits="userSpaceOnUse">
+            {MARK_STOPS.map(([offset, color]) => (
+              <stop key={offset} offset={offset} stopColor={color} />
+            ))}
+          </linearGradient>
+        </defs>
+      )}
+      {BARS.map((b) => (
+        <rect key={b.y} x="0" y={b.y} width={b.width} height={H} rx={H / 2} />
+      ))}
     </svg>
   );
 }
 
 /**
- * The mark while the AI works: each bar draws in toward the left edge and back, top to bottom, like the "E"
- * is being written. A loop, so it runs on CSS (off the main thread). Reduced motion shows the plain mark.
+ * The mark while the AI works, in white: each bar draws in toward the left edge and back, top to bottom, like the
+ * "E" is being written. A loop, so it runs on CSS (off the main thread). Reduced motion shows the plain mark.
  */
 export function LogoMarkThinking({ className }: { className?: string }) {
   const bar = "origin-left animate-mark [transform-box:fill-box] motion-reduce:animate-none";
@@ -30,11 +56,20 @@ export function LogoMarkThinking({ className }: { className?: string }) {
       viewBox="0 0 92 100"
       fill="currentColor"
       aria-hidden="true"
-      className={cn("size-4 shrink-0", className)}
+      className={cn("size-4 shrink-0 text-white", className)}
     >
-      <rect className={bar} x="0" y="0" width="92" height="26" rx="11" />
-      <rect className={bar} style={{ animationDelay: "140ms" }} x="0" y="37" width="60" height="26" rx="11" />
-      <rect className={bar} style={{ animationDelay: "280ms" }} x="0" y="74" width="92" height="26" rx="11" />
+      {BARS.map((b, i) => (
+        <rect
+          key={b.y}
+          className={bar}
+          style={i ? { animationDelay: `${i * 140}ms` } : undefined}
+          x="0"
+          y={b.y}
+          width={b.width}
+          height={H}
+          rx={H / 2}
+        />
+      ))}
     </svg>
   );
 }
