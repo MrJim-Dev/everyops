@@ -11,6 +11,7 @@ import { useAuthReady, useCurrentUser } from "@/lib/auth/client";
 import type { WorkspaceData } from "@/lib/blueprint/types";
 import { takePendingFiles } from "@/lib/pending-files";
 import { useHydrated } from "@/lib/store/use-hydrated";
+import { idFromPrompt } from "@/lib/store/workspace-model";
 import { useWorkspaces } from "@/lib/store/workspaces";
 import { PENDING_KEY, StarterChips } from "./starters";
 
@@ -57,6 +58,7 @@ export function CreatePrompt() {
 
   const create = (text: string, attachments: AttachmentRef[] = []) => {
     const slug = createWorkspace({
+      slug: idFromPrompt(text),
       name: "New workspace",
       summary: "Setting up",
       data: EMPTY,

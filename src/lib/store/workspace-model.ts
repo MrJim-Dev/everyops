@@ -182,6 +182,26 @@ export function randomToken(bytes = 12) {
 /** URL-friendly and unique across accounts: "court-house-7f3a". */
 export const newWorkspaceId = (name: string) => `${slugify(name)}-${randomToken(2)}`;
 
+const FILLER = new Set(
+  "i we our my a an the and or for to of in on at with by from is are am be run own have has need needs want wants system app software track manage help small business shop that this it its about some".split(
+    " ",
+  ),
+);
+
+/**
+ * The address a new workspace gets from the owner's first message, before Ask EveryOps has named it: "I run a
+ * small sari-sari store and mini grocery in Cebu" becomes sari-sari-store-mini-grocery. The id can't change later,
+ * so this beats "new-workspace-…" for good.
+ */
+export function idFromPrompt(prompt: string): string {
+  const words = prompt
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !FILLER.has(w) && !/^\d+$/.test(w));
+  return newWorkspaceId(words.slice(0, 4).join(" ") || "workspace");
+}
+
 export function workspaceFrom(input: NewWorkspace, slug: string, now: string): Workspace {
   return {
     slug,
