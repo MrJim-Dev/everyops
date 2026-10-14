@@ -1,17 +1,36 @@
 "use client";
 
-import { ArrowCounterClockwiseIcon, ClockCounterClockwiseIcon } from "@phosphor-icons/react";
+import {
+  ArrowClockwiseIcon,
+  ArrowCounterClockwiseIcon,
+  ClockCounterClockwiseIcon,
+} from "@phosphor-icons/react";
+import { useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { ViewEmpty } from "@/components/views/view-empty";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { formatDateTime } from "@/lib/format";
 import { markFresh } from "@/lib/motion/fresh";
+import { canRedo } from "@/lib/store/apply-plan";
+import type { ChangeEntry } from "@/lib/store/workspace-model";
 import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
 
 export function HistoryList() {
   const ws = useWorkspace();
   const workspace = useWorkspaces((s) => s.workspaces[ws.id]);
   const undo = useWorkspaces((s) => s.undoChange);
+  const redo = useWorkspaces((s) => s.redoChange);
+  const [confirming, setConfirming] = useState<ChangeEntry | null>(null);
   const changes = workspace?.changes ?? [];
 
   if (!workspace || changes.length === 0) {
@@ -23,79 +42,108 @@ export function HistoryList() {
     );
   }
 
+  const runUndo = (entry: ChangeEntry) => {
+    undo(ws.id, entry.id);
+    markFresh([
+      ...new Set([
+        ...entry.recordChanges.map((c) => c.recordId),
+        ...(entry.removedRecords ?? []).map((r) => r.id),
+        ...(entry.replacedRecords ?? []).map((r) => r.id),
+      ]),
+    ]);
+  };
+  const redoable = (entry: ChangeEntry) => canManage(ws.role) && canRedo(workspace, entry.id);
+
   return (
-    <ol className="divide-y">
-      {changes.map((entry, index) => {
-        // Changes are undone newest first, so only the latest one still applied can be undone.
-        const isCurrent =
-          !entry.undoneAt &&
-          workspace.currentVersion === entry.toVersion &&
-          changes.slice(0, index).every((c) => c.undoneAt);
-        // Staff can undo the data changes they're allowed to make; owners and admins anything.
-        const mayUndo =
-          canManage(ws.role) ||
-          (canEdit(ws.role) && entry.fromVersion === entry.toVersion && !entry.teamBefore);
-        const counts = [
-          entry.recordChanges.length && `${entry.recordChanges.length} values updated`,
-          entry.createdRecordIds?.length && `${entry.createdRecordIds.length} records added`,
-          entry.replacedRecords?.length && `${entry.replacedRecords.length} records edited`,
-          entry.removedRecords?.length && `${entry.removedRecords.length} records deleted`,
-        ].filter(Boolean);
-        return (
-          <li key={entry.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start">
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-full border text-muted-foreground">
-              <ClockCounterClockwiseIcon className="size-3.5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-[14px] font-medium">{entry.title}</h2>
-                <span className="font-mono text-[11.5px] text-muted-foreground tabular">
-                  v{entry.fromVersion} → v{entry.toVersion}
-                </span>
-                {entry.undoneAt ? (
-                  <span className="text-[12px] text-muted-foreground">Undone</span>
-                ) : isCurrent ? (
-                  <span className="text-[12px] text-primary">Current</span>
-                ) : null}
+    <>
+      <ol className="divide-y">
+        {changes.map((entry, index) => {
+          // Changes are undone newest first, so only the latest one still applied can be undone.
+          const isCurrent =
+            !entry.undoneAt &&
+            workspace.currentVersion === entry.toVersion &&
+            changes.slice(0, index).every((c) => c.undoneAt);
+          // Staff can undo the data changes they're allowed to make; owners and admins anything.
+          const mayUndo =
+            canManage(ws.role) ||
+            (canEdit(ws.role) && entry.fromVersion === entry.toVersion && !entry.teamBefore);
+          const counts = [
+            entry.recordChanges.length && `${entry.recordChanges.length} values updated`,
+            entry.createdRecordIds?.length && `${entry.createdRecordIds.length} records added`,
+            entry.replacedRecords?.length && `${entry.replacedRecords.length} records edited`,
+            entry.removedRecords?.length && `${entry.removedRecords.length} records deleted`,
+          ].filter(Boolean);
+          return (
+            <li key={entry.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-full border text-muted-foreground">
+                <ClockCounterClockwiseIcon className="size-3.5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-[14px] font-medium">{entry.title}</h2>
+                  <span className="font-mono text-[11.5px] text-muted-foreground tabular">
+                    v{entry.fromVersion} → v{entry.toVersion}
+                  </span>
+                  {entry.undoneAt ? (
+                    <span className="text-[12px] text-muted-foreground">Undone</span>
+                  ) : isCurrent ? (
+                    <span className="text-[12px] text-primary">Current</span>
+                  ) : null}
+                </div>
+                <p className="mt-0.5 text-[13px] text-muted-foreground">“{entry.request}”</p>
+                <ul className="mt-2 flex flex-col gap-1 text-[12.5px]">
+                  {entry.steps.map((step) => (
+                    <li key={step.label} className="flex gap-2">
+                      <span className={step.kind === "remove" ? "text-destructive" : "text-muted-foreground"}>
+                        {step.kind === "add" ? "Added" : step.kind === "remove" ? "Removed" : "Changed"}
+                      </span>
+                      <span>{step.label}</span>
+                      <span className="text-muted-foreground tabular">{step.detail}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-[12px] text-muted-foreground">
+                  {[formatDateTime(entry.appliedAt), ...counts].join(" · ")}
+                </p>
               </div>
-              <p className="mt-0.5 text-[13px] text-muted-foreground">“{entry.request}”</p>
-              <ul className="mt-2 flex flex-col gap-1 text-[12.5px]">
-                {entry.steps.map((step) => (
-                  <li key={step.label} className="flex gap-2">
-                    <span className={step.kind === "remove" ? "text-destructive" : "text-muted-foreground"}>
-                      {step.kind === "add" ? "Added" : step.kind === "remove" ? "Removed" : "Changed"}
-                    </span>
-                    <span>{step.label}</span>
-                    <span className="text-muted-foreground tabular">{step.detail}</span>
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-2 text-[12px] text-muted-foreground">
-                {[formatDateTime(entry.appliedAt), ...counts].join(" · ")}
-              </p>
-            </div>
-            {isCurrent && mayUndo ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  undo(ws.id, entry.id);
-                  markFresh([
-                    ...new Set([
-                      ...entry.recordChanges.map((c) => c.recordId),
-                      ...(entry.removedRecords ?? []).map((r) => r.id),
-                      ...(entry.replacedRecords ?? []).map((r) => r.id),
-                    ]),
-                  ]);
-                }}
-              >
-                <ArrowCounterClockwiseIcon data-icon="inline-start" />
-                Undo
-              </Button>
-            ) : null}
-          </li>
-        );
-      })}
-    </ol>
+              {isCurrent && mayUndo ? (
+                <Button variant="outline" size="sm" onClick={() => setConfirming(entry)}>
+                  <ArrowCounterClockwiseIcon data-icon="inline-start" />
+                  Undo
+                </Button>
+              ) : redoable(entry) ? (
+                <Button variant="outline" size="sm" onClick={() => redo(ws.id, entry.id)}>
+                  <ArrowClockwiseIcon data-icon="inline-start" />
+                  Redo
+                </Button>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+      <AlertDialog open={!!confirming} onOpenChange={(open) => !open && setConfirming(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Undo “{confirming?.title}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirming && confirming.fromVersion !== confirming.toVersion
+                ? `The workspace goes back to version ${confirming.fromVersion}. You can redo it from here afterwards.`
+                : "The records it added, edited or deleted go back to how they were."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirming) runUndo(confirming);
+                setConfirming(null);
+              }}
+            >
+              Undo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

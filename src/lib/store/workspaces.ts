@@ -6,7 +6,7 @@ import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import type { ChangePlan } from "@/lib/engine/changes";
 import { computeAll } from "@/lib/engine/compute";
 import { markFresh } from "@/lib/motion/fresh";
-import { applyPlan, undoPlan } from "./apply-plan";
+import { applyPlan, redoPlan, undoPlan } from "./apply-plan";
 import {
   blueprintOf,
   type ChangeEntry,
@@ -61,6 +61,8 @@ type State = {
   /** by: who made it, for invites the plan sends. */
   applyChange: (slug: string, plan: ChangePlan, by?: string) => ChangeEntry | null;
   undoChange: (slug: string, changeId: string) => void;
+  /** Puts back the latest undone design change. */
+  redoChange: (slug: string, changeId: string) => void;
 };
 
 /* ---------- Server sync ---------- */
@@ -408,5 +410,7 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
 
     undoChange: (slug, changeId) =>
       update(slug, (ws) => (ws.loaded === false ? ws : (undoPlan(ws, changeId) ?? ws))),
+    redoChange: (slug, changeId) =>
+      update(slug, (ws) => (ws.loaded === false ? ws : (redoPlan(ws, changeId) ?? ws))),
   };
 });
