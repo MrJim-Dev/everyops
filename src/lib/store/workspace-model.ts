@@ -43,7 +43,14 @@ export type SetupQuestion = {
   options?: string[];
 };
 /** A question Ask EveryOps asked on a turn, answered on a card with its options or the owner's own words. */
-export type AskQuestion = { id: string; question: string; required: boolean; options: string[] };
+export type AskQuestion = {
+  id: string;
+  question: string;
+  required: boolean;
+  options: string[];
+  /** Opened again from the side panel: the answer it already has, selected to start with. */
+  current?: string;
+};
 /** A workspace Gemini designed, waiting for the owner to create it. */
 export type SetupDraft = {
   name: string;

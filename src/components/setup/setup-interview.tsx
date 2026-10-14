@@ -49,7 +49,14 @@ type Failure = { message: string; retry: () => void };
  * The setup checklist beside the conversation: answered questions with the answer, then the ones still open.
  * Required ones are marked so the owner sees why EveryOps keeps asking them.
  */
-function QuestionList({ questions }: { questions: SetupQuestion[] }) {
+function QuestionList({
+  questions,
+  onPick,
+}: {
+  questions: SetupQuestion[];
+  /** Opens the question card on this question; absent while Ask EveryOps is working. */
+  onPick?: (id: string) => void;
+}) {
   const required = questions.filter((q) => q.required);
   const answered = required.filter((q) => q.answer.trim()).length;
   const open = questions.filter((q) => !q.answer.trim());
@@ -71,37 +78,45 @@ function QuestionList({ questions }: { questions: SetupQuestion[] }) {
           </span>
         ) : null}
       </div>
-      <ul className="flex flex-col gap-2.5 text-[13px]">
+      <ul className="flex flex-col gap-0.5 text-[13px]">
         {[...open, ...done].map((q) => {
           const answer = q.answer.trim();
           return (
-            <li key={q.id} className="flex gap-2">
-              {answer ? (
-                <CheckCircleIcon weight="fill" className="mt-0.5 size-3.5 shrink-0 text-primary" />
-              ) : (
-                <CircleDashedIcon
-                  className={cn(
-                    "mt-0.5 size-3.5 shrink-0",
-                    q.required ? "text-warning" : "text-muted-foreground",
-                  )}
-                />
-              )}
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className={cn(answer && "text-muted-foreground")}>
-                  {q.question}
-                  {!answer ? (
-                    <span
-                      className={cn(
-                        "ml-1.5 inline-flex rounded-full px-1.5 py-px align-[1px] text-[10.5px] font-medium",
-                        q.required ? "bg-warning/12 text-warning" : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {q.required ? "Required" : "Optional"}
-                    </span>
-                  ) : null}
-                </span>
-                {answer ? <span className="text-foreground">{answer}</span> : null}
-              </div>
+            <li key={q.id}>
+              <button
+                type="button"
+                disabled={!onPick}
+                onClick={() => onPick?.(q.id)}
+                aria-label={`${answer ? "Change" : "Answer"}: ${q.question}`}
+                className="-mx-2 flex w-[calc(100%+1rem)] gap-2 rounded-lg px-2 py-1.5 text-left outline-none transition-[background-color,transform] duration-150 ease-out enabled:cursor-pointer enabled:active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-ring/50 [@media(hover:hover)_and_(pointer:fine)]:enabled:hover:bg-muted"
+              >
+                {answer ? (
+                  <CheckCircleIcon weight="fill" className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                ) : (
+                  <CircleDashedIcon
+                    className={cn(
+                      "mt-0.5 size-3.5 shrink-0",
+                      q.required ? "text-warning" : "text-muted-foreground",
+                    )}
+                  />
+                )}
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <span className={cn(answer && "text-muted-foreground")}>
+                    {q.question}
+                    {!answer ? (
+                      <span
+                        className={cn(
+                          "ml-1.5 inline-flex rounded-full px-1.5 py-px align-[1px] text-[10.5px] font-medium",
+                          q.required ? "bg-warning/12 text-warning" : "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        {q.required ? "Required" : "Optional"}
+                      </span>
+                    ) : null}
+                  </span>
+                  {answer ? <span className="text-foreground">{answer}</span> : null}
+                </div>
+              </button>
             </li>
           );
         })}
@@ -293,7 +308,32 @@ export function SetupInterview({
   const last = messages.at(-1);
   const waiting = !busy && !failure && last?.role === "assistant";
   const suggestions = waiting && !last.ask?.length ? (last.suggestions ?? []) : [];
-  const asking = waiting && !draft ? (last.ask ?? []) : [];
+  const turnAsk = waiting && !draft ? (last.ask ?? []) : [];
+  // A question picked in the side panel opens the card on it: within this turn's questions when it's one of them,
+  // otherwise on its own (an answered one can be changed this way).
+  const [picked, setPicked] = useState<{ id: string; turn: number; nonce: number } | null>(null);
+  const fromPanel = picked && picked.turn === messages.length ? picked : null;
+  const pickedQuestion = fromPanel ? questions.find((q) => q.id === fromPanel.id) : undefined;
+  const inTurn = fromPanel ? turnAsk.findIndex((q) => q.id === fromPanel.id) : -1;
+  const asking: AskQuestion[] =
+    pickedQuestion && inTurn < 0
+      ? [
+          {
+            id: pickedQuestion.id,
+            question: pickedQuestion.question,
+            required: pickedQuestion.required,
+            options: pickedQuestion.options ?? [],
+            ...(pickedQuestion.answer.trim() ? { current: pickedQuestion.answer.trim() } : {}),
+          },
+        ]
+      : turnAsk;
+  const openQuestion = (id: string) => setPicked({ id, turn: messages.length, nonce: Date.now() });
+  // Closing a card opened from the side panel brings back this turn's questions as the collapsed chip.
+  const [collapsedTurn, setCollapsedTurn] = useState(-1);
+  const closePanelCard = () => {
+    setPicked(null);
+    setCollapsedTurn(messages.length);
+  };
 
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_360px]">
@@ -416,7 +456,9 @@ export function SetupInterview({
           </div>
         </div>
 
-        <div className="border-t px-5 py-3">
+        {/* No rule above the composer: the conversation fades under it instead, so the question card and the
+            composer read as one floating surface. */}
+        <div className="relative px-5 pt-1 pb-3 before:pointer-events-none before:absolute before:inset-x-0 before:-top-10 before:h-10 before:bg-linear-to-t before:from-background before:to-transparent">
           <form
             // The composer arrives from below with the first message, a beat after it.
             className={cn(
@@ -431,8 +473,12 @@ export function SetupInterview({
           >
             {asking.length ? (
               <QuestionCard
-                key={messages.length}
+                key={`${messages.length}-${fromPanel?.nonce ?? 0}`}
                 questions={asking}
+                initialAt={Math.max(0, inTurn)}
+                defaultOpen={!!fromPanel || (turnAsk.length > 0 && collapsedTurn !== messages.length)}
+                autoFocus={!!fromPanel}
+                onClose={fromPanel ? closePanelCard : undefined}
                 disabled={busy}
                 onSend={(text) => send(text, false)}
               />
@@ -502,7 +548,9 @@ export function SetupInterview({
             <p className="text-[13px] text-muted-foreground">Details appear here as you chat.</p>
           )}
         </section>
-        {questions.length ? <QuestionList questions={questions} /> : null}
+        {questions.length ? (
+          <QuestionList questions={questions} onPick={!busy && !draft ? openQuestion : undefined} />
+        ) : null}
         {plan.length ? (
           <section>
             <h2 className="mb-3 text-[13px] font-semibold">What EveryOps will set up</h2>
