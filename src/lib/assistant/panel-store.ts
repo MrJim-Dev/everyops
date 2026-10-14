@@ -62,6 +62,8 @@ type State = {
 };
 
 const newThreadId = () => `thread_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+/** A conversation touched this recently is reopened after a reload. */
+const RESUME_WITHIN_MS = 6 * 60 * 60 * 1000;
 
 /** A conversation is named by its first question. */
 export function threadTitle(turns: AssistantTurn[]) {
@@ -178,6 +180,16 @@ export const useAssistant = create<State>()((set, get) => {
           const local = (s.lists[workspaceId] ?? []).filter((t) => !saved.some((x) => x.id === t.id));
           return { lists: { ...s.lists, [workspaceId]: [...local, ...saved] } };
         });
+        // After a reload, pick up the conversation from the last few hours instead of a blank one, so "that
+        // didn't work" still has the change it refers to.
+        const latest = saved[0];
+        const current = get().active[workspaceId];
+        if (
+          latest &&
+          (!current || !get().threads[current]?.length) &&
+          Date.now() - Date.parse(latest.updatedAt) < RESUME_WITHIN_MS
+        )
+          await get().openThread(workspaceId, latest.id);
       }
     },
   };

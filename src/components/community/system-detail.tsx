@@ -13,7 +13,10 @@ import { UseSystemButton } from "./use-system-dialog";
 /** Everything needed to decide on a system, laid out top to bottom in the side sheet. */
 export function SystemDetail({ system }: { system: CatalogSystem }) {
   const facts = [
-    ["Used by", system.uses ? `${formatUses(system.uses)} businesses` : "New"],
+    [
+      "Copies",
+      system.uses ? `${formatUses(system.uses)} ${system.uses === 1 ? "workspace" : "workspaces"}` : "New",
+    ],
     ["Category", CATEGORIES.find((c) => c.id === system.category)?.label ?? "Other"],
     ["Version", system.version],
     ["License", system.license],

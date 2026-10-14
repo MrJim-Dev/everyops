@@ -254,6 +254,20 @@ export function submitButton(label: string | undefined, fallback: string): { lab
 }
 
 /**
+ * A stranger's submission must say who they are and how to reach them: the form's first name field and its first
+ * phone or email field are required on public forms even when the record type leaves them optional.
+ */
+export function visitorContactIds(fields: Field[]): Set<string> {
+  const text = fields.filter((f) => f.type === "text");
+  const label = (f: Field) => `${f.id.replace(/_/g, " ")} ${f.name}`;
+  const name = text.find(
+    (f) => /\bname\b|guest|customer|client|player/i.test(label(f)) && !/ref|code/i.test(label(f)),
+  );
+  const reach = text.find((f) => /phone|mobile|cell|e-?mail|contact/i.test(label(f)));
+  return new Set([name?.id, reach?.id].filter((id): id is string => !!id));
+}
+
+/**
  * Fields a visitor fills in. Statuses and prices are the business's call, and computed or uploaded fields
  * aren't asked, so a visitor can't type their own fee.
  */
@@ -285,6 +299,7 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
   const entity = bp.entities.find((e) => e.id === view.entityId);
   if (!entity) return null;
   const fields = publicFieldsOf(bp, view);
+  const contact = visitorContactIds(fields);
   const choices: PublicForm["choices"] = {};
   for (const f of fields) {
     if (f.type !== "relation" || !f.relation) continue;
@@ -349,7 +364,7 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
       id: f.id,
       name: f.name,
       type: f.type,
-      required: !!f.required,
+      required: !!f.required || contact.has(f.id),
       description: f.description,
       range: f.range,
       options: f.options?.map((o) => ({ id: o.id, label: o.label })),

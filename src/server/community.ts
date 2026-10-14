@@ -38,10 +38,14 @@ type Row = {
   doc: CommunityDoc;
   published_at: Date;
   updated_at: Date;
+  /** Workspaces built from this system, counted live (see listCommunity). */
+  copies?: number;
 };
 
 const toSystem = (r: Row): CommunitySystem => ({
   ...r.doc,
+  // Only real copies count; the stored figure was a placeholder.
+  uses: Number(r.copies ?? 0),
   id: r.id,
   official: r.is_official,
   authorId: r.author_id,
@@ -52,12 +56,15 @@ const toSystem = (r: Row): CommunitySystem => ({
 
 export async function listCommunity(): Promise<CommunitySystem[]> {
   const { rows } = await sql<Row>`
-    select * from published_system order by is_official asc, published_at desc`.execute(db);
+    select p.*, (select count(*) from workspace w where w.doc->'source'->>'systemId' = p.id)::int as copies
+    from published_system p order by p.is_official asc, p.published_at desc`.execute(db);
   return rows.map(toSystem);
 }
 
 export async function getCommunity(id: string): Promise<CommunitySystem | null> {
-  const { rows } = await sql<Row>`select * from published_system where id = ${id}`.execute(db);
+  const { rows } = await sql<Row>`
+    select p.*, (select count(*) from workspace w where w.doc->'source'->>'systemId' = p.id)::int as copies
+    from published_system p where p.id = ${id}`.execute(db);
   return rows[0] ? toSystem(rows[0]) : null;
 }
 
