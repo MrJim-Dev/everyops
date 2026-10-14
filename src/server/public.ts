@@ -173,9 +173,11 @@ function draftFromVisitor(
   const time = booking ? input[booking.timeFieldId] : undefined;
   if (booking && isTimeRange(time ?? null) && Date.parse((time as { start: string }).start) <= now.getTime())
     return { ok: false, status: 422, message: "Pick a time that hasn't started yet." } as const;
-  // A picked range is whole slots inside opening hours, and one slot when the form allows only one.
+  // A picked range is whole slots inside opening hours, and one slot when the form allows only one. Stays and
+  // rentals book whole days (range "dates"), which have no slots to line up with.
   const resource = booked?.resources.find((r) => r.id === input[booked.resourceFieldId]);
-  if (booked && resource && isTimeRange(time ?? null)) {
+  const wholeDays = entity.fields.find((f) => f.id === booked?.timeFieldId)?.range === "dates";
+  if (booked && resource && !wholeDays && isTimeRange(time ?? null)) {
     const problem = slotRangeProblem(time as { start: string; end: string }, resource, booked.multiple);
     if (problem)
       return {
