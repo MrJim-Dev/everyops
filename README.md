@@ -11,10 +11,9 @@ Built for the Google Cloud AI Builder Cup 2026, under **Future of Work & Enterpr
 ## Project links
 
 - [Live prototype](https://everyops.app)
+- [Demo video (2:55, YouTube)](https://youtu.be/E85yod_2D5M)
 - [Proposal deck — 12 slides in one Canva design](https://www.canva.com/d/HhNfOabEsPf0LWV)
 - [Project scope, functional requirements and architecture](https://docs.google.com/document/d/1XDItCEo7MKC9mf3s0hgONXBJoFdnMv6JfKo-BceKyCc/edit)
-
-The demo video link will be added after recording.
 
 ## The problem and approach
 
