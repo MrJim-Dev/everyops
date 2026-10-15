@@ -54,6 +54,8 @@ export type AskQuestion = {
 /** A workspace Gemini designed, waiting for the owner to create it. */
 export type SetupDraft = {
   coverage?: { request: string; detail: string }[];
+  /** What the brief asked for that the workspace doesn't do yet; the owner can ask Ask EveryOps for it later. */
+  gaps?: { request: string; detail: string }[];
   name: string;
   summary: string;
   data: WorkspaceData;

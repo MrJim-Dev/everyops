@@ -45,6 +45,7 @@ import {
   designRequest,
   PATCH_INSTRUCTIONS,
 } from "./design-prompt";
+import { type SetupGap, salvage, widgetProblems } from "./design-salvage";
 import { generateJsonHedged } from "./gemini";
 import { withOverviewLayout } from "./overview-layout";
 import { referencesText, setupReferences } from "./references";
@@ -729,7 +730,6 @@ export function asksFor(brief: string, pattern: RegExp): boolean {
 function extraChecks(bp: Blueprint, brief: string): string[] {
   const errors: string[] = [];
   const entityIds = new Set(bp.entities.map((e) => e.id));
-  const viewIds = new Set(bp.views.map((v) => v.id));
   if (!bp.systems.length) errors.push("The workspace has no systems.");
   // The brief is the plan the owner agreed to; a public booking page it lists can't be left out.
   if (
@@ -751,18 +751,6 @@ function extraChecks(bp: Blueprint, brief: string): string[] {
     for (const f of e.fields)
       if (f.type === "rollup" && f.rollup && !entityIds.has(f.rollup.childEntityId))
         errors.push(`${e.name}.${f.id}: rollup uses a missing record type`);
-  }
-  for (const w of bp.widgets) {
-    const entity = bp.entities.find((e) => e.id === w.entityId);
-    if (!entity) continue;
-    const has = (id?: string) => !id || entity.fields.some((f) => f.id === id);
-    if (!has(w.metric.fieldId)) errors.push(`Widget ${w.title}: field "${w.metric.fieldId}" is missing`);
-    if (w.type === "chart" && (!w.chart || !has(w.chart.dateFieldId)))
-      errors.push(`Widget ${w.title}: a chart needs a date field`);
-    if (w.type === "list" && (!w.list || !w.list.fieldIds.every((id) => has(id))))
-      errors.push(`Widget ${w.title}: list fields are missing`);
-    if (w.list?.viewId && !viewIds.has(w.list.viewId))
-      errors.push(`Widget ${w.title}: links to a missing view`);
   }
   return errors;
 }
@@ -893,8 +881,18 @@ export type DesignResult =
       summary: string;
       data: WorkspaceData;
       coverage?: { request: string; detail: string }[];
+      /** What the workspace doesn't do yet that the brief asked for, so the owner can ask for it afterwards. */
+      gaps?: SetupGap[];
     }
   | { ok: false; message: string };
+
+/** "Request: what's missing" (a coverage finding or a check) as something the owner can ask for afterwards. */
+function asGap(error: string): SetupGap {
+  const at = error.indexOf(": ");
+  return at > 0
+    ? { request: error.slice(0, at), detail: error.slice(at + 2) }
+    : { request: error, detail: "" };
+}
 
 /** How long the design rounds may take in all. Samples and the Overview (60 s at most) come after, inside Cloud Run's limit. */
 const DESIGN_BUDGET_MS = 220_000;
@@ -1034,6 +1032,69 @@ export async function designWorkspace(
   /** The last whole design that was rejected: a repair's patch applies to it. */
   let previous: { entities: number; views: number; data: Design; flagged: Set<string> } | null = null;
   let errors: string[] = [];
+  type Built = { data: Design; samples: Design["samples"]; name: string; bp: Blueprint; advisory: string[] };
+  type Candidate = { built: Built; coverage: SetupGap[]; gaps: SetupGap[] };
+  /** The design that validated with the fewest shortfalls so far, and the last one that didn't validate. */
+  let best: Candidate | null = null;
+  let lastBroken: Built | null = null;
+  const finish = async ({ built, coverage, gaps }: Candidate): Promise<DesignResult> => {
+    const { data, samples, name, bp } = built;
+    if (gaps.length)
+      console.info(JSON.stringify({ event: "design_gaps", gaps: gaps.map((g) => g.request).slice(0, 15) }));
+    show(sketchOf(bp, true));
+    onEvent?.({ type: "stage", stage: "finish" });
+    // Record types the design left without samples (line items, most often) get theirs from one small call, while
+    // the Overview becomes a layout of library components (when that step fails the template layout stays).
+    const [filled, laidOut] = await Promise.all([
+      fillEmptySamples(bp, samples, now),
+      withOverviewLayout(bp, name, brief, now),
+    ]);
+    // Samples in the wrong year (the right month and day, but 2023) move to this year.
+    const dated = samplesThisYear(laidOut, toRecords(laidOut, filled, now), now);
+    if (dated.fields) console.info(JSON.stringify({ event: "design_samples_moved", fields: dated.fields }));
+    const records = computeAll(laidOut, dated.records, now);
+    // Businesses whose customers book on their own get a custom HTML website and a calendar that suits them.
+    const blueprint = withCustomSite(laidOut, records, name, now);
+    const sketch = sketchOf(blueprint, true);
+    show(sketch && { ...sketch, samples: records.length });
+    return done({
+      ok: true,
+      name,
+      summary: data.summary,
+      data: { blueprint, records },
+      coverage,
+      ...(gaps.length ? { gaps } : {}),
+    });
+  };
+  /**
+   * When the repairs run out or a repair call fails, setup still hands over a workspace: the best one that validated
+   * (with what it doesn't do yet listed), else the last design with the parts that don't work taken out. Only a
+   * design that never came back, or the owner leaving, ends in an error.
+   */
+  const settle = (reason: string): Promise<DesignResult> | DesignResult => {
+    if (options.signal?.aborted) return failed(reason);
+    if (best) {
+      console.info(JSON.stringify({ event: "design_settled", from: "best", reason, gaps: best.gaps.length }));
+      return finish(best);
+    }
+    const saved = lastBroken && salvage(lastBroken.bp);
+    if (lastBroken && saved) {
+      console.info(
+        JSON.stringify({
+          event: "design_settled",
+          from: "salvage",
+          reason,
+          removed: saved.removed.map((g) => g.request),
+        }),
+      );
+      return finish({
+        built: { ...lastBroken, bp: saved.bp },
+        coverage: [],
+        gaps: [...saved.removed, ...lastBroken.advisory.map(asGap)],
+      });
+    }
+    return failed(reason);
+  };
   for (let round = 0; round < 3; round++) {
     let designed: Design;
     let removed = new Set<string>();
@@ -1062,7 +1123,7 @@ export async function designWorkspace(
         },
         { hedgeMs: 20_000, attempts: 4, afterSilence: true },
       );
-      if (!result.ok) return failed(result.error);
+      if (!result.ok) return settle(result.error);
       stats.output += result.tokens.output;
       designed = result.data;
     } else {
@@ -1112,7 +1173,7 @@ export async function designWorkspace(
           },
           { hedgeMs: 40_000, attempts: 3, afterSilence: true },
         );
-        if (!result.ok) return failed(result.error);
+        if (!result.ok) return settle(result.error);
         stats.output += result.tokens.output;
         ({ design: designed, removed } = applyDesignPatch(previous.data, result.data));
       }
@@ -1125,15 +1186,18 @@ export async function designWorkspace(
         withStandardSite(repairStructure(tidy(raw)), name, data.site, fileParts.length ? undefined : brief),
       );
       const partial = shrunk(previous, bp);
-      const errors = [
+      // What would break a screen, and what only falls short of the brief.
+      const structural = [
         ...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`),
         ...bp.views.flatMap((v) =>
           v.type === "html" && v.html ? htmlConnectionProblems(bp, v.id, v.html) : [],
         ),
-        ...extraChecks(bp, brief),
+        ...widgetProblems(bp).map((p) => p.message),
         ...partial,
       ];
-      return { data, samples, name, bp, partial, errors };
+      const advisory = extraChecks(bp, brief);
+      const errors = [...structural, ...advisory];
+      return { data, samples, name, bp, partial, errors, structural, advisory };
     };
     let built = build(designed);
     if (previous) {
@@ -1156,8 +1220,10 @@ export async function designWorkspace(
     }
     const { data, samples, name, bp, partial } = built;
     errors = built.errors;
-    let coverage: { request: string; detail: string }[] = [];
-    if (!errors.length) {
+    // Validates and lost nothing: good enough to hand over if the repairs run out.
+    const sound = !built.structural.length;
+    if (!sound && !partial.length) lastBroken = built;
+    if (sound) {
       onEvent?.({ type: "stage", stage: "check" });
       stats.calls++;
       const checked = await reviewCoverage({
@@ -1169,31 +1235,19 @@ export async function designWorkspace(
         signal,
         mode: "setup",
       });
-      if (!checked)
-        return failed("I couldn't finish checking the design against your brief. Please try again.");
-      if (checked.questions.length)
-        return failed(`I need a detail before I can finish: ${checked.questions.join(" ")}`);
-      errors.push(...checked.errors.map((e) => `Brief coverage: ${e}`));
-      coverage = checked.covered;
-    }
-    if (!errors.length) {
-      show(sketchOf(bp, true));
-      onEvent?.({ type: "stage", stage: "finish" });
-      // Record types the design left without samples (line items, most often) get theirs from one small call, while
-      // the Overview becomes a layout of library components (when that step fails the template layout stays).
-      const [filled, laidOut] = await Promise.all([
-        fillEmptySamples(bp, samples, now),
-        withOverviewLayout(bp, name, brief, now),
-      ]);
-      // Samples in the wrong year (the right month and day, but 2023) move to this year.
-      const dated = samplesThisYear(laidOut, toRecords(laidOut, filled, now), now);
-      if (dated.fields) console.info(JSON.stringify({ event: "design_samples_moved", fields: dated.fields }));
-      const records = computeAll(laidOut, dated.records, now);
-      // Businesses whose customers book on their own get a custom HTML website and a calendar that suits them.
-      const blueprint = withCustomSite(laidOut, records, name, now);
-      const sketch = sketchOf(blueprint, true);
-      show(sketch && { ...sketch, samples: records.length });
-      return done({ ok: true, name, summary: data.summary, data: { blueprint, records }, coverage });
+      // The review is a second opinion: when it's unavailable, a workspace that validates is still handed over, and a
+      // question it raises is shown to the owner instead of stopping setup (the interview already asked).
+      const gaps: SetupGap[] = built.advisory.map(asGap);
+      if (checked) {
+        errors.push(...checked.errors.map((e) => `Brief coverage: ${e}`));
+        gaps.push(
+          ...checked.errors.map(asGap),
+          ...checked.questions.map((q) => ({ request: "A detail to confirm", detail: q })),
+        );
+      }
+      const candidate: Candidate = { built, coverage: checked?.covered ?? [], gaps };
+      if (!best || gaps.length <= best.gaps.length) best = candidate;
+      if (!errors.length) return finish(candidate);
     }
     console.warn(JSON.stringify({ event: "design_rejected", round, errors: errors.slice(0, 15) }));
     if (!partial.length)
@@ -1204,10 +1258,7 @@ export async function designWorkspace(
         flagged: flaggedBy(bp, errors),
       };
   }
-  return done({
-    ok: false,
-    message: "I couldn't design a valid workspace for that yet. Add a detail or two and try again.",
-  });
+  return settle("I couldn't design a valid workspace for that yet. Add a detail or two and try again.");
 }
 
 /**
@@ -1734,11 +1785,20 @@ function slotTimes(label: string, id: string): { start: number; end?: number } |
     if (ap === "am" && h === 12) h = 0;
     return h * 60 + Number(m[2] ?? 0);
   };
-  const parts = label.split(/\s*(?:-|–|to)\s*/i);
-  const start = one(parts[0] ?? "") ?? one(id.replace(/_/g, ":"));
-  if (start === null) return null;
-  const end = parts[1] ? one(parts[1]) : null;
-  return { start, ...(end !== null && end > start ? { end } : {}) };
+  // The whole label has to be a time or a range of two: "1 - Poor" is a rating, not 1:00. A lone bare number
+  // ("3") is a count or a rating too; a time says so with ":" or am/pm, or comes as a range.
+  const parts = label
+    .trim()
+    .split(/\s*(?:-|–|to)\s*/i)
+    .filter(Boolean);
+  const times = parts.map(one);
+  const timeLike = parts.length === 2 || /:|am|pm/i.test(label);
+  if (parts.length && parts.length <= 2 && timeLike && times.every((t) => t !== null)) {
+    const [start, end] = times as number[];
+    return { start, ...(end !== undefined && end > start ? { end } : {}) };
+  }
+  const fromId = /^\d{1,2}_\d{2}$/.test(id) ? one(id.replace("_", ":")) : null;
+  return fromId === null ? null : { start: fromId };
 }
 
 /** The thing a record type books: a record type with hours, else one named like a court or room, never people. */
