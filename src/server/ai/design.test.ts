@@ -254,6 +254,49 @@ describe("schedules on bookings that don't say what is booked", () => {
 });
 
 describe("mergeDateAndSlot", () => {
+  it("leaves a rating dropdown like '1 - Poor' and its date alone", () => {
+    // An activity log's Sleep Quality (1 - Poor … 5 - Optimal) was read as time slots and merged with its Date into
+    // a booking time, so every repair round reported both fields missing until setup gave up.
+    const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
+    const bp = structuredClone(blueprint);
+    bp.entities.push(
+      {
+        id: "category",
+        name: "Category",
+        pluralName: "Categories",
+        primaryFieldId: "name",
+        fields: [{ id: "name", name: "Name", type: "text" }],
+      },
+      {
+        id: "activity_log",
+        name: "Activity Log",
+        pluralName: "Activity Logs",
+        primaryFieldId: "title",
+        fields: [
+          { id: "title", name: "Title", type: "text" },
+          { id: "category", name: "Category", type: "relation", relation: { entityId: "category" } },
+          { id: "date", name: "Date", type: "date" },
+          {
+            id: "sleep_quality",
+            name: "Sleep Quality",
+            type: "select",
+            options: ["1 - Poor", "2 - Fair", "3 - Good", "4 - Great", "5 - Optimal"].map((label, i) => ({
+              id: `q${i + 1}`,
+              label,
+              tone: "neutral" as const,
+            })),
+          },
+        ],
+      },
+    );
+    mergeDateAndSlot(bp, []);
+    expect(bp.entities.find((e) => e.id === "activity_log")?.fields.map((f) => f.id)).toEqual([
+      "title",
+      "category",
+      "date",
+      "sleep_quality",
+    ]);
+  });
   it("turns a booking date plus a time-slot dropdown into one time range with booking settings", () => {
     const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
     const bp = structuredClone(blueprint);
