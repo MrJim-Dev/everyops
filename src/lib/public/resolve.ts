@@ -35,7 +35,8 @@ import {
   formatRange,
   isTimeRange,
 } from "@/lib/format";
-import { liveSiteHtml } from "./custom-site";
+import { type SiteDetails, withIncludes } from "./bindings";
+import { liveBlocksOf, liveSiteHtml } from "./custom-site";
 import { type HeroFact, heroFacts } from "./hero-facts";
 import { pageHtml } from "./html-page";
 import { type PublicLayout, resolveLayout } from "./layout";
@@ -173,6 +174,12 @@ export type PublicPageData = {
   /** HTML pages: the owner's page, and the public forms it may send to (by view id). */
   html?: string;
   forms?: PublicForm[];
+  /** HTML pages setup made: their own sections, worked out from the current data (EveryOps.data("page")). */
+  live?: ResolvedBlock[];
+  /** HTML pages: the business and its site, for data-everyops-text="site.…" and the site.pages menu. */
+  site?: SiteDetails;
+  /** Public HTML pages: the titles their bindings list, as text for visitors and crawlers without JavaScript. */
+  listed?: string[];
 };
 
 export type PublicSite = {
@@ -741,7 +748,7 @@ export function resolvePage(
     };
   }
   if (!view || !isPublic(view)) return null;
-  if (view.type === "html") return htmlPage(bp, records, docs, view);
+  if (view.type === "html") return htmlPage(bp, records, docs, view, siteName, now);
   if (view.type === "layout")
     return {
       id: view.id,
@@ -800,6 +807,8 @@ export function htmlPage(
   records: DataRecord[],
   docs: PageDocs,
   view: HtmlPageView,
+  siteName = "",
+  now = new Date(),
 ): PublicPageData {
   const forms = bp.views
     .filter((v): v is FormView => v.type === "form" && v.public === true)
@@ -816,9 +825,77 @@ export function htmlPage(
       const payments = pay ? resolveBlocks(bp, records, docs, "", { ...v, blocks: [pay] })[0] : undefined;
       return [payments?.type === "records" && payments.items.length ? { ...form, payments } : form];
     });
-  // A website setup made shows the workspace's current data in its live parts (offers, prices, ways to pay).
-  const html = liveSiteHtml(bp, records, docs, view, pageHtml(view, docs));
-  return { id: view.id, name: view.name, type: "html", blocks: [], html, forms };
+  const html = renderedHtml(bp, records, docs, view, pageHtml(view, docs), now);
+  const live = liveBlocksOf(bp, records, docs, view, now);
+  return {
+    id: view.id,
+    name: view.name,
+    type: "html",
+    blocks: [],
+    html,
+    forms,
+    ...(live ? { live } : {}),
+    site: siteDetails(bp, records, docs, siteName),
+  };
+}
+
+/**
+ * A custom page's HTML as it's shown: a website setup made gets its older live parts (offers, prices, ways to pay)
+ * drawn again from the current data, and each data-everyops-include is replaced by the HTML page it names.
+ */
+export function renderedHtml(
+  bp: Blueprint,
+  records: DataRecord[],
+  docs: PageDocs,
+  view: HtmlPageView,
+  html: string,
+  now = new Date(),
+): string {
+  return withIncludes(liveSiteHtml(bp, records, docs, view, html, now), (id) => {
+    const other = bp.views.find((v) => v.id === id);
+    return other?.type === "html" && other.id !== view.id ? pageHtml(other, docs) : undefined;
+  });
+}
+
+/**
+ * The business and its public site for custom pages: its name, contact details (from the website's contact section),
+ * the published pages in menu order and the main booking page.
+ */
+export function siteDetails(
+  bp: Blueprint,
+  records: DataRecord[],
+  docs: PageDocs,
+  siteName = "",
+): SiteDetails {
+  const name = bp.workspaceName || siteName;
+  const site = siteOf("", name, bp);
+  let contact: Extract<ResolvedBlock, { type: "contact" }> | undefined;
+  for (const v of bp.views) {
+    const blocks = v.type === "landing" ? v.blocks : v.type === "html" ? v.live?.blocks : undefined;
+    const block = blocks?.find((b) => b.type === "contact");
+    if (!block) continue;
+    const landing = { id: v.id, entityId: "", name: v.name, type: "landing", blocks: [block] } as LandingView;
+    const [resolved] = resolveBlocks(bp, records, docs, "", landing);
+    if (resolved?.type === "contact") {
+      contact = resolved;
+      break;
+    }
+  }
+  return {
+    name,
+    ...(contact?.phone ? { phone: contact.phone } : {}),
+    ...(contact?.email ? { email: contact.email } : {}),
+    ...(contact?.address ? { address: contact.address } : {}),
+    ...(contact?.hours ? { hours: contact.hours } : {}),
+    // Detail pages (one record, from the address) only make sense with a record, so menus leave them out.
+    pages: (site?.pages ?? [])
+      .filter((p) => {
+        const v = bp.views.find((x) => x.id === p.id);
+        return v?.type !== "html" || !/data-everyops-record\s*=/.test(pageHtml(v, docs));
+      })
+      .map((p) => ({ id: p.id, name: p.name })),
+    ...(site?.book ? { book: site.book } : {}),
+  };
 }
 
 /** Hero text has to fit a hero. */

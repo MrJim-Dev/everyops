@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Blueprint, DataRecord } from "@/lib/blueprint/types";
+import { validateBlueprint } from "@/lib/blueprint/validate";
+import { courtBookingsSample } from "@/lib/catalog/court-bookings";
+import { sharedTableProblems } from "@/lib/components/public-safety";
+import { applyOps } from "@/lib/engine/changes";
 import { htmlConnectionProblems } from "./html-connections";
-import { publishedPageData, workspaceTableData } from "./page-data";
+import { listedText, publicTableData, publishedPageData, workspaceTableData } from "./page-data";
+import { siteDetails, siteOf } from "./resolve";
 
 const bp = {
   entities: [
@@ -133,5 +138,153 @@ describe("AI HTML connection checks", () => {
     expect(
       htmlConnectionProblems(bp, "site", `EveryOps.form(formId); EveryOps.data(\`source_\${id}\`)`),
     ).toEqual([]);
+  });
+});
+
+describe("tables shared as public data", () => {
+  const shared = {
+    ...bp,
+    entities: [
+      ...bp.entities,
+      {
+        id: "customer",
+        name: "Customer",
+        pluralName: "Customers",
+        primaryFieldId: "name",
+        fields: [
+          { id: "name", name: "Name", type: "text" },
+          { id: "phone", name: "Phone", type: "text" },
+        ],
+      },
+    ],
+    views: [
+      ...bp.views,
+      {
+        id: "menu",
+        type: "table",
+        entityId: "product",
+        name: "Menu",
+        fieldIds: ["name", "cost"],
+        filter: "active == true",
+        publicData: true,
+      },
+      {
+        id: "regulars",
+        type: "table",
+        entityId: "customer",
+        name: "Regulars",
+        fieldIds: ["name"],
+        publicData: true,
+      },
+    ],
+  } as unknown as Blueprint;
+
+  it("sends only fields visitors may see, with record ids for detail pages", () => {
+    const result = publicTableData(shared, [record("a1", "Adobo"), record("off", "Old dish", false)], "menu");
+    expect(result).toMatchObject({ ok: true, total: 1, columns: [{ id: "name", name: "Name" }] });
+    expect(result.ok && result.items[0].id).toBe("a1");
+    expect(JSON.stringify(result)).not.toContain("12345");
+    expect(JSON.stringify(result)).not.toContain("Old dish");
+  });
+  it("refuses tables that weren't shared, and tables about people even when flagged", () => {
+    expect(publicTableData(shared, [record("a1", "Adobo")], "stock").ok).toBe(false);
+    expect(publicTableData(shared, [], "regulars").ok).toBe(false);
+    const regulars = shared.views.find((v) => v.id === "regulars");
+    expect(regulars?.type === "table" && sharedTableProblems(shared, regulars)).toHaveLength(1);
+    expect(validateBlueprint(shared).some((e) => /about people/.test(e.message))).toBe(true);
+  });
+  it("lets public pages read shared tables and their bindings, and checks includes", () => {
+    expect(htmlConnectionProblems(shared, "site", 'EveryOps.data("menu"); EveryOps.items("menu")')).toEqual(
+      [],
+    );
+    expect(
+      htmlConnectionProblems(
+        shared,
+        "site",
+        '<template data-everyops-each="menu"></template><template data-everyops-each="@rows"></template><template data-everyops-each="site.pages"></template><div data-everyops-include="custom"></div>',
+      ),
+    ).toEqual([]);
+    expect(
+      htmlConnectionProblems(
+        shared,
+        "site",
+        '<template data-everyops-each="stock"></template><div data-everyops-record="page"></div><div data-everyops-include="site"></div>',
+      ),
+    ).toHaveLength(3);
+  });
+  it("shares a table when it's made public, without making it a page of the site", () => {
+    const next = applyOps(bp, [{ op: "update_view", viewId: "stock", patch: { public: true } }]);
+    const stock = next.views.find((v) => v.id === "stock");
+    expect(stock?.type === "table" && stock.publicData).toBe(true);
+    expect(siteOf("shop", "Shop", next)?.pages.map((p) => p.id)).not.toContain("stock");
+    const back = applyOps(next, [{ op: "update_view", viewId: "stock", patch: { public: false } }]);
+    expect(back.views.find((v) => v.id === "stock")).not.toHaveProperty("publicData");
+  });
+});
+
+describe("text for visitors without JavaScript", () => {
+  it("lists the titles a public page's bindings will show, only from sources visitors may read", () => {
+    const withMenu = {
+      ...bp,
+      views: [
+        ...bp.views,
+        {
+          id: "menu",
+          type: "table",
+          entityId: "product",
+          name: "Menu",
+          fieldIds: ["name"],
+          publicData: true,
+        },
+      ],
+    } as unknown as Blueprint;
+    const html =
+      '<template data-everyops-each="menu"></template><template data-everyops-each="stock"></template><template data-everyops-each="@rows"></template>';
+    const listed = listedText(withMenu, [record("a", "Adobo"), record("b", "Sinigang")], {
+      id: "site",
+      name: "Site",
+      type: "html",
+      blocks: [],
+      html,
+    });
+    expect(listed).toEqual(["Adobo", "Sinigang"]);
+  });
+});
+
+describe("sharing the court sample's tables", () => {
+  it("shares courts, and refuses players and bookings (each booking belongs to a player)", () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-15T00:00:00Z"));
+    const problems = (id: string) => {
+      const v = blueprint.views.find((x) => x.id === id);
+      return v?.type === "table" ? sharedTableProblems(blueprint, { ...v, publicData: true }) : ["missing"];
+    };
+    expect(problems("courts_table")).toEqual([]);
+    expect(problems("players_table")[0]).toMatch(/about people/);
+    expect(problems("all_bookings")[0]).toMatch(/belong to someone \(Player\)/);
+  });
+  it("leaves detail pages out of the site's menu", () => {
+    const { blueprint, records } = courtBookingsSample(new Date("2026-10-15T00:00:00Z"));
+    blueprint.views.push(
+      {
+        id: "courts_page",
+        entityId: "",
+        name: "Our courts",
+        type: "html",
+        public: true,
+        html: "<h1>Courts</h1>",
+      },
+      {
+        id: "court_detail",
+        entityId: "",
+        name: "Court details",
+        type: "html",
+        public: true,
+        html: '<article data-everyops-record="courts_table"></article>',
+      },
+    );
+    blueprint.systems[0].viewIds.push("courts_page", "court_detail");
+    const pages = siteDetails(blueprint, records, {}, "Court House").pages.map((p) => p.id);
+    expect(pages).toContain("courts_page");
+    expect(pages).not.toContain("court_detail");
   });
 });

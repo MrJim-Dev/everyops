@@ -15,7 +15,8 @@ function sandbox() {
   const context = {
     window,
     parent,
-    document: { addEventListener: vi.fn() },
+    // The bridge runs first thing in <head>, while the page is still loading.
+    document: { addEventListener: vi.fn(), readyState: "loading" },
     setTimeout,
     clearTimeout,
     setInterval,

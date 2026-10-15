@@ -5,6 +5,7 @@ import type { Blueprint, DataRecord, Entity, FieldValue, FormView, RecordData } 
 import { createRecord, isImagePath } from "@/lib/engine/records";
 import { autoReferenceFields, nextReference } from "@/lib/engine/references";
 import { isTimeRange } from "@/lib/format";
+import { listedText, publicTableData } from "@/lib/public/page-data";
 import {
   formatCell,
   formPageOf,
@@ -68,7 +69,19 @@ export async function publicPage(
     new Date(),
     doc.meta.name,
   );
-  return page ? { site, page } : null;
+  if (!page) return null;
+  if (page.type === "html") page.listed = listedText(bp, doc.records, page);
+  return { site, page };
+}
+
+/**
+ * A table view the owner shared as public data, for public custom pages; null when the workspace isn't published.
+ */
+export async function sharedData(slug: string, viewId: string) {
+  const doc = await readDoc(slug);
+  if (!doc || doc.meta.setup) return null;
+  const data = publicTableData(doc.blueprint, doc.records, viewId);
+  return data.ok ? data : null;
 }
 
 export async function publicSlots(

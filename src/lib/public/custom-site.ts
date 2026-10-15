@@ -17,6 +17,7 @@ import type {
   HtmlPageView,
   LandingView,
 } from "@/lib/blueprint/types";
+import { withUnit } from "./bindings";
 import { customBookingHtml } from "./booking-page";
 import type { HeroFact } from "./hero-facts";
 import { type PageDocs, type ResolvedBlock, resolveBlocks } from "./resolve";
@@ -158,15 +159,6 @@ type Records = Extract<ResolvedBlock, { type: "records" }>;
 type Hero = Extract<ResolvedBlock, { type: "hero" }>;
 type Item = Records["items"][number];
 
-/** "Duration Mins: 60" reads as "Duration: 60 min". */
-function withUnit(c: Item["cells"][number]): Item["cells"][number] {
-  const unit = /\b(mins?|minutes|hrs?|hours)\b/i.exec(c.name)?.[1];
-  if (!unit || !/^[\d.,]+$/.test(c.text)) return c;
-  const short = /^h/i.test(unit) ? "hr" : "min";
-  const name = c.name.replace(/[\s(]*\b(mins?|minutes|hrs?|hours)\b\)?/i, "").trim() || "Duration";
-  return { ...c, name, text: `${c.text} ${short}` };
-}
-
 /** A card's parts: its title, picture, tags (category), the one description, and the rest as label and value rows. */
 function cardParts(item: Item) {
   const filled = item.cells.filter((c) => c.text);
@@ -252,6 +244,65 @@ function section(id: string, title: string | undefined, body: string, className 
   return `<section id="${id}" class="section ${className}">${heading}${body}</section>`;
 }
 
+/*
+ * Setup's website draws its data parts with bindings (src/lib/public/bindings.ts): each is a <template> the bridge
+ * fills from the page's own sections (EveryOps.data("page")) every time the page is shown. The markup inside a
+ * template is the owner's to restyle; only the values change, so a redesigned card keeps its design and its data.
+ */
+
+/** A data section that hides itself while it has nothing to show, and shows records added later. */
+function boundSection(id: string, title: string | undefined, body: string, className = "") {
+  const heading = title ? `<h2 class="reveal">${esc(title)}</h2>` : "";
+  return `<section id="${id}" class="section ${className}" data-everyops-hide-empty>${heading}${body}</section>`;
+}
+
+/** Cards of what's offered (with picture, tags and details) or of ways to pay. */
+function boundCards(b: Records) {
+  const pay = b.id === "payments";
+  const card = pay
+    ? `<article class="card reveal"><h3 data-field="@title"></h3><p class="about" data-everyops-if="@about" data-field="@about"></p>${ROWS}</article>`
+    : `<article class="card reveal"><img data-everyops-if="@image" data-src="{@image}" alt="" loading="lazy"><p class="tags" data-everyops-if="@tags"><template data-everyops-each="@tags"><span data-field="@text"></span></template></p><h3 data-field="@title"></h3><p class="about clamp" data-everyops-if="@about" data-field="@about"></p>${ROWS}</article>`;
+  return boundSection(
+    b.id,
+    b.title,
+    `<div class="grid cards"><template data-everyops-each="page" data-everyops-block="${esc(b.id)}" data-everyops-skip="@title=">${card}</template></div>`,
+    pay ? "pay" : "",
+  );
+}
+const ROWS =
+  '<dl data-everyops-if="@rows"><template data-everyops-each="@rows"><div><dt data-field="@name"></dt><dd data-field="@text"></dd></div></template></dl>';
+
+/** Questions and answers, one disclosure each. */
+function boundFaq(b: Records) {
+  return boundSection(
+    "faq",
+    b.title ?? "Questions",
+    `<div class="faq"><template data-everyops-each="page" data-everyops-block="${esc(b.id)}" data-everyops-skip="@1="><details class="reveal"><summary><span data-field="@1"></span><span aria-hidden="true" class="plus"></span></summary><div class="answer"><p data-field="@2"></p></div></details></template></div>`,
+  );
+}
+
+/** How to reach the business, from the site's details (so a phone changed in one place changes here too). */
+function boundContact(title: string | undefined) {
+  const row = (label: string, key: string) =>
+    `<div data-everyops-if="site.${key}"><dt>${label}</dt><dd data-everyops-text="site.${key}"></dd></div>`;
+  return `<section id="contact" class="section" data-everyops-if="site.contact"><h2 class="reveal">${esc(title ?? "Visit us")}</h2><dl class="contact reveal">${row("Phone", "phone")}${row("Email", "email")}${row("Address", "address")}${row("Hours", "hours")}</dl></section>`;
+}
+
+/** The hero's right side: the first few offers with their prices, what to know before booking, and the button. */
+function boundGlance(hero: Hero | undefined, offer: Records | undefined, cta: string) {
+  const picks = offer
+    ? `<p class="label">${esc(offer.title ?? "What we offer")}</p><ul class="picks" data-everyops-hide-empty><template data-everyops-each="page" data-everyops-block="${esc(offer.id)}" data-everyops-limit="3" data-everyops-skip="@title="><li><span data-field="@title"></span><b data-everyops-if="@price" data-field="@price"></b></li></template></ul><a class="more" href="#offer">See all →</a>`
+    : "";
+  const icons = (Object.keys(ICONS) as HeroFact["kind"][])
+    .map((kind) => icon(kind).replace("<svg ", `<svg data-everyops-if="@kind=${kind}" `))
+    .join("");
+  const facts = hero
+    ? `<ul class="facts" data-everyops-hide-empty><template data-everyops-each="page" data-everyops-block="${esc(hero.id)}"${offer ? ' data-everyops-skip="@kind=offer"' : ""}><li>${icons}<span data-field="@text"></span></li></template></ul>`
+    : "";
+  if (!picks && !facts) return "";
+  return `<aside class="glance rise" aria-label="At a glance">${picks}${facts}${cta}</aside>`;
+}
+
 /** The page's main button, to the site's booking or order page. */
 function ctaOf(hero: Hero | undefined, cls = ""): string {
   return hero?.ctaHref
@@ -322,7 +373,6 @@ export function customSiteHtml(name: string, blocks: ResolvedBlock[], about = ""
   );
   const button = (cls: string) => ctaOf(hero, cls);
   const cta = button("");
-  const fresh = liveParts(blocks);
   const parts: string[] = [];
   for (const b of blocks) {
     if (b.type === "highlights" && b.items.length) {
@@ -334,10 +384,10 @@ export function customSiteHtml(name: string, blocks: ResolvedBlock[], about = ""
         .join("");
       parts.push(section("why", b.title, `<div class="grid three">${items}</div>`, "plain"));
     }
-    // Data sections are live parts, kept even while empty so records added later show up.
-    if (b.type === "records" && (b.layout === "cards" || b.layout === "faq"))
-      parts.push(live(b.id, fresh[b.id] ?? ""));
-    if (b.type === "contact") parts.push(live("contact", fresh.contact ?? ""));
+    // Data sections are bound, kept even while empty so records added later show up.
+    if (b.type === "records" && b.layout === "cards") parts.push(boundCards(b));
+    if (b.type === "records" && b.layout === "faq") parts.push(boundFaq(b));
+    if (b.type === "contact") parts.push(boundContact(b.title));
     if (b.type === "steps" && b.items.length) {
       const items = b.items
         .map(
@@ -367,7 +417,7 @@ export function customSiteHtml(name: string, blocks: ResolvedBlock[], about = ""
   // The line above the headline says something the headline doesn't: opening hours, or how much there is to book.
   const note = hero?.facts?.find((f) => f.kind === "hours") ?? hero?.facts?.find((f) => f.kind === "offer");
   const eyebrow = note ? `<span class="eyebrow rise">${esc(note.text)}</span>` : "";
-  const glance = fresh.glance;
+  const glance = boundGlance(hero, offer, cta);
   const initial = esc(name.trim().charAt(0).toUpperCase() || "•");
 
   return `<!doctype html>
@@ -443,6 +493,7 @@ ${fontLink(p)}
   .tags { margin: 0 0 10px; display: flex; flex-wrap: wrap; gap: 6px; }
   .tags span { font-size: 12px; font-weight: 600; color: var(--accent); background: var(--tint); padding: 3px 10px; border-radius: 999px; }
   .card .about { margin: 0 0 4px; color: var(--soft); font-size: 14.5px; }
+  .card .about.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
   .card dl { margin: auto 0 0; padding-top: 14px; display: grid; gap: 6px; font-size: 14px; }
   .card dl div { display: flex; justify-content: space-between; gap: 12px; border-top: 1px dashed var(--line); padding-top: 6px; }
   .card dt { color: var(--soft); } .card dd { margin: 0; font-weight: 600; text-align: right; }
@@ -462,7 +513,8 @@ ${fontLink(p)}
   .plus::after { transform: rotate(90deg); }
   details[open] .plus::after { transform: rotate(0deg); }
   .answer { color: var(--soft); padding-bottom: 18px; }
-  .answer p { margin: 0 0 8px; }
+  .answer p { margin: 0 0 8px; white-space: pre-line; }
+  [hidden] { display: none !important; }
   .contact { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin: 0; }
   .contact div { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
   .contact dt { color: var(--soft); font-size: 13px; } .contact dd { margin: 2px 0 0; font-weight: 600; }
@@ -497,7 +549,7 @@ ${fontLink(p)}
 </style>
 </head>
 <body>
-<nav><div class="wrap"><a class="brand" href="#top"><i aria-hidden="true">${initial}</i><strong>${esc(name)}</strong></a><div class="links">${navLinks}${button("small")}</div></div></nav>
+<nav><div class="wrap"><a class="brand" href="#top"><i aria-hidden="true">${initial}</i><strong data-everyops-text="site.name">${esc(name)}</strong></a><div class="links">${navLinks}${button("small")}</div></div></nav>
 <main id="top">
 <header class="hero"><div class="wrap hero-grid${glance ? "" : " solo"}">
   <div>
@@ -506,20 +558,19 @@ ${fontLink(p)}
     ${lead}
     <div class="actions rise">${cta}${secondary}</div>
   </div>
-  ${live("glance", glance)}
+  ${glance}
 </div></header>
 <div class="wrap">
 ${parts.join("\n")}
 ${cta ? `<div class="closing reveal"><h2>Ready to ${esc((hero?.ctaLabel ?? "Book now").toLowerCase().replace(/\s+now$/, ""))}?</h2>${cta}</div>` : ""}
 </div>
 </main>
-<footer><div class="wrap"><span>© ${new Date().getFullYear()} ${esc(name)}</span><span>Booking by EveryOps</span></div></footer>
+<footer><div class="wrap"><span>© ${new Date().getFullYear()} <span data-everyops-text="site.name">${esc(name)}</span></span><span>Booking by EveryOps</span></div></footer>
 <script>
-  // Reveal each part once as it scrolls into view. Without IntersectionObserver everything simply shows.
+  // Reveal each part once as it scrolls into view, including cards the data bindings add (everyops:bound).
+  // Without IntersectionObserver everything simply shows.
   (function () {
-    var items = document.querySelectorAll(".reveal");
-    if (!("IntersectionObserver" in window)) { items.forEach(function (el) { el.classList.add("in"); }); return; }
-    var seen = new IntersectionObserver(function (entries) {
+    var seen = "IntersectionObserver" in window && new IntersectionObserver(function (entries) {
       entries.forEach(function (e, i) {
         if (!e.isIntersecting) return;
         e.target.style.transitionDelay = Math.min(i * 50, 200) + "ms";
@@ -527,7 +578,15 @@ ${cta ? `<div class="closing reveal"><h2>Ready to ${esc((hero?.ctaLabel ?? "Book
         seen.unobserve(e.target);
       });
     }, { rootMargin: "0px 0px -8% 0px" });
-    items.forEach(function (el) { seen.observe(el); });
+    function watch() {
+      document.querySelectorAll(".reveal:not(.in):not([data-watched])").forEach(function (el) {
+        if (!seen) return el.classList.add("in");
+        el.setAttribute("data-watched", "");
+        seen.observe(el);
+      });
+    }
+    watch();
+    document.addEventListener("everyops:bound", watch);
   })();
 </script>
 </body>
@@ -554,21 +613,39 @@ export function liveSiteHtml(
     /<section id="(offer|payments)" class="section/.test(html) &&
     html.includes("Reveal each part once");
   if (!marked && !legacy) return html;
-  const blocks = view.live?.blocks ?? standardBlocks(bp, bp.workspaceName || view.name);
+  const parts = liveParts(resolveLive(bp, records, docs, view, now));
+  if (marked) return refreshLive(html, parts);
+  return html.replace(
+    /<section id="(offer|payments)" class="section[^"]*">[\s\S]*?<\/section>/g,
+    (whole, id: string) => (parts[id] ? parts[id] : whole),
+  );
+}
+
+function resolveLive(bp: Blueprint, records: DataRecord[], docs: PageDocs, view: HtmlPageView, now: Date) {
   const landing = {
     id: view.id,
     entityId: "",
     name: view.name,
     type: "landing",
     layout: "standard",
-    blocks,
+    blocks: view.live?.blocks ?? standardBlocks(bp, bp.workspaceName || view.name),
   } as LandingView;
-  const parts = liveParts(resolveBlocks(bp, records, docs, SITE_TOKEN, landing, now));
-  if (marked) return refreshLive(html, parts);
-  return html.replace(
-    /<section id="(offer|payments)" class="section[^"]*">[\s\S]*?<\/section>/g,
-    (whole, id: string) => (parts[id] ? parts[id] : whole),
-  );
+  return resolveBlocks(bp, records, docs, SITE_TOKEN, landing, now);
+}
+
+/**
+ * A website setup made: its sections worked out from the current data, for EveryOps.data("page") and the bindings
+ * that draw its offers, prices, ways to pay and FAQs. Undefined for pages without sections of their own.
+ */
+export function liveBlocksOf(
+  bp: Blueprint,
+  records: DataRecord[],
+  docs: PageDocs,
+  view: HtmlPageView,
+  now = new Date(),
+): ResolvedBlock[] | undefined {
+  if (!view.live) return undefined;
+  return resolveLive(bp, records, docs, view, now).filter((b) => b.type !== "html");
 }
 
 /** What the business is, for picking its look: its name, what it offers and its record types. */
