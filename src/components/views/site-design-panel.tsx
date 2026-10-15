@@ -1,14 +1,24 @@
 "use client";
 
-import { PaletteIcon, XIcon } from "@phosphor-icons/react";
+import { ArrowDownIcon, ArrowUpIcon, PaletteIcon, XIcon } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { BookingLayout, HtmlPageView } from "@/lib/blueprint/types";
-import { designOf, redesignSite, THEMES } from "@/lib/public/custom-site";
-import { REFERENCES, SECTION_STYLES, type SectionKind, type SiteDesign } from "@/lib/public/site-sections";
+import { designOf, redesignSite } from "@/lib/public/custom-site";
+import {
+  BODY_SECTIONS,
+  type BodySection,
+  LOOKS,
+  type LookKind,
+  looksOf,
+  REFERENCES,
+  SECTION_STYLES,
+  type SectionKind,
+  type SiteDesign,
+} from "@/lib/public/site-sections";
 import { mainForm } from "@/lib/public/site-template";
 import { useWorkspaces } from "@/lib/store/workspaces";
 
@@ -16,6 +26,18 @@ const CALENDARS: Record<BookingLayout, string> = {
   days: "Day strip, then times",
   grid: "Courts side by side",
   month: "Month calendar, then times",
+};
+
+const LOOK_NAMES: Record<LookKind, string> = {
+  theme: "Colors",
+  font: "Heading font",
+  body: "Body font",
+  radius: "Corners",
+  density: "Spacing",
+  buttons: "Buttons",
+  cards: "Cards",
+  headings: "Section headings",
+  rhythm: "Section backgrounds",
 };
 
 const KIND_NAMES: Record<SectionKind, string> = {
@@ -73,6 +95,17 @@ export function SiteDesignPanel({
   const [calendar, setCalendar] = useState<BookingLayout>(calendarFor?.bookingLayout ?? "days");
   const edited = !!ws.docs[view.id]?.body;
 
+  const order = draft.order ?? [...BODY_SECTIONS];
+  const move = (k: BodySection, dir: number) => {
+    const next = [...order];
+    const i = next.indexOf(k);
+    const j = i + dir;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    show({ ...draft, order: next });
+  };
+  const toggle = (k: BodySection) =>
+    show({ ...draft, order: order.includes(k) ? order.filter((x) => x !== k) : [...order, k] });
   const show = (next: SiteDesign) => {
     setDraft(next);
     onPreview(redesignSite(ws.blueprint, ws.records, ws.docs, view, next).html);
@@ -96,6 +129,12 @@ export function SiteDesignPanel({
           detail:
             [
               ...(draft.theme !== saved.theme ? [`Theme: ${draft.theme ?? "automatic"}`] : []),
+              ...((Object.keys(LOOKS) as LookKind[]).some((k) => k !== "theme" && draft[k] !== saved[k])
+                ? ["Look"]
+                : []),
+              ...(JSON.stringify(draft.order ?? null) !== JSON.stringify(saved.order ?? null)
+                ? ["Section order"]
+                : []),
               ...(calendarFor && calendar !== (calendarFor.bookingLayout ?? "days")
                 ? [`Calendar: ${CALENDARS[calendar]}`]
                 : []),
@@ -168,21 +207,65 @@ export function SiteDesignPanel({
             ))}
           </NativeSelect>
         </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Theme</span>
-          <NativeSelect
-            aria-label="Theme"
-            value={draft.theme ?? ""}
-            onChange={(e) => show({ ...draft, theme: e.target.value || undefined })}
-          >
-            <NativeSelectOption value="">Automatic</NativeSelectOption>
-            {THEMES.map((t) => (
-              <NativeSelectOption key={t.id} value={t.id}>
-                {t.id[0].toUpperCase() + t.id.slice(1)} · {t.font}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </div>
+        <p className="mt-1 text-[11.5px] font-semibold tracking-wide text-muted-foreground uppercase">Look</p>
+        {(Object.keys(LOOKS) as LookKind[]).map((kind) => (
+          <div key={kind} className="flex flex-col gap-1">
+            <span className="text-muted-foreground">{LOOK_NAMES[kind]}</span>
+            <NativeSelect
+              aria-label={LOOK_NAMES[kind]}
+              value={draft[kind] ?? (looksOf(draft) as Partial<Record<LookKind, string>>)[kind] ?? ""}
+              onChange={(e) => show({ ...draft, [kind]: e.target.value || undefined })}
+              title={LOOKS[kind].find((o) => o.id === draft[kind])?.use}
+            >
+              {kind === "theme" || kind === "font" ? (
+                <NativeSelectOption value="">Automatic</NativeSelectOption>
+              ) : null}
+              {LOOKS[kind].map((o) => (
+                <NativeSelectOption key={o.id} value={o.id}>
+                  {o.label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </div>
+        ))}
+        <p className="mt-2 text-[11.5px] font-semibold tracking-wide text-muted-foreground uppercase">
+          Sections
+        </p>
+        <ul className="flex flex-col gap-1" aria-label="Section order">
+          {[...order, ...BODY_SECTIONS.filter((k) => !order.includes(k))].map((k) => {
+            const on = order.includes(k);
+            const at = order.indexOf(k);
+            return (
+              <li key={k} className="flex items-center gap-1 rounded-md border px-2 py-1">
+                <label className="flex flex-1 items-center gap-2">
+                  <input type="checkbox" checked={on} onChange={() => toggle(k)} />
+                  <span className={on ? "" : "text-muted-foreground line-through"}>{KIND_NAMES[k]}</span>
+                </label>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`Move ${KIND_NAMES[k]} up`}
+                  disabled={!on || at === 0}
+                  onClick={() => move(k, -1)}
+                >
+                  <ArrowUpIcon />
+                </Button>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`Move ${KIND_NAMES[k]} down`}
+                  disabled={!on || at === order.length - 1}
+                  onClick={() => move(k, 1)}
+                >
+                  <ArrowDownIcon />
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="mt-2 text-[11.5px] font-semibold tracking-wide text-muted-foreground uppercase">
+          Section styles
+        </p>
         {(Object.keys(SECTION_STYLES) as SectionKind[]).map((kind) => (
           <div key={kind} className="flex flex-col gap-1">
             <span className="text-muted-foreground">{KIND_NAMES[kind]}</span>

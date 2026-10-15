@@ -32,116 +32,586 @@ export type SectionKind =
   | "footer"
   | "booking";
 
-/** One style of a section: its id, a short name for the picker, and a sentence for the AI choosing it. */
-export type SectionStyle = { id: string; label: string; about: string };
+/**
+ * One style of a section: its id, a short name for the picker, what it looks like, when it fits and when it doesn't.
+ * The AI reads all four; the picker shows the label.
+ */
+export type SectionStyle = { id: string; label: string; about: string; use: string; avoid?: string };
 
 export const SECTION_STYLES: Record<SectionKind, SectionStyle[]> = {
   nav: [
-    { id: "bar", label: "Bar", about: "a thin sticky bar: name left, links and the button right" },
-    { id: "centered", label: "Centered name", about: "the name in the middle, links left, button right" },
-    { id: "floating", label: "Floating pill", about: "a rounded bar floating over the page" },
-    { id: "solid", label: "Solid color", about: "a bar in the brand color with white text" },
-    { id: "minimal", label: "Minimal", about: "just the name and the button, no bar" },
+    {
+      id: "bar",
+      label: "Bar",
+      about: "a thin sticky bar: name left, links and the button right",
+      use: "the safe default for any business",
+      avoid: "nothing",
+    },
+    {
+      id: "centered",
+      label: "Centered name",
+      about: "the name in the middle, links left, button right",
+      use: "boutique, beauty, dining and wellness brands where the name is the brand",
+      avoid: "long business names (over about 28 characters)",
+    },
+    {
+      id: "floating",
+      label: "Floating pill",
+      about: "a rounded bar floating over the page",
+      use: "modern, playful or lifestyle brands; pairs with banner and centered heroes",
+      avoid: "very formal businesses (clinics, law, finance)",
+    },
+    {
+      id: "solid",
+      label: "Solid color",
+      about: "a bar in the brand color with white text",
+      use: "bold, energetic brands (sports, gyms, shops, events)",
+      avoid: "calm or premium brands; the dark hero",
+    },
+    {
+      id: "minimal",
+      label: "Minimal",
+      about: "just the name and the button, no bar",
+      use: "short one-page sites, cafés, studios, calm brands",
+      avoid: "sites with FAQs and many sections people jump between",
+    },
   ],
   hero: [
     {
       id: "split",
       label: "Split with card",
       about: "headline left, a card of prices, hours and the button right",
+      use: "booking businesses with a few offers and prices to show at once",
+      avoid: "businesses with no prices or offers listed",
     },
-    { id: "centered", label: "Centered", about: "centered headline and buttons with facts as pills below" },
-    { id: "banner", label: "Color banner", about: "a big block in the brand color with white text" },
+    {
+      id: "centered",
+      label: "Centered",
+      about: "centered headline and buttons with facts as pills below",
+      use: "clinics, studios and services where trust and a clear call matter more than prices",
+      avoid: "long headlines (over about 8 words)",
+    },
+    {
+      id: "banner",
+      label: "Color banner",
+      about: "a big block in the brand color with white text",
+      use: "bold brands, promos, gyms, shops and events that want energy",
+      avoid: "pale palettes (sage, mono) and calm or medical brands",
+    },
     {
       id: "editorial",
       label: "Editorial",
       about: "a very large headline, then the intro beside a list of facts",
+      use: "resorts, stays, venues and premium brands with a short, strong headline",
+      avoid: "headlines over about 7 words",
     },
-    { id: "menu", label: "Price list", about: "headline left, prices as a menu list right" },
-    { id: "stats", label: "Big numbers", about: "headline, then the key facts as big numbers in a row" },
-    { id: "dark", label: "Dark", about: "a dark full-width hero with a light card of prices" },
-    { id: "minimal", label: "Minimal", about: "a quiet, smaller headline with the facts in one line" },
+    {
+      id: "menu",
+      label: "Price list",
+      about: "headline left, prices as a menu list right",
+      use: "cafés, salons and services with 3 or more priced items",
+      avoid: "offers without prices",
+    },
+    {
+      id: "stats",
+      label: "Big numbers",
+      about: "headline, then the key facts as big numbers in a row",
+      use: "venues and workshops with strong facts (how many courts, hours, starting price)",
+      avoid: "businesses with fewer than 3 facts",
+    },
+    {
+      id: "dark",
+      label: "Dark",
+      about: "a dark full-width hero with a light card of prices",
+      use: "nightlife, premium dining, bistros, bold venues",
+      avoid: "pairing with the solid nav; light, airy brands",
+    },
+    {
+      id: "minimal",
+      label: "Minimal",
+      about: "a quiet, smaller headline with the facts in one line",
+      use: "calm brands (wellness, spa) and very short sites",
+      avoid: "booking businesses that need the button and prices up front",
+    },
   ],
   highlights: [
-    { id: "numbered", label: "Numbered", about: "three columns with a small number and a rule above each" },
-    { id: "cards", label: "Cards", about: "bordered cards with a colored top edge" },
-    { id: "icons", label: "Check icons", about: "each point with a round check icon" },
-    { id: "list", label: "List", about: "rows: title left, text right, with dividers" },
-    { id: "spotlight", label: "Spotlight", about: "the first point large on color, the others beside it" },
-    { id: "split", label: "Heading beside", about: "a heading left, the points listed right" },
+    {
+      id: "numbered",
+      label: "Numbered",
+      about: "three columns with a small number and a rule above each",
+      use: "the safe default for 3 short points",
+      avoid: "more than 4 points",
+    },
+    {
+      id: "cards",
+      label: "Cards",
+      about: "bordered cards with a colored top edge",
+      use: "clinics, studios and services: makes each point feel concrete",
+      avoid: "pairing with card-heavy offer styles right after",
+    },
+    {
+      id: "icons",
+      label: "Check icons",
+      about: "each point with a round check icon",
+      use: "practical promises (indoor, free parking, same-day)",
+      avoid: "abstract or emotional points",
+    },
+    {
+      id: "list",
+      label: "List",
+      about: "rows: title left, text right, with dividers",
+      use: "calm, editorial brands with longer point text",
+      avoid: "very short points (two or three words)",
+    },
+    {
+      id: "spotlight",
+      label: "Spotlight",
+      about: "the first point large on color, the others beside it",
+      use: "when one point clearly leads (the view, the 24-hour gym)",
+      avoid: "fewer than 3 points or points of equal weight",
+    },
+    {
+      id: "split",
+      label: "Heading beside",
+      about: "a heading left, the points listed right",
+      use: "editorial, boutique and café sites",
+      avoid: "nothing in particular",
+    },
   ],
   offer: [
-    { id: "cards", label: "Cards", about: "a grid of cards with tags, prices and details" },
-    { id: "menu", label: "Menu", about: "a two-column menu: name, dotted line, price" },
-    { id: "table", label: "Price table", about: "a table with one row per item and its prices" },
-    { id: "tiles", label: "Compact tiles", about: "small tiles with an initial and the price" },
-    { id: "feature", label: "Featured first", about: "the first item large, the rest listed beside it" },
-    { id: "rows", label: "Rows", about: "full-width rows with details and a Book link each" },
+    {
+      id: "cards",
+      label: "Cards",
+      about: "a grid of cards with tags, prices and details",
+      use: "the safe default; 3 to 12 items with a few details each",
+      avoid: "only 1 item",
+    },
+    {
+      id: "menu",
+      label: "Menu",
+      about: "a two-column menu: name, dotted line, price",
+      use: "food, drinks, salon and service menus with 5 or more priced items",
+      avoid: "items without prices; items with many details",
+    },
+    {
+      id: "table",
+      label: "Price table",
+      about: "a table with one row per item and its prices",
+      use: "items compared on the same numbers (rates, durations, deposits): clinics, rentals, courts with peak and off-peak",
+      avoid: "fewer than 3 items or items with no numbers",
+    },
+    {
+      id: "tiles",
+      label: "Compact tiles",
+      about: "small tiles with an initial and the price",
+      use: "many items (8 or more) with short names",
+      avoid: "items with descriptions worth reading",
+    },
+    {
+      id: "feature",
+      label: "Featured first",
+      about: "the first item large, the rest listed beside it",
+      use: "one signature item (a package, the main court, a best seller) and a few others",
+      avoid: "more than 8 items",
+    },
+    {
+      id: "rows",
+      label: "Rows",
+      about: "full-width rows with details and a Book link each",
+      use: "rentals and bookable things where each needs its own button (cars, rooms, gear)",
+      avoid: "more than 10 items",
+    },
     {
       id: "gallery",
       label: "Gallery",
       about: "picture-first cards (a colored panel when there is no picture)",
+      use: "items with pictures: rooms, venues, cars, dishes",
+      avoid: "items without pictures",
     },
-    { id: "pricing", label: "Pricing cards", about: "centered cards with a big price and a button each" },
+    {
+      id: "pricing",
+      label: "Pricing cards",
+      about: "centered cards with a big price and a button each",
+      use: "2 to 4 plans, packages, classes or courts at clear prices",
+      avoid: "more than 4 items or items without prices",
+    },
   ],
   steps: [
-    { id: "cards", label: "Cards", about: "three cards in a row with numbered circles" },
-    { id: "timeline", label: "Timeline", about: "a vertical line with a dot per step" },
-    { id: "numbers", label: "Big numbers", about: "large outlined numbers beside each step" },
-    { id: "split", label: "Heading beside", about: "the heading and button left, the steps right" },
-    { id: "inline", label: "Connected", about: "steps in a row joined by arrows" },
-    { id: "panel", label: "Color panel", about: "one colored panel holding the steps as columns" },
+    {
+      id: "cards",
+      label: "Cards",
+      about: "three cards in a row with numbered circles",
+      use: "the safe default for 3 steps",
+      avoid: "more than 4 steps",
+    },
+    {
+      id: "timeline",
+      label: "Timeline",
+      about: "a vertical line with a dot per step",
+      use: "calm brands and longer step text",
+      avoid: "nothing in particular",
+    },
+    {
+      id: "numbers",
+      label: "Big numbers",
+      about: "large outlined numbers beside each step",
+      use: "cafés, workshops and bold brands",
+      avoid: "very short step text",
+    },
+    {
+      id: "split",
+      label: "Heading beside",
+      about: "the heading and button left, the steps right",
+      use: "booking businesses that want the button beside the steps",
+      avoid: "nothing in particular",
+    },
+    {
+      id: "inline",
+      label: "Connected",
+      about: "steps in a row joined by arrows",
+      use: "quick, energetic flows (book, pay, play)",
+      avoid: "long step text",
+    },
+    {
+      id: "panel",
+      label: "Color panel",
+      about: "one colored panel holding the steps as columns",
+      use: "breaking up a long page of white sections",
+      avoid: "the alternating section rhythm (it's already tinted)",
+    },
   ],
   payments: [
-    { id: "cards", label: "Cards", about: "tinted cards with instructions and account details" },
-    { id: "list", label: "List", about: "one row per method with its details" },
-    { id: "compact", label: "Compact", about: "small cards side by side, details in small type" },
-    { id: "table", label: "Table", about: "a table of methods and account details" },
-    { id: "split", label: "Heading beside", about: "a heading and note left, the methods right" },
+    {
+      id: "cards",
+      label: "Cards",
+      about: "tinted cards with instructions and account details",
+      use: "the safe default for 1 to 4 methods",
+      avoid: "nothing",
+    },
+    {
+      id: "list",
+      label: "List",
+      about: "one row per method with its details",
+      use: "calm, editorial sites",
+      avoid: "nothing in particular",
+    },
+    {
+      id: "compact",
+      label: "Compact",
+      about: "small cards side by side, details in small type",
+      use: "3 or more methods with short details",
+      avoid: "long instructions",
+    },
+    {
+      id: "table",
+      label: "Table",
+      about: "a table of methods and account details",
+      use: "clinics and formal businesses with account numbers",
+      avoid: "only 1 method",
+    },
+    {
+      id: "split",
+      label: "Heading beside",
+      about: "a heading and note left, the methods right",
+      use: "businesses taking deposits that want a reassuring note",
+      avoid: "nothing in particular",
+    },
   ],
   faq: [
-    { id: "accordion", label: "Accordion", about: "questions that open one at a time" },
-    { id: "columns", label: "Two columns", about: "the accordion in two columns" },
-    { id: "open", label: "All open", about: "every answer shown, in two columns" },
-    { id: "split", label: "Heading beside", about: "a heading left, the accordion right" },
-    { id: "cards", label: "Cards", about: "each question and answer in its own card" },
+    {
+      id: "accordion",
+      label: "Accordion",
+      about: "questions that open one at a time",
+      use: "the safe default",
+      avoid: "nothing",
+    },
+    {
+      id: "columns",
+      label: "Two columns",
+      about: "the accordion in two columns",
+      use: "6 or more questions",
+      avoid: "fewer than 4 questions",
+    },
+    {
+      id: "open",
+      label: "All open",
+      about: "every answer shown, in two columns",
+      use: "short answers people should read (deposits, cancellations)",
+      avoid: "long answers",
+    },
+    {
+      id: "split",
+      label: "Heading beside",
+      about: "a heading left, the accordion right",
+      use: "editorial and boutique sites",
+      avoid: "nothing in particular",
+    },
+    {
+      id: "cards",
+      label: "Cards",
+      about: "each question and answer in its own card",
+      use: "3 to 6 short questions",
+      avoid: "long answers",
+    },
   ],
   contact: [
-    { id: "cards", label: "Cards", about: "one small card per detail" },
-    { id: "band", label: "Dark band", about: "the details in one dark band" },
-    { id: "split", label: "Heading beside", about: "a heading and the button left, details right" },
-    { id: "inline", label: "One line", about: "the details in one row with dividers" },
-    { id: "centered", label: "Centered", about: "the details centered under the heading" },
+    {
+      id: "cards",
+      label: "Cards",
+      about: "one small card per detail",
+      use: "the safe default",
+      avoid: "only 1 detail",
+    },
+    {
+      id: "band",
+      label: "Dark band",
+      about: "the details in one dark band",
+      use: "bold brands and the end of long pages",
+      avoid: "the dark closing banner right after",
+    },
+    {
+      id: "split",
+      label: "Heading beside",
+      about: "a heading and the button left, details right",
+      use: "businesses customers visit (address and hours)",
+      avoid: "nothing in particular",
+    },
+    {
+      id: "inline",
+      label: "One line",
+      about: "the details in one row with dividers",
+      use: "2 to 4 short details",
+      avoid: "long addresses",
+    },
+    {
+      id: "centered",
+      label: "Centered",
+      about: "the details centered under the heading",
+      use: "calm, centered sites",
+      avoid: "nothing in particular",
+    },
   ],
   closing: [
-    { id: "dark", label: "Dark band", about: "a dark rounded band with the question and the button" },
-    { id: "accent", label: "Color band", about: "the same in the brand color" },
-    { id: "centered", label: "Centered", about: "a centered question and button, no background" },
-    { id: "split", label: "With facts", about: "a tinted panel with the facts beside the button" },
-    { id: "minimal", label: "Minimal", about: "one line of text with a link" },
+    {
+      id: "dark",
+      label: "Dark band",
+      about: "a dark rounded band with the question and the button",
+      use: "the safe default",
+      avoid: "the dark contact band right before",
+    },
+    {
+      id: "accent",
+      label: "Color band",
+      about: "the same in the brand color",
+      use: "bold, energetic brands",
+      avoid: "pale palettes",
+    },
+    {
+      id: "centered",
+      label: "Centered",
+      about: "a centered question and button, no background",
+      use: "calm brands and centered sites",
+      avoid: "nothing in particular",
+    },
+    {
+      id: "split",
+      label: "With facts",
+      about: "a tinted panel with the facts beside the button",
+      use: "booking businesses with strong facts (price, hours)",
+      avoid: "businesses with no facts",
+    },
+    {
+      id: "minimal",
+      label: "Minimal",
+      about: "one line of text with a link",
+      use: "short sites and calm brands",
+      avoid: "sites that need a strong last push to book",
+    },
   ],
   footer: [
-    { id: "simple", label: "Simple", about: "name left, a note right" },
-    { id: "centered", label: "Centered", about: "everything centered" },
-    { id: "columns", label: "Columns", about: "name, contact details and links in columns" },
-    { id: "dark", label: "Dark", about: "a dark footer with the button" },
-    { id: "minimal", label: "Minimal", about: "one small line" },
+    {
+      id: "simple",
+      label: "Simple",
+      about: "name left, a note right",
+      use: "the safe default",
+      avoid: "nothing",
+    },
+    {
+      id: "centered",
+      label: "Centered",
+      about: "everything centered",
+      use: "centered and boutique sites",
+      avoid: "nothing in particular",
+    },
+    {
+      id: "columns",
+      label: "Columns",
+      about: "name, contact details and links in columns",
+      use: "businesses with contact details and several sections",
+      avoid: "sites with no contact details",
+    },
+    {
+      id: "dark",
+      label: "Dark",
+      about: "a dark footer with the button",
+      use: "bold brands",
+      avoid: "a dark closing band right before it",
+    },
+    {
+      id: "minimal",
+      label: "Minimal",
+      about: "one small line",
+      use: "very short sites",
+      avoid: "nothing in particular",
+    },
   ],
   booking: [
-    { id: "split", label: "Summary right", about: "the steps left, a sticky summary right" },
-    { id: "summary-left", label: "Summary left", about: "the summary left, the steps right" },
-    { id: "centered", label: "Single column", about: "one narrow column, the summary under the steps" },
-    { id: "topbar", label: "Summary on top", about: "the summary as a bar above the steps" },
+    {
+      id: "split",
+      label: "Summary right",
+      about: "the steps left, a sticky summary right",
+      use: "the safe default",
+      avoid: "nothing",
+    },
+    {
+      id: "summary-left",
+      label: "Summary left",
+      about: "the summary left, the steps right",
+      use: "stays and rentals where the dates and total matter most",
+      avoid: "nothing in particular",
+    },
+    {
+      id: "centered",
+      label: "Single column",
+      about: "one narrow column, the summary under the steps",
+      use: "simple bookings with few steps; cafés",
+      avoid: "bookings with many add-ons",
+    },
+    {
+      id: "topbar",
+      label: "Summary on top",
+      about: "the summary as a bar above the steps",
+      use: "the court grid calendar, which needs the full width",
+      avoid: "nothing in particular",
+    },
     {
       id: "intro-side",
       label: "Intro beside",
       about: "the heading and summary in a column beside the steps",
+      use: "salons, clinics and boutique brands",
+      avoid: "the court grid calendar (too narrow)",
     },
-    { id: "card", label: "One card", about: "everything in one large card on a tinted page" },
+    {
+      id: "card",
+      label: "One card",
+      about: "everything in one large card on a tinted page",
+      use: "studios and calm brands",
+      avoid: "nothing in particular",
+    },
   ],
 };
 
-/** The style of each section a site uses, and its theme (a palette name; empty picks one from the business). */
-export type SiteDesign = Record<SectionKind, string> & { theme?: string };
+/**
+ * The look, broken into parts the AI (or the owner) picks one by one: colors, fonts, corners, spacing, buttons, cards,
+ * section headings and the rhythm of section backgrounds. Every combination works: each is a CSS variable or class.
+ */
+export type TokenOption = { id: string; label: string; use: string };
+export const LOOKS: Record<LookKind, TokenOption[]> = {
+  theme: [
+    { id: "court", label: "Court green", use: "sports, courts, outdoors, fresh" },
+    { id: "clay", label: "Clay", use: "cafés, bakeries, food, warm and crafted" },
+    { id: "tide", label: "Tide blue", use: "stays, travel, beach, clinics, trustworthy" },
+    { id: "plum", label: "Plum", use: "salons, nails, lashes, beauty, boutique" },
+    { id: "sage", label: "Sage", use: "spa, wellness, yoga, dental and medical, calm" },
+    { id: "ember", label: "Ember", use: "gyms, workshops, print, events, bold" },
+    { id: "sand", label: "Sand gold", use: "resorts, weddings, premium dining, luxury" },
+    { id: "rose", label: "Rose", use: "florists, kids, bridal, soft and friendly" },
+    { id: "lagoon", label: "Lagoon teal", use: "pools, dive, laundry, cleaning, fresh services" },
+    { id: "mono", label: "Mono", use: "studios, architects, minimalist and modern brands" },
+  ],
+  font: [
+    { id: "bricolage", label: "Bricolage Grotesque", use: "sporty, friendly, modern" },
+    { id: "fraunces", label: "Fraunces", use: "warm serif for food and crafted brands" },
+    { id: "manrope", label: "Manrope", use: "clean and trustworthy (stays, clinics, services)" },
+    { id: "dmserif", label: "DM Serif Display", use: "elegant serif for beauty and boutique" },
+    { id: "cormorant", label: "Cormorant Garamond", use: "refined, calm serif for wellness and luxury" },
+    { id: "archivo", label: "Archivo", use: "bold, compact grotesk for gyms and shops" },
+    {
+      id: "playfair",
+      label: "Playfair Display",
+      use: "classic high-contrast serif for premium dining and events",
+    },
+    {
+      id: "spacegrotesk",
+      label: "Space Grotesk",
+      use: "techy and geometric (repairs, printing, co-working)",
+    },
+    { id: "outfit", label: "Outfit", use: "soft geometric sans, friendly services and kids" },
+    { id: "instrument", label: "Instrument Serif", use: "editorial serif for studios and stays" },
+  ],
+  body: [
+    { id: "system", label: "System", use: "fastest; the safe default" },
+    { id: "inter", label: "Inter", use: "neutral and very readable" },
+    { id: "dmsans", label: "DM Sans", use: "friendly and soft, pairs with serif headings" },
+  ],
+  radius: [
+    { id: "sharp", label: "Sharp corners", use: "formal, architectural, mono and editorial looks" },
+    { id: "soft", label: "Soft corners", use: "the safe default" },
+    { id: "round", label: "Round corners", use: "friendly, playful, beauty and kids brands" },
+  ],
+  density: [
+    { id: "compact", label: "Compact", use: "sites with many sections or items" },
+    { id: "comfortable", label: "Comfortable", use: "the safe default" },
+    { id: "airy", label: "Airy", use: "premium, calm brands with few sections" },
+  ],
+  buttons: [
+    { id: "pill", label: "Pill", use: "the safe default; friendly" },
+    { id: "rounded", label: "Rounded", use: "modern services and clinics" },
+    {
+      id: "square",
+      label: "Square",
+      use: "editorial, mono and architectural looks (pair with sharp corners)",
+    },
+  ],
+  cards: [
+    { id: "bordered", label: "Bordered", use: "the safe default; clear on pale backgrounds" },
+    { id: "shadow", label: "Soft shadow", use: "premium and airy looks" },
+    { id: "flat", label: "Flat tint", use: "calm, minimal looks; avoid with the alternating rhythm" },
+  ],
+  headings: [
+    { id: "left", label: "Left", use: "the safe default; easiest to read" },
+    { id: "center", label: "Centered", use: "centered heroes and calm brands" },
+  ],
+  rhythm: [
+    { id: "plain", label: "Plain", use: "the safe default: one background with dividers" },
+    {
+      id: "alternate",
+      label: "Alternating bands",
+      use: "long sites; gives each section its own band of tint",
+    },
+  ],
+};
+export type LookKind =
+  | "theme"
+  | "font"
+  | "body"
+  | "radius"
+  | "density"
+  | "buttons"
+  | "cards"
+  | "headings"
+  | "rhythm";
+
+/** The sections between the hero and the closing banner, in the order they show; the AI may reorder or drop them. */
+export const BODY_SECTIONS = ["highlights", "offer", "steps", "payments", "faq", "contact"] as const;
+export type BodySection = (typeof BODY_SECTIONS)[number];
+
+/**
+ * A site's design: one style per section, the look (theme, fonts, corners, spacing, buttons, cards, headings,
+ * rhythm) and the order of the body sections (any left out are hidden). Missing parts take the defaults.
+ */
+export type SiteDesign = Record<SectionKind, string> &
+  Partial<Record<LookKind, string>> & { order?: BodySection[] };
 
 export const DEFAULT_DESIGN: SiteDesign = {
   nav: "bar",
@@ -157,15 +627,128 @@ export const DEFAULT_DESIGN: SiteDesign = {
   booking: "split",
 };
 
-/** A design with every section set to a style that exists (unknown or missing ones fall back to the default). */
+/** The look a design asks for, with the defaults filled in (theme and font stay empty: they follow the business). */
+export function looksOf(d: Partial<SiteDesign>) {
+  return {
+    body: d.body ?? "system",
+    radius: d.radius ?? "soft",
+    density: d.density ?? "comfortable",
+    buttons: d.buttons ?? "pill",
+    cards: d.cards ?? "bordered",
+    headings: d.headings ?? "left",
+    rhythm: d.rhythm ?? "plain",
+  };
+}
+
+/** A design with every part set to something that exists; unknown or missing parts fall back to the defaults. */
 export function cleanDesign(design: Partial<Record<string, unknown>> | undefined): SiteDesign {
-  const out = { ...DEFAULT_DESIGN };
+  const out: SiteDesign = { ...DEFAULT_DESIGN };
   for (const kind of Object.keys(SECTION_STYLES) as SectionKind[]) {
     const id = design?.[kind];
     if (typeof id === "string" && SECTION_STYLES[kind].some((s) => s.id === id)) out[kind] = id;
   }
-  if (typeof design?.theme === "string" && design.theme) out.theme = design.theme;
+  for (const kind of Object.keys(LOOKS) as LookKind[]) {
+    const id = design?.[kind];
+    if (typeof id === "string" && LOOKS[kind].some((s) => s.id === id)) out[kind] = id;
+  }
+  const order = design?.order;
+  if (Array.isArray(order)) {
+    const kept = order.filter(
+      (x, i): x is BodySection => BODY_SECTIONS.includes(x as BodySection) && order.indexOf(x) === i,
+    );
+    if (kept.length) out.order = kept;
+  }
   return out;
+}
+
+/** What the business's site has to show, which decides which styles fit it. */
+export type SiteFacts = {
+  /** Offers (courts, services, items) and how many have a picture, a description and prices. */
+  items: number;
+  pictures: number;
+  descriptions: number;
+  /** Price fields per offer (peak and off-peak is 2). */
+  prices: number;
+  payments: number;
+  faqs: number;
+  /** Contact details given (phone, email, address, hours). */
+  contact: number;
+  /** Hero facts (how many, hours, starting price, how to pay). */
+  facts: number;
+  highlights: number;
+  steps: number;
+  /** Words in the headline and characters in the business name. */
+  headline: number;
+  name: number;
+  /** The booking form's calendar, when it books times. */
+  calendar?: string;
+};
+
+/** The facts of a site from its resolved sections. */
+export function siteFacts(name: string, blocks: ResolvedBlock[], calendar?: string): SiteFacts {
+  const hero = blocks.find((b): b is Hero => b.type === "hero");
+  const records = (id: string) => blocks.find((b): b is Records => b.type === "records" && b.id === id);
+  const offer = records("offer")?.items.map(cardParts) ?? [];
+  const contact = blocks.find((b): b is Contact => b.type === "contact");
+  const list = (type: "highlights" | "steps") =>
+    blocks.find((b): b is Steps => b.type === type)?.items.length ?? 0;
+  return {
+    items: offer.length,
+    pictures: offer.filter((x) => x.image).length,
+    descriptions: offer.filter((x) => x.about).length,
+    prices: Math.max(0, ...offer.map((x) => x.rows.filter((r) => /₱|php/i.test(r.text)).length)),
+    payments: records("payments")?.items.length ?? 0,
+    faqs: blocks.find((b): b is Records => b.type === "records" && b.layout === "faq")?.items.length ?? 0,
+    contact: [contact?.phone, contact?.email, contact?.address, contact?.hours].filter(Boolean).length,
+    facts: hero?.facts?.length ?? 0,
+    highlights: list("highlights"),
+    steps: list("steps"),
+    headline: (hero?.heading ?? "").split(/\s+/).filter(Boolean).length,
+    name: name.length,
+    ...(calendar ? { calendar } : {}),
+  };
+}
+
+/**
+ * Corrects choices that don't fit the data (the AI is told the same, this makes sure): pricing cards with many
+ * items, a gallery without pictures, a price table without prices, two FAQ columns for two questions, the narrow
+ * booking column with the court grid, and so on. Offers and ways to pay are never dropped while there are some.
+ */
+export function fitDesign(design: SiteDesign, f: SiteFacts): SiteDesign {
+  const d = { ...design };
+  const swap = (kind: SectionKind, when: boolean, to: string) => {
+    if (when) d[kind] = to;
+  };
+  swap("offer", d.offer === "pricing" && (f.items > 4 || f.prices === 0), "cards");
+  swap("offer", (d.offer === "menu" || d.offer === "table") && f.prices === 0, "cards");
+  swap("offer", d.offer === "table" && f.items < 3, "cards");
+  swap("offer", d.offer === "gallery" && f.pictures < Math.ceil(f.items / 2), "cards");
+  swap("offer", d.offer === "feature" && f.items > 8, "cards");
+  swap("offer", d.offer === "tiles" && f.items < 6, "cards");
+  swap("offer", d.offer === "rows" && f.items > 10, "cards");
+  swap("offer", d.offer === "cards" && f.items === 1, "feature");
+  swap("hero", (d.hero === "menu" || d.hero === "split") && f.items === 0 && f.facts === 0, "centered");
+  swap("hero", d.hero === "menu" && f.prices === 0, "split");
+  swap("hero", d.hero === "stats" && f.facts < 3, f.items ? "split" : "centered");
+  swap("hero", d.hero === "editorial" && f.headline > 9, "split");
+  swap("hero", d.hero === "centered" && f.headline > 10, "split");
+  swap("nav", d.nav === "centered" && f.name > 28, "bar");
+  swap("highlights", d.highlights === "spotlight" && f.highlights < 3, "numbered");
+  swap("faq", d.faq === "columns" && f.faqs < 4, "accordion");
+  swap("payments", d.payments === "table" && f.payments < 2, "cards");
+  swap("contact", d.contact === "inline" && f.contact < 2, "cards");
+  swap("closing", d.closing === "split" && f.facts === 0, "dark");
+  swap("booking", d.booking === "intro-side" && f.calendar === "grid", "topbar");
+  swap("steps", d.steps === "panel" && d.rhythm === "alternate", "cards");
+  if (d.cards === "flat" && d.rhythm === "alternate") d.cards = "bordered";
+  if (d.order) {
+    const order = [...d.order];
+    if (f.items && !order.includes("offer")) order.splice(Math.min(1, order.length), 0, "offer");
+    if (f.payments && !order.includes("payments"))
+      order.splice(order.indexOf("offer") + 1 || order.length, 0, "payments");
+    d.order = order;
+  }
+  return d;
 }
 
 /**
@@ -397,6 +980,65 @@ export const REFERENCES: { id: string; kind: string; label: string; design: Site
     },
   },
 ];
+
+/** The look of each reference site, so each starts as a whole: fonts, corners, spacing and rhythm that suit it. */
+const REFERENCE_LOOKS: Record<string, Partial<SiteDesign>> = {
+  "venue-club": {
+    font: "bricolage",
+    radius: "soft",
+    buttons: "pill",
+    order: ["highlights", "offer", "steps", "payments", "faq", "contact"],
+  },
+  "venue-arena": {
+    font: "archivo",
+    radius: "sharp",
+    buttons: "rounded",
+    density: "compact",
+    rhythm: "alternate",
+    order: ["offer", "highlights", "steps", "payments", "faq", "contact"],
+  },
+  "salon-boutique": { font: "dmserif", body: "dmsans", radius: "round", headings: "center", density: "airy" },
+  "salon-studio": {
+    theme: "rose",
+    font: "outfit",
+    radius: "round",
+    cards: "shadow",
+    order: ["offer", "highlights", "steps", "payments", "faq", "contact"],
+  },
+  "stay-resort": { theme: "sand", font: "instrument", radius: "soft", cards: "shadow", density: "airy" },
+  "stay-rentals": { font: "manrope", radius: "soft", rhythm: "alternate" },
+  "cafe-menu": {
+    font: "fraunces",
+    radius: "soft",
+    cards: "flat",
+    order: ["offer", "highlights", "steps", "payments", "contact", "faq"],
+  },
+  "cafe-bistro": { font: "playfair", radius: "sharp", buttons: "square", headings: "center" },
+  "wellness-calm": {
+    font: "cormorant",
+    body: "dmsans",
+    radius: "round",
+    density: "airy",
+    cards: "flat",
+    headings: "center",
+  },
+  "wellness-clinic": { theme: "lagoon", font: "manrope", body: "inter", radius: "soft", buttons: "rounded" },
+  "shop-bold": {
+    font: "archivo",
+    radius: "sharp",
+    buttons: "square",
+    density: "compact",
+    rhythm: "alternate",
+  },
+  "shop-workshop": {
+    theme: "mono",
+    font: "spacegrotesk",
+    radius: "sharp",
+    buttons: "square",
+    cards: "bordered",
+  },
+};
+for (const r of REFERENCES) Object.assign(r.design, REFERENCE_LOOKS[r.id] ?? {});
 
 const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ESC[c]);
@@ -832,7 +1474,7 @@ export const STYLE_CSS: Record<SectionKind, Record<string, string>> = {
   .hero-centered h1, .hero-centered .lead { margin-left: auto; margin-right: auto; }
   .hero-centered .actions, .hero-centered .pills { justify-content: center; }`,
     banner: `.hero-banner { padding: 24px 0 48px; }
-  .hero-banner .band { background: var(--accent); color: #fff; border-radius: 32px; padding: clamp(36px, 7vw, 88px); }
+  .hero-banner .band { background: var(--accent); color: #fff; border-radius: var(--radius-lg); padding: clamp(36px, 7vw, 88px); }
   .hero-banner .lead { color: rgb(255 255 255 / .86); }
   .hero-banner .eyebrow { background: rgb(255 255 255 / .16); color: #fff; }
   .hero-banner .button.primary { background: #fff; color: var(--accent); box-shadow: none; }
@@ -927,7 +1569,7 @@ export const STYLE_CSS: Record<SectionKind, Record<string, string>> = {
     inline: `.st-inline .steps { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 40px; }
   .st-inline .steps li { flex-direction: column; position: relative; }
   .st-inline .steps li:not(:last-child)::after { content: "→"; position: absolute; right: -30px; top: 4px; color: var(--accent); font-size: 22px; }`,
-    panel: `.st-panel .panel-box { background: var(--tint); border-radius: 28px; padding: clamp(28px, 5vw, 56px); }
+    panel: `.st-panel .panel-box { background: var(--tint); border-radius: var(--radius-lg); padding: clamp(28px, 5vw, 56px); }
   .st-panel .steps li { flex-direction: column; }
   .st-panel .num { background: var(--card); color: var(--accent); }`,
   },
@@ -955,7 +1597,7 @@ export const STYLE_CSS: Record<SectionKind, Record<string, string>> = {
   contact: {
     cards: `.ct-cards .contact div { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }`,
     band: `.ct-band { border-top: 0; }
-  .ct-band .band { background: var(--ink); color: var(--bg); border-radius: 28px; padding: clamp(28px, 5vw, 48px); }
+  .ct-band .band { background: var(--ink); color: var(--bg); border-radius: var(--radius-lg); padding: clamp(28px, 5vw, 48px); }
   .ct-band h2 { margin: 0 0 24px; } .ct-band dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; margin: 0; }
   .ct-band dt { color: color-mix(in oklab, var(--bg) 65%, transparent); }`,
     split: `.ct-split dl { display: grid; gap: 0; margin: 0; } .ct-split dl div { padding: 16px 0; border-bottom: 1px solid var(--line); }
@@ -966,16 +1608,16 @@ export const STYLE_CSS: Record<SectionKind, Record<string, string>> = {
   .ct-centered dl { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px 48px; margin: 0; }`,
   },
   closing: {
-    dark: `.close-dark, .close-accent { margin: 0 0 72px; padding: 48px; border-radius: 28px; background: var(--ink); color: var(--bg); display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; }
+    dark: `.close-dark, .close-accent { margin: 0 0 72px; padding: 48px; border-radius: var(--radius-lg); background: var(--ink); color: var(--bg); display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; }
   .close-dark h2, .close-accent h2 { margin: 0; font-size: clamp(26px, 3.4vw, 38px); letter-spacing: -0.02em; line-height: 1.1; max-width: 18ch; }`,
-    accent: `.close-dark, .close-accent { margin: 0 0 72px; padding: 48px; border-radius: 28px; color: #fff; display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; }
+    accent: `.close-dark, .close-accent { margin: 0 0 72px; padding: 48px; border-radius: var(--radius-lg); color: #fff; display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; }
   .close-accent { background: var(--accent); }
   .close-accent h2 { margin: 0; font-size: clamp(26px, 3.4vw, 38px); letter-spacing: -0.02em; line-height: 1.1; max-width: 18ch; }
   .close-accent .button.primary { background: #fff; color: var(--accent); box-shadow: none; }`,
     centered: `.close-centered { text-align: center; padding: 80px 0; border-top: 1px solid var(--line); }
   .close-centered h2 { margin: 0 auto 10px; font-size: clamp(30px, 4.4vw, 48px); letter-spacing: -0.02em; max-width: 18ch; }
   .close-centered p { color: var(--soft); margin: 0 0 24px; }`,
-    split: `.close-split { margin: 0 0 72px; padding: 40px; border-radius: 28px; background: var(--tint); display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; }
+    split: `.close-split { margin: 0 0 72px; padding: 40px; border-radius: var(--radius-lg); background: var(--tint); display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; }
   .close-split h2 { margin: 0 0 12px; font-size: clamp(26px, 3.4vw, 36px); letter-spacing: -0.02em; }
   .close-split ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--soft); font-size: 14.5px; }
   .close-split li { display: flex; gap: 8px; align-items: center; } .close-split svg { color: var(--accent); }`,

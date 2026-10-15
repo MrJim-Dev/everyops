@@ -251,7 +251,7 @@ export type HtmlPageView = ViewBase & {
      * The style of each section and the theme (src/lib/public/site-sections.ts), e.g. { hero: "menu", offer: "table",
      * theme: "plum" }. Missing or unknown ones fall back to the default style.
      */
-    design?: Record<string, string>;
+    design?: Record<string, string | string[]>;
   };
 };
 

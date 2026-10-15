@@ -3,7 +3,17 @@ import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { customBookingHtml } from "./booking-page";
 import { customSiteHtml, liveSiteHtml, withCustomSite } from "./custom-site";
 import type { ResolvedBlock } from "./resolve";
-import { cleanDesign, DEFAULT_DESIGN, REFERENCES, SECTION_STYLES, type SectionKind } from "./site-sections";
+import {
+  cleanDesign,
+  DEFAULT_DESIGN,
+  fitDesign,
+  LOOKS,
+  type LookKind,
+  REFERENCES,
+  SECTION_STYLES,
+  type SectionKind,
+  siteFacts,
+} from "./site-sections";
 import { standardLanding } from "./site-template";
 
 const cell = (name: string, text: string, kind = "text") => ({ id: name, name, text, kind }) as never;
@@ -162,14 +172,82 @@ describe("the website section library", () => {
     form.public = true;
     blueprint.views.push(standardLanding(blueprint, "Court House", {}, "home"));
     blueprint.systems[0].viewIds.push("home");
-    withCustomSite(blueprint, records, "Court House", new Date(), { offer: "menu", hero: "stats" });
+    withCustomSite(blueprint, records, "Court House", new Date(), { offer: "rows", hero: "stats" });
     const view = blueprint.views.find((v) => v.id === "home");
     if (view?.type !== "html") throw new Error("no site");
-    expect(view.live?.design).toMatchObject({ offer: "menu", hero: "stats" });
+    expect(view.live?.design).toMatchObject({ offer: "rows", hero: "stats" });
     const html = liveSiteHtml(blueprint, records, {}, view, view.html ?? "");
-    expect(html).toContain("of-menu");
+    expect(html).toContain("of-rows");
     expect(html).toContain("Court 1");
     const booking = blueprint.views.find((v) => v.id === form.page);
     expect(booking?.type === "html" && booking.html).toContain(`layout-${view.live?.design?.booking}`);
+  });
+});
+
+describe("the look and the section order", () => {
+  it("gives every style and every look option guidance for the AI", () => {
+    for (const styles of Object.values(SECTION_STYLES))
+      for (const s of styles) expect(s.use, s.id).toBeTruthy();
+    for (const options of Object.values(LOOKS)) for (const o of options) expect(o.use, o.id).toBeTruthy();
+  });
+
+  it("draws every look option, and every one follows the motion rules", () => {
+    for (const [kind, options] of Object.entries(LOOKS) as [LookKind, { id: string }[]][]) {
+      for (const { id } of options) {
+        const html = customSiteHtml("Court House", blocks, "courts", { ...DEFAULT_DESIGN, [kind]: id });
+        const rules = css(html);
+        if (kind === "theme") expect(html).toMatch(/--accent: #/);
+        else if (kind === "font") expect(html).toContain("fonts.googleapis.com");
+        else if (kind !== "body")
+          expect(html).toContain(
+            `${{ radius: "r", density: "d", buttons: "b", cards: "c", headings: "h", rhythm: "y" }[kind]}-${id}`,
+          );
+        expect(rules).not.toMatch(/transition:\s*all/);
+        expect(rules).not.toMatch(/\bease-in\b(?!-out)/);
+        expect(rules).toContain("prefers-reduced-motion");
+      }
+    }
+  });
+
+  it("shows the body sections in the design's order and leaves out the ones it drops", () => {
+    const html = customSiteHtml("Court House", blocks, "", {
+      ...DEFAULT_DESIGN,
+      order: ["faq", "offer", "steps"],
+    });
+    const at = (id: string) => html.indexOf(`id="${id}"`);
+    expect(at("faq")).toBeGreaterThan(0);
+    expect(at("faq")).toBeLessThan(at("offer"));
+    expect(at("offer")).toBeLessThan(at("how"));
+    expect(at("payments")).toBe(-1);
+    expect(at("contact")).toBe(-1);
+  });
+
+  it("keeps only looks and sections that exist", () => {
+    expect(
+      cleanDesign({ radius: "wobbly", density: "airy", order: ["faq", "nope", "faq", "offer"] }),
+    ).toMatchObject({
+      density: "airy",
+      order: ["faq", "offer"],
+    });
+    expect(cleanDesign({ radius: "wobbly" })).not.toHaveProperty("radius");
+  });
+
+  it("corrects choices that don't fit the data, and never drops offers or ways to pay that exist", () => {
+    const facts = siteFacts("Court House", blocks, "grid");
+    expect(facts).toMatchObject({ items: 3, pictures: 0, prices: 1, payments: 1, faqs: 1, facts: 4 });
+    const fitted = fitDesign(
+      {
+        ...DEFAULT_DESIGN,
+        offer: "gallery",
+        faq: "columns",
+        booking: "intro-side",
+        order: ["highlights", "faq"],
+      },
+      facts,
+    );
+    expect(fitted).toMatchObject({ offer: "cards", faq: "accordion", booking: "topbar" });
+    expect(fitted.order).toEqual(expect.arrayContaining(["offer", "payments", "faq"]));
+    expect(fitDesign({ ...DEFAULT_DESIGN, offer: "pricing" }, facts).offer).toBe("pricing");
+    expect(fitDesign({ ...DEFAULT_DESIGN, offer: "pricing" }, { ...facts, items: 9 }).offer).toBe("cards");
   });
 });

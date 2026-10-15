@@ -21,11 +21,15 @@ import type {
 import { customBookingHtml } from "./booking-page";
 import { type PageDocs, type ResolvedBlock, resolveBlocks } from "./resolve";
 import {
+  BODY_SECTIONS,
+  type BodySection,
   cleanDesign,
   designCss,
   esc,
+  fitDesign,
   heroGlance,
   heroNote,
+  looksOf,
   REFERENCES,
   renderClosing,
   renderContact,
@@ -39,6 +43,7 @@ import {
   renderSteps,
   type SiteDesign,
   type SiteParts,
+  siteFacts,
 } from "./site-sections";
 import { bookLabel, defaultCopy, mainForm, offeringOf, standardBlocks } from "./site-template";
 
@@ -122,6 +127,50 @@ const PALETTES = [
     font: "Archivo",
     weight: "800",
   },
+  {
+    name: "sand",
+    bg: "#faf6ef",
+    ink: "#241d14",
+    soft: "#76695a",
+    accent: "#a87a2a",
+    tint: "#f1e6d1",
+    card: "#fffdf9",
+    font: "Instrument Serif",
+    weight: "400",
+  },
+  {
+    name: "rose",
+    bg: "#fdf6f6",
+    ink: "#2a1619",
+    soft: "#7b5d62",
+    accent: "#c2456a",
+    tint: "#f8e1e7",
+    card: "#ffffff",
+    font: "Outfit",
+    weight: "700",
+  },
+  {
+    name: "lagoon",
+    bg: "#f2f8f8",
+    ink: "#0f2426",
+    soft: "#4f6a6c",
+    accent: "#0e8784",
+    tint: "#d9efee",
+    card: "#ffffff",
+    font: "Manrope",
+    weight: "800",
+  },
+  {
+    name: "mono",
+    bg: "#f7f7f5",
+    ink: "#111111",
+    soft: "#5f5f5c",
+    accent: "#111111",
+    tint: "#ebebe7",
+    card: "#ffffff",
+    font: "Space Grotesk",
+    weight: "700",
+  },
 ] as const;
 export type SitePalette = (typeof PALETTES)[number];
 
@@ -156,10 +205,42 @@ export function paletteFor(name: string, about = ""): SitePalette {
   return PALETTES[h % PALETTES.length];
 }
 
-/** The <link> that loads a palette's heading font. */
-export function fontLink(p: SitePalette): string {
-  const family = p.font.replace(/ /g, "+");
-  return `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${family}:wght@${p.weight}&display=swap">`;
+/** Heading fonts by id (site-sections LOOKS.font), with the weight that suits each. */
+const FONTS: Record<string, { family: string; weight: string }> = {
+  bricolage: { family: "Bricolage Grotesque", weight: "700" },
+  fraunces: { family: "Fraunces", weight: "600" },
+  manrope: { family: "Manrope", weight: "800" },
+  dmserif: { family: "DM Serif Display", weight: "400" },
+  cormorant: { family: "Cormorant Garamond", weight: "700" },
+  archivo: { family: "Archivo", weight: "800" },
+  playfair: { family: "Playfair Display", weight: "700" },
+  spacegrotesk: { family: "Space Grotesk", weight: "700" },
+  outfit: { family: "Outfit", weight: "700" },
+  instrument: { family: "Instrument Serif", weight: "400" },
+};
+/** Body fonts by id; "system" loads nothing. */
+const BODY_FONTS: Record<string, { family: string; css: string } | undefined> = {
+  system: undefined,
+  inter: { family: "Inter:wght@400;600", css: '"Inter", ui-sans-serif, system-ui, sans-serif' },
+  dmsans: { family: "DM Sans:wght@400;600", css: '"DM Sans", ui-sans-serif, system-ui, sans-serif' },
+};
+
+/** The palette with the heading font a design picks (else the palette's own). */
+export function withFont(p: SitePalette, font?: string): SitePalette {
+  const f = font ? FONTS[font] : undefined;
+  return f ? ({ ...p, font: f.family, weight: f.weight } as SitePalette) : p;
+}
+
+/** The <link> that loads a palette's heading font, and the body font when it isn't the system one. */
+export function fontLink(p: SitePalette, body?: string): string {
+  const families = [
+    `${p.font.replace(/ /g, "+")}:wght@${p.weight}`,
+    BODY_FONTS[body ?? ""]?.family.replace(/ /g, "+"),
+  ]
+    .filter(Boolean)
+    .map((f) => `family=${f}`)
+    .join("&");
+  return `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?${families}&display=swap">`;
 }
 
 type Records = Extract<ResolvedBlock, { type: "records" }>;
@@ -254,36 +335,50 @@ export function customSiteHtml(
   design?: Partial<SiteDesign>,
 ): string {
   const d = cleanDesign(design);
-  const p = themeFor(name, about, d.theme);
+  const p = withFont(themeFor(name, about, d.theme), d.font);
+  const look = looksOf(d);
   const parts = partsOf(name, blocks);
   const fresh = liveParts(name, blocks, d);
-  const body: string[] = [];
+  // Each body section by its place in the order (highlights, offer, steps, payments, faq, contact).
+  const byKey: Partial<Record<BodySection, string>> = {};
   for (const b of blocks) {
-    if (b.type === "highlights") body.push(renderHighlights(d.highlights, b, parts));
-    if (b.type === "steps") body.push(renderSteps(d.steps, b, parts));
-    if (b.type === "records" && (b.layout === "cards" || b.layout === "faq"))
-      body.push(live(b.id, fresh[b.id] ?? ""));
-    if (b.type === "contact") body.push(live("contact", fresh.contact ?? ""));
+    if (b.type === "highlights") byKey.highlights = renderHighlights(d.highlights, b, parts);
+    if (b.type === "steps") byKey.steps = renderSteps(d.steps, b, parts);
+    if (b.type === "records" && b.layout === "faq") byKey.faq = live(b.id, fresh[b.id] ?? "");
+    if (b.type === "records" && b.layout === "cards" && (b.id === "offer" || b.id === "payments"))
+      byKey[b.id] = live(b.id, fresh[b.id] ?? "");
+    if (b.type === "contact") byKey.contact = live("contact", fresh.contact ?? "");
   }
+  const body = (d.order ?? BODY_SECTIONS).map((k) => byKey[k] ?? "");
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(name)}</title>
-${fontLink(p)}
+${fontLink(p, look.body)}
 <style>
   :root {
     --bg: ${p.bg}; --ink: ${p.ink}; --soft: ${p.soft}; --accent: ${p.accent}; --tint: ${p.tint}; --card: ${p.card};
     --display: "${p.font}", ui-serif, Georgia, serif; --display-weight: ${p.weight};
+    --body: ${BODY_FONTS[look.body]?.css ?? 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'};
     --line: color-mix(in oklab, var(--ink) 11%, transparent);
     /* Strong ease-out for anything entering or answering a press; ease-in is never used. */
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-    --radius: 18px;
+    --radius: 18px; --radius-lg: 28px; --pad: 80px; --btn: 999px;
   }
+  /* The look: corners, spacing, buttons, cards, section headings and the rhythm of section backgrounds. */
+  .r-sharp { --radius: 6px; --radius-lg: 10px; } .r-round { --radius: 26px; --radius-lg: 36px; }
+  .d-compact { --pad: 56px; } .d-airy { --pad: 112px; }
+  .b-rounded { --btn: 12px; } .b-square { --btn: 4px; }
+  .c-shadow .card, .c-shadow details, .c-shadow .glance, .c-shadow .tile { border-color: transparent; box-shadow: 0 18px 40px -28px rgb(0 0 0 / .35); }
+  .c-flat .card, .c-flat details, .c-flat .tile { background: var(--tint); border-color: transparent; box-shadow: none; }
+  .h-center .section > h2 { text-align: center; margin-left: auto; margin-right: auto; }
+  .y-alternate .section:nth-of-type(even) { background: var(--tint); box-shadow: 0 0 0 100vmax var(--tint); clip-path: inset(0 -100vmax); border-top-color: transparent; }
+  .y-alternate .section.pay:nth-of-type(even) .card { background: var(--card); }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--body); -webkit-font-smoothing: antialiased; }
   a { color: inherit; }
   h1, h2, h3, nav strong { font-family: var(--display); font-weight: var(--display-weight); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
@@ -293,7 +388,7 @@ ${fontLink(p)}
   nav strong { font-size: 18px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   nav .links { display: flex; gap: 22px; align-items: center; font-size: 14px; }
   nav .links a:not(.button) { text-decoration: none; color: var(--soft); transition: color 150ms ease; }
-  .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 0 22px; border-radius: 999px; font-weight: 600; font-size: 15px; text-decoration: none; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 0 22px; border-radius: var(--btn); font-weight: 600; font-size: 15px; text-decoration: none; border: 1px solid var(--line); background: var(--card); color: var(--ink);
     /* Presses answer at once: 160 ms, transform only. */
     transition: transform 160ms var(--ease-out), background-color 150ms ease, box-shadow 150ms ease; }
   .button:active { transform: scale(0.97); }
@@ -308,7 +403,7 @@ ${fontLink(p)}
   .lead { font-size: clamp(17px, 2vw, 20px); color: var(--soft); max-width: 50ch; margin: 0 0 32px; text-wrap: pretty; }
   .actions { display: flex; flex-wrap: wrap; gap: 12px; }
   .label { margin: 0 0 6px; font-size: 12.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--soft); }
-  .glance { background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 24px; box-shadow: 0 30px 60px -40px rgb(0 0 0 / .35); display: grid; gap: 18px; }
+  .glance { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 24px; box-shadow: 0 30px 60px -40px rgb(0 0 0 / .35); display: grid; gap: 18px; }
   .picks, .leaders { list-style: none; margin: 0; padding: 0; }
   .picks li { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
   .leaders li { display: flex; align-items: baseline; gap: 10px; padding: 12px 0; font-size: 17px; }
@@ -328,7 +423,7 @@ ${fontLink(p)}
   .rise:nth-child(2) { animation-delay: 60ms; } .rise:nth-child(3) { animation-delay: 120ms; } .rise:nth-child(4) { animation-delay: 180ms; }
   .glance.rise { animation-delay: 160ms; }
   @keyframes rise { to { opacity: 1; transform: none; } }
-  .section { padding: 80px 0; border-top: 1px solid var(--line); }
+  .section { padding: var(--pad) 0; border-top: 1px solid var(--line); }
   .section h2 { font-size: clamp(28px, 3.6vw, 40px); line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 36px; max-width: 22ch; }
   .grid { display: grid; gap: 16px; }
   .grid.three { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 28px; }
@@ -394,7 +489,7 @@ ${fontLink(p)}
   }
 </style>
 </head>
-<body>
+<body class="r-${look.radius} d-${look.density} b-${look.buttons} c-${look.cards} h-${look.headings} y-${look.rhythm}">
 ${renderNav(d.nav, parts)}
 <main id="top">
 ${renderHero(d.hero, parts, live("glance", fresh.glance ?? ""), live("note", fresh.note ?? ""))}
@@ -560,7 +655,7 @@ export function withCustomSite(
   /** The styles chosen for this business (by the AI); the rest come from its reference site. */
   chosen?: Partial<SiteDesign>,
 ): Blueprint {
-  const design = cleanDesign({ ...referenceDesign(name, aboutOf(bp)), ...chosen });
+  const picked = cleanDesign({ ...referenceDesign(name, aboutOf(bp)), ...chosen });
   for (const v of bp.views)
     if (v.type === "form" && v.public && !v.bookingLayout) {
       const layout = defaultBookingLayout(bp, records, v);
@@ -570,17 +665,21 @@ export function withCustomSite(
   const landing = bp.views[at];
   const form = mainForm(bp);
   if (!form) return bp;
+  const blocks = landing?.type === "landing" ? resolveBlocks(bp, records, {}, SITE_TOKEN, landing, now) : [];
+  // The styles that fit what the site has to show (pricing cards for a few items, a gallery only with pictures).
+  const design = fitDesign(picked, siteFacts(name, blocks, form.bookingLayout));
   if (bp.entities.find((e) => e.id === form.entityId)?.booking)
     addBookingPage(bp, form, name, design, landing?.id);
   if (!landing || landing.type !== "landing") return bp;
-  const blocks = resolveBlocks(bp, records, {}, SITE_TOKEN, landing, now);
+  // Drawn again now that the booking page exists, so the buttons open it.
+  const shown = resolveBlocks(bp, records, {}, SITE_TOKEN, landing, now);
   const page: HtmlPageView = {
     id: landing.id,
     entityId: "",
     name: landing.name,
     type: "html",
     public: true,
-    html: customSiteHtml(name, blocks, aboutOf(bp), design),
+    html: customSiteHtml(name, shown, aboutOf(bp), design),
     // The sections behind the page's live parts and their styles: every time it's shown they're drawn again from
     // the current data.
     live: { blocks: landing.blocks ?? [], design: { ...design } },
@@ -603,7 +702,7 @@ export function bookingPageHtml(
     homeHref: `/s/${SITE_TOKEN}`,
     heading: bookLabel(bp, form.id),
     intro: form.intro ?? defaultCopy(bp, name).intro,
-    palette: themeFor(name, aboutOf(bp), d.theme),
+    palette: withFont(themeFor(name, aboutOf(bp), d.theme), d.font),
     layout: d.booking,
   });
 }

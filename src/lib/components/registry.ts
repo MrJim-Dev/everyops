@@ -708,7 +708,50 @@ export function catalogText(): string {
   return GROUPS.map(
     (g) =>
       `${g.label}:\n${COMPONENTS.filter((c) => c.group === g.id)
-        .map((c) => `  - ${c.id}: ${c.description}. Settings: ${c.settings}`)
+        .map(
+          (c) =>
+            `  - ${c.id}: ${c.description}.${COMPONENT_USE[c.id] ? ` Use for ${COMPONENT_USE[c.id]}.` : ""} Settings: ${c.settings}`,
+        )
         .join("\n")}`,
   ).join("\n");
 }
+
+/**
+ * When each component is the right pick, for the AI arranging a page: the job it does best and what to avoid. Every
+ * component needs an entry (registry.test.ts checks).
+ */
+export const COMPONENT_USE: Record<string, string> = {
+  heading: "a section title or a short intro line above a group of parts; avoid more than one per section",
+  text: "a sentence or two of guidance (how to use the page, today's focus); avoid long paragraphs",
+  card: "one highlighted note, link or instruction that should stand out; avoid for numbers (use stat)",
+  alert: "something that needs action now (overdue bills, low stock, unpaid bookings); avoid for normal info",
+  separator: "splitting a long page into clear parts; avoid between every part",
+  button: "a quick action to another page or form (new booking, add expense); 1 to 3 per page",
+  accordion: "reference info people open when needed (policies, how-tos); avoid for data",
+  tabs: "two to four alternative views of the same thing (today, this week, this month); avoid for unrelated parts",
+  stat: "one key number on its own (cash on hand, open tickets); pair 2 to 4 in a row",
+  progress: "a number against a target (monthly sales goal, budget used, occupancy)",
+  table: "a short list of records with a few columns (latest 5 bookings); avoid more than 10 rows",
+  list: "a compact list of record names with one detail each (due today, top customers)",
+  avatars: "who is on duty or assigned (staff, coaches); only for people lists",
+  badges: "counts by status or category at a glance (bookings by status)",
+  calendar: "what's coming on dates (bookings, bills due, posts); needs a date field",
+  carousel: "pictures (rooms, products, menu items); needs an image field with pictures",
+  chart_area:
+    "a total that builds up over time (revenue, sign-ups); split by an option for one area each, at most 4",
+  chart_bar: "comparing totals by category or by period (sales by branch, bookings per weekday)",
+  chart_line:
+    "a trend over time where the shape matters (daily bookings, average ticket); several lines when split",
+  chart_pie: "a share of a whole with 2 to 6 parts (sales by category, payment methods)",
+  chart_radar: "comparing 4 to 8 categories on one measure; use rarely",
+  chart_radial: "one or two percentages (occupancy, collection rate)",
+  stat_cards: "the top row of an Overview: 2 to 4 key numbers with change against the last period",
+  chart_interactive:
+    "the main trend of an Overview (revenue, bookings over time) with a 7, 30, 90 day switch; one per page",
+  data_table: "a full searchable list people work through (all orders, all bookings); wide, near the bottom",
+  leaderboard: "ranking (top products, best customers, busiest courts) by a total",
+  status_overview: "how many records are in each stage of a workflow (pipeline, order status)",
+  form: "adding a record right from the page (quick expense, walk-in booking)",
+  view: "embedding an existing screen of the workspace (the schedule, the kanban) when it is the page's main work",
+  widget: "reusing a dashboard card the workspace already has",
+};
