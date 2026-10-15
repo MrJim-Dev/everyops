@@ -41,6 +41,8 @@ type Reply =
       plan?: ChangePlan;
       navigate?: Navigation;
       sources?: Navigation[];
+      /** Notes this message added to the workspace's memory. */
+      remembered?: string[];
     }
   | { ok: false; message: string };
 
@@ -244,6 +246,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
           ...(body.plan ? { plan: body.plan, planState: "pending" as const } : {}),
           ...(body.navigate ? { navigate: body.navigate } : {}),
           ...(body.sources?.length ? { sources: body.sources } : {}),
+          ...(body.remembered?.length ? { remembered: body.remembered } : {}),
         });
         if (body.navigate?.open) go(body.navigate);
       } else
