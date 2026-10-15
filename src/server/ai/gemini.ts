@@ -428,10 +428,16 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
     }
     console.error(JSON.stringify({ event: "gemini_error", task: input.task, model: MODEL, message }));
     const timedOut = /abort|timeout/i.test(message);
+    // A dropped connection ("terminated" is undici's word for a response cut off mid-stream), a reset socket or a
+    // busy Vertex answers fine on the next try. A bad request (400) does not, so it stays final.
+    const transient =
+      /terminated|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|socket|fetch failed|other side closed|\b(429|500|502|503|504)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|INTERNAL/i.test(
+        message,
+      );
     return {
       ok: false,
       error: timedOut ? "Gemini took too long to answer." : "Gemini is unavailable right now.",
-      retryable: timedOut,
+      retryable: timedOut || transient,
     };
   } finally {
     clearTimeout(idleTimer);
