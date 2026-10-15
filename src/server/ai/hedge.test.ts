@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { hedged } from "./gemini";
+import { fitToolOutput, hedged, quotaPause } from "./gemini";
 
-type R = { ok: true; who: number } | { ok: false; retryable: boolean; who: number };
+type R = { ok: true; who: number } | { ok: false; retryable: boolean; rateLimited?: boolean; who: number };
 
 afterEach(() => vi.useRealTimers());
 
@@ -84,5 +84,70 @@ describe("hedged Gemini calls", () => {
     expect(await result).toEqual({ ok: true, who: 2 });
     // The last part came at 30 s, so the twin started at 75 s.
     expect(started.map((t) => t - t0)).toEqual([0, 75_000]);
+  });
+
+  it("waits before asking again after an out-of-quota answer, and starts no twin meanwhile", async () => {
+    vi.useFakeTimers();
+    const started: number[] = [];
+    let n = 0;
+    const run = () => {
+      const who = ++n;
+      started.push(Date.now());
+      return Promise.resolve(
+        (who === 1 ? { ok: false, retryable: true, rateLimited: true, who } : { ok: true, who }) as R,
+      );
+    };
+    const t0 = Date.now();
+    const result = hedged(run, { hedgeMs: 1_000, attempts: 3 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    // A plain retryable failure would have been asked again at once; out of quota, nothing yet.
+    expect(n).toBe(1);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(await result).toEqual({ ok: true, who: 2 });
+    expect(started[1] - t0).toBeGreaterThanOrEqual(1_500);
+  });
+
+  it("gives up with the quota error once the attempts are used", async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    const run = async () => ({ ok: false, retryable: true, rateLimited: true, who: ++n }) as R;
+    const result = hedged(run, { hedgeMs: 1_000, attempts: 2 });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(await result).toMatchObject({ ok: false, rateLimited: true, who: 2 });
+  });
+});
+
+describe("quotaPause", () => {
+  it("doubles from about 2 s and stops growing at about 8 s", () => {
+    expect(quotaPause(0, () => 0.5)).toBe(2_000);
+    expect(quotaPause(1, () => 0.5)).toBe(4_000);
+    expect(quotaPause(5, () => 0.5)).toBe(8_000);
+    expect(quotaPause(0, () => 0)).toBe(1_500);
+  });
+});
+
+describe("fitToolOutput", () => {
+  const rows = Array.from({ length: 200 }, (_, i) => ({
+    id: `r${i}`,
+    name: `Booking ${i}`,
+    note: "x".repeat(80),
+  }));
+  it("leaves a small result as it is", () => {
+    expect(fitToolOutput({ total: 2, records: rows.slice(0, 2) }, 12_000)).toBe(
+      JSON.stringify({ total: 2, records: rows.slice(0, 2) }),
+    );
+  });
+  it("drops rows from the longest list so the result stays valid JSON, and says how many fit", () => {
+    const text = fitToolOutput({ total: 200, shown: 200, records: rows }, 12_000);
+    expect(text.length).toBeLessThanOrEqual(12_000);
+    const parsed = JSON.parse(text);
+    expect(parsed.result.total).toBe(200);
+    expect(parsed.result.records.length).toBeGreaterThan(1);
+    expect(parsed.result.records.length).toBeLessThan(200);
+    expect(parsed.cut).toContain(`first ${parsed.result.records.length} of 200`);
+  });
+  it("still returns valid JSON when nothing can be dropped", () => {
+    const parsed = JSON.parse(fitToolOutput({ text: "y".repeat(20_000) }, 12_000));
+    expect(parsed.cut).toContain("too large");
   });
 });

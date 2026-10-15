@@ -5,7 +5,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { applyOps, type ChangeOp, type ChangePlan } from "@/lib/engine/changes";
 import { type OptionUsage, strandedOptions } from "@/lib/engine/options";
 import { attachmentParts } from "./attachments";
-import { generateJson } from "./gemini";
+import { generateJsonHedged } from "./gemini";
 import { type Answer, answer, SYSTEM } from "./plan-change-prompt";
 
 export type PlanChangeResult =
@@ -137,7 +137,12 @@ export async function planChangeWithGemini(
   let repaired = false;
   // Up to three calls: transient failures (timeouts, malformed JSON) are retried, invalid plans get one repair.
   for (let attempt = 0; attempt < 3; attempt++) {
-    const result = await generateJson(answer, { system: SYSTEM, prompt, task: "plan-change" });
+    // Plans take 5–10 s. A call that has sent nothing for 12 s has stalled and gets a twin, as every other call does.
+    const result = await generateJsonHedged(
+      answer,
+      { system: SYSTEM, prompt, task: "plan-change", timeoutMs: 45_000 },
+      { hedgeMs: 12_000, afterSilence: true, attempts: 2 },
+    );
     if (!result.ok) {
       if (result.retryable && attempt < 2) continue;
       return { ok: false, kind: "error", message: result.error };

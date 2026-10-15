@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { courtBookingsBlueprint } from "@/lib/catalog/court-bookings";
 import type { ChangePlan } from "@/lib/engine/changes";
-import { changedReferences, checkedCoverage, coverageEvidence } from "./coverage-prompt";
+import {
+  changedReferences,
+  checkedCoverage,
+  coverageAnswer,
+  coverageEvidence,
+  trimCoverage,
+} from "./coverage-prompt";
 
 const plan: ChangePlan = {
   request: "Add notes and rename Players",
@@ -36,6 +42,20 @@ describe("request coverage gate", () => {
     );
     expect(checked.covered).toHaveLength(1);
     expect(checked.errors).toEqual(["Rename Players: Rename the Players page to Members."]);
+    expect(checked.missing).toEqual(["Rename Players"]);
+  });
+  it("cuts an over-long requirement to size instead of failing the review", () => {
+    // Production: a 240+ character request failed the schema and the person saw "I couldn't finish checking this plan".
+    const answer = {
+      preserve: [],
+      requirements: [
+        { request: "x".repeat(300), status: "covered", evidence: ["ops:0"], detail: "y".repeat(700) },
+      ],
+    };
+    expect(coverageAnswer.safeParse(answer).success).toBe(false);
+    const trimmed = coverageAnswer.parse(trimCoverage(answer));
+    expect(trimmed.requirements[0].request).toHaveLength(240);
+    expect(trimmed.requirements[0].detail).toHaveLength(500);
   });
   it("rejects invented evidence ids and claims with no evidence", () => {
     for (const evidence of [[], ["ops:99"], ["ops:0", "view:imaginary"]])

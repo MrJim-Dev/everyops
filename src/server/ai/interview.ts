@@ -4,7 +4,7 @@ import { partialString } from "@/lib/partial-json";
 import type { AskQuestion, ChatTurn, SetupQuestion } from "@/lib/store/workspace-model";
 import { promptWithFiles } from "./attachments";
 import { generateJsonHedged } from "./gemini";
-import { INTERVIEW_SYSTEM, type Turn, turn } from "./interview-prompt";
+import { INTERVIEW_SYSTEM, INTERVIEW_TEXT_LIMITS, type Turn, turn } from "./interview-prompt";
 import { referencesText, setupReferences } from "./references";
 import {
   askAgainMessage,
@@ -116,6 +116,9 @@ export async function interviewTurn(
         idleMs: 15_000,
         firstPartMs: 25_000,
         maxStringChars: 12_000,
+        textLimits: INTERVIEW_TEXT_LIMITS,
+        // Real turns are up to about 5k tokens (a full brief). Past 9k it's a runaway, not a longer brief.
+        maxOutputTokens: 9_000,
         onText,
       },
       { hedgeMs: 15_000, attempts: 3, afterSilence: true },
