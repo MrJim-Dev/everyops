@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyMemoryEdits, MAX_NOTES, type MemoryNote, memoryContext, notesFromSetup } from "./memory";
+import { DEFAULT_PERMISSIONS } from "./permissions";
 
 const NOW = "2026-10-15T08:00:00.000Z";
 let n = 0;
@@ -95,6 +96,7 @@ describe("memoryContext", () => {
       {
         instructions: "Call customers members.",
         notes: [note("Prefers short replies", { kind: "preference" }), note("Pickleball venue")],
+        permissions: DEFAULT_PERMISSIONS,
         updatedAt: NOW,
       },
       "Courts and bookings",

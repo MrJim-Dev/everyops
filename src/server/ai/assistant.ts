@@ -2,6 +2,7 @@ import "server-only";
 import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import { memoryContext, type WorkspaceMemory } from "@/lib/assistant/memory";
+import { permissionsText } from "@/lib/assistant/permissions";
 import { fieldUsage, renameInPages } from "@/lib/assistant/related";
 import {
   describeScreen,
@@ -1044,11 +1045,13 @@ export async function assistantTurn(input: {
   summary?: string;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
-  const permissions = input.canDesign
+  const role = input.canDesign
     ? "The person can change the design and the data."
     : input.canEditRecords
       ? "The person is staff: they can change data (records) but not the design. Don't plan design changes; say an owner or admin can."
       : "The person is a viewer: answer questions only. For changes, say an owner or admin can make them.";
+  const allowed = input.memory && input.canEditRecords ? permissionsText(input.memory.permissions) : "";
+  const permissions = allowed ? `${role}\n${allowed}` : role;
   const screen = describeScreen(bp, records, input.screen, input.docs);
   const status = input.onStatus ?? (() => {});
   const where = bp.systems.find((s) => s.id === input.screen.systemId);

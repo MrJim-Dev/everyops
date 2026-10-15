@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_PERMISSIONS } from "@/lib/assistant/permissions";
 import { toEdits, worthRemembering } from "./memory-prompt";
 
 const memory = {
@@ -13,6 +14,7 @@ const memory = {
       updatedAt: "",
     },
   ],
+  permissions: DEFAULT_PERMISSIONS,
   updatedAt: null,
 };
 

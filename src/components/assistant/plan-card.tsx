@@ -139,6 +139,7 @@ function useImpact(plan: ChangePlan, active: boolean) {
 export function PlanCard({
   plan,
   state,
+  auto,
   onApply,
   onDismiss,
   onUndo,
@@ -146,6 +147,8 @@ export function PlanCard({
 }: {
   plan: ChangePlan;
   state: AssistantTurn["planState"];
+  /** Applied on its own, as the workspace's permissions allow. */
+  auto?: boolean;
   onApply: () => void;
   onDismiss: () => void;
   onUndo: () => void;
@@ -178,7 +181,9 @@ export function PlanCard({
         <span className="flex-1 font-medium">{plan.title}</span>
         <span className="text-[11.5px] text-muted-foreground">
           {state === "applied"
-            ? "Applied"
+            ? auto
+              ? "Auto-applied"
+              : "Applied"
             : state === "undone"
               ? "Undone"
               : state === "dismissed"
@@ -342,7 +347,8 @@ export function PlanCard({
         {state === "applied" ? (
           <>
             <span key="applied" className="flex flex-1 animate-pop items-center gap-1.5 text-primary">
-              <CheckIcon className="size-3.5" /> Applied and saved to History
+              <CheckIcon className="size-3.5" />
+              {auto ? "Applied automatically · saved to History" : "Applied and saved to History"}
             </span>
             {onOpenPage ? (
               <Button size="sm" variant="ghost" onClick={onOpenPage}>

@@ -325,6 +325,7 @@ export function ChatThread({
                       <PlanCard
                         plan={t.plan}
                         state={chat.planStateOf(t)}
+                        auto={t.autoApplied}
                         onApply={() => chat.apply(i, t.plan as ChangePlan)}
                         onDismiss={() => chat.dismiss(i)}
                         onUndo={() => chat.undo(i, t.changeId)}

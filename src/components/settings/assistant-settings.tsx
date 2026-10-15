@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import {
@@ -18,8 +20,16 @@ import {
   type MemoryNote,
   type WorkspaceMemory,
 } from "@/lib/assistant/memory";
+import {
+  type AssistantPermissions,
+  AUTONOMY_INFO,
+  AUTONOMY_LEVELS,
+  type Autonomy,
+  DEFAULT_PERMISSIONS,
+} from "@/lib/assistant/permissions";
 import { formatDateTime } from "@/lib/format";
 import { canManage } from "@/lib/store/workspaces";
+import { cn } from "@/lib/utils";
 import { SettingsPage, SettingsSection } from "./settings-section";
 
 const SOURCE: Record<MemoryNote["source"], string> = {
@@ -30,12 +40,13 @@ const SOURCE: Record<MemoryNote["source"], string> = {
 
 type Draft = { id?: string; kind: MemoryKind; text: string };
 
-/** Settings → Assistant: the owner's standing instructions and what Ask EveryOps remembers about the business. */
+/** Settings → Assistant: what Ask EveryOps may do on its own, the owner's instructions and its memory. */
 export function AssistantSettings() {
   const ws = useWorkspace();
   const manager = canManage(ws.role);
   const [memory, setMemory] = useState<WorkspaceMemory | null>(null);
   const [instructions, setInstructions] = useState("");
+  const [perms, setPerms] = useState<AssistantPermissions>(DEFAULT_PERMISSIONS);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
@@ -49,6 +60,7 @@ export function AssistantSettings() {
         if (!live || !body.ok || !body.memory) return;
         setMemory(body.memory);
         setInstructions(body.memory.instructions);
+        setPerms(body.memory.permissions);
       })
       .catch(() => toast.error("Couldn't load the assistant's memory"));
     return () => {
@@ -57,7 +69,10 @@ export function AssistantSettings() {
   }, [ws.id]);
 
   const save = useCallback(
-    async (next: { instructions: string; notes: Draft[] }, done: string) => {
+    async (
+      next: { instructions: string; notes: Draft[]; permissions?: AssistantPermissions },
+      done: string,
+    ) => {
       setSaving(true);
       try {
         const res = await fetch(`/api/workspaces/${ws.id}/memory`, {
@@ -69,6 +84,7 @@ export function AssistantSettings() {
         if (!body.ok || !body.memory) throw new Error(body.message ?? "Couldn't save");
         setMemory(body.memory);
         setInstructions(body.memory.instructions);
+        setPerms(body.memory.permissions);
         toast.success(done);
         return true;
       } catch (e) {
@@ -91,11 +107,88 @@ export function AssistantSettings() {
 
   const drafts = (notes: MemoryNote[]): Draft[] => notes.map(({ id, kind, text }) => ({ id, kind, text }));
   const changed = instructions.trim() !== memory.instructions.trim();
+  const permsChanged = JSON.stringify(perms) !== JSON.stringify(memory.permissions);
   const saveNotes = (notes: Draft[], done: string) =>
     save({ instructions: memory.instructions, notes }, done);
 
   return (
     <SettingsPage>
+      <SettingsSection
+        title="Permissions"
+        description="How much Ask EveryOps may do on its own. People's roles still apply, and anything it applies is saved to History so it can be undone."
+        footer={
+          manager
+            ? "Applies to everyone who uses the assistant in this workspace."
+            : "Only the owner or an admin can change the permissions."
+        }
+        action={
+          manager ? (
+            <Button
+              size="sm"
+              variant={permsChanged ? "default" : "outline"}
+              disabled={!permsChanged || saving}
+              onClick={() =>
+                void save(
+                  { instructions: memory.instructions, notes: drafts(memory.notes), permissions: perms },
+                  "Permissions saved",
+                )
+              }
+            >
+              Save
+            </Button>
+          ) : null
+        }
+      >
+        <RadioGroup
+          aria-label="What the assistant may do on its own"
+          value={perms.autonomy}
+          disabled={!manager}
+          onValueChange={(value) => setPerms({ ...perms, autonomy: value as Autonomy })}
+          className="gap-0 divide-y overflow-hidden rounded-lg border"
+        >
+          {AUTONOMY_LEVELS.map((level) => (
+            // biome-ignore lint/a11y/noLabelWithoutControl: the radio inside is the control
+            <label
+              key={level}
+              className={cn(
+                "flex cursor-pointer items-start gap-3 px-3.5 py-3 transition-colors hover:bg-foreground/[0.02]",
+                perms.autonomy === level && "bg-primary/[0.06]",
+              )}
+            >
+              <RadioGroupItem value={level} className="mt-0.5" />
+              <span className="min-w-0">
+                <span className="flex items-center gap-2 text-[13.5px] font-medium">
+                  {AUTONOMY_INFO[level].label}
+                  {level === "ask" ? (
+                    <span className="rounded border px-1.5 py-px text-[10.5px] font-normal text-muted-foreground">
+                      Default
+                    </span>
+                  ) : null}
+                </span>
+                <span className="mt-0.5 block text-[12.5px] leading-snug text-muted-foreground">
+                  {AUTONOMY_INFO[level].detail}
+                </span>
+              </span>
+            </label>
+          ))}
+        </RadioGroup>
+        <div className="divide-y rounded-lg border">
+          <ToggleRow
+            title="Always ask before removing"
+            detail="Deleting records, pages, fields or record types waits for approval, whatever the level above."
+            checked={perms.confirmDeletes}
+            disabled={!manager || perms.autonomy === "read_only" || perms.autonomy === "ask"}
+            onChange={(confirmDeletes) => setPerms({ ...perms, confirmDeletes })}
+          />
+          <ToggleRow
+            title="Learn from conversations"
+            detail="Saves business facts, preferences and plans people mention to the memory below."
+            checked={perms.learn}
+            disabled={!manager}
+            onChange={(learn) => setPerms({ ...perms, learn })}
+          />
+        </div>
+      </SettingsSection>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -136,7 +229,6 @@ export function AssistantSettings() {
           />
         </SettingsSection>
       </form>
-
       <SettingsSection
         title="Memory"
         description="What Ask EveryOps knows about your business. It starts with what you told it during setup and adds what people mention in chat, so it can plan ahead and keep every page in step."
@@ -272,5 +364,30 @@ export function AssistantSettings() {
         ) : null}
       </SettingsSection>
     </SettingsPage>
+  );
+}
+
+function ToggleRow({
+  title,
+  detail,
+  checked,
+  disabled,
+  onChange,
+}: {
+  title: string;
+  detail: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    // biome-ignore lint/a11y/noLabelWithoutControl: the switch inside is the control
+    <label className="flex cursor-pointer items-center justify-between gap-4 px-3.5 py-3">
+      <span className="min-w-0">
+        <span className="block text-[13.5px] font-medium">{title}</span>
+        <span className="mt-0.5 block text-[12.5px] leading-snug text-muted-foreground">{detail}</span>
+      </span>
+      <Switch checked={checked} disabled={disabled} onCheckedChange={onChange} aria-label={title} />
+    </label>
   );
 }

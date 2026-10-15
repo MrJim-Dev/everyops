@@ -5,6 +5,8 @@
  * Every assistant turn starts from it, so the assistant knows what the business is and what it's building toward.
  */
 
+import { type AssistantPermissions, DEFAULT_PERMISSIONS } from "./permissions";
+
 export const MEMORY_KINDS = ["business", "preference", "goal"] as const;
 export type MemoryKind = (typeof MEMORY_KINDS)[number];
 export type MemorySource = "setup" | "assistant" | "owner";
@@ -18,9 +20,20 @@ export type MemoryNote = {
   updatedAt: string;
 };
 
-export type WorkspaceMemory = { instructions: string; notes: MemoryNote[]; updatedAt: string | null };
+export type WorkspaceMemory = {
+  instructions: string;
+  notes: MemoryNote[];
+  /** What the assistant may do on its own (Settings → Assistant → Permissions). */
+  permissions: AssistantPermissions;
+  updatedAt: string | null;
+};
 
-export const EMPTY_MEMORY: WorkspaceMemory = { instructions: "", notes: [], updatedAt: null };
+export const EMPTY_MEMORY: WorkspaceMemory = {
+  instructions: "",
+  notes: [],
+  permissions: DEFAULT_PERMISSIONS,
+  updatedAt: null,
+};
 export const MAX_INSTRUCTIONS = 4000;
 export const MAX_NOTE_CHARS = 300;
 export const MAX_NOTES = 80;

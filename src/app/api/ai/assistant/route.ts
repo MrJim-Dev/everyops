@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { attachmentRef } from "@/lib/assistant/attachments";
+import { appliesOnItsOwn } from "@/lib/assistant/permissions";
 import { screenSchema } from "@/lib/assistant/screen";
 import { blueprintOf, canEdit, canManage } from "@/lib/store/workspace-model";
 import { assistantTurn } from "@/server/ai/assistant";
@@ -56,22 +57,23 @@ export async function POST(request: Request) {
       const send = (line: object) => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
       // What this message adds to the workspace's memory, worked out beside the answer so it costs no waiting.
       // Viewers only read; what they say isn't kept.
-      const remembering = canEdit(found.role)
-        ? noteMemory({
-            memory,
-            workspaceName: found.workspace.name,
-            pages: blueprint.systems.map((s) => s.name),
-            messages: parsed.data.messages,
-            signal: request.signal,
-          })
-            .then((edits) => (edits.length ? rememberEdits(workspaceId, edits) : null))
-            .catch((e) => {
-              console.warn(JSON.stringify({ event: "assistant_memory_failed", message: String(e) }));
-              return null;
+      const remembering =
+        canEdit(found.role) && memory.permissions.learn
+          ? noteMemory({
+              memory,
+              workspaceName: found.workspace.name,
+              pages: blueprint.systems.map((s) => s.name),
+              messages: parsed.data.messages,
+              signal: request.signal,
             })
-        : Promise.resolve(null);
+              .then((edits) => (edits.length ? rememberEdits(workspaceId, edits) : null))
+              .catch((e) => {
+                console.warn(JSON.stringify({ event: "assistant_memory_failed", message: String(e) }));
+                return null;
+              })
+          : Promise.resolve(null);
       try {
-        const result = await assistantTurn({
+        const turn = await assistantTurn({
           blueprint,
           records: found.workspace.records,
           messages: parsed.data.messages,
@@ -87,13 +89,31 @@ export async function POST(request: Request) {
           memory,
           onStatus: (text) => send({ type: "status", text }),
         });
+        // Read only: whatever Gemini planned anyway is dropped, never offered.
+        const result =
+          turn.ok && turn.plan && memory.permissions.autonomy === "read_only"
+            ? {
+                ok: true as const,
+                kind: "answer" as const,
+                reply:
+                  "I'm set to read only in this workspace, so I can't prepare changes. An owner or admin can allow them in Settings → Assistant.",
+                suggestions: [],
+              }
+            : turn;
+        // The plan was checked like any other; the browser applies it straight away (saved to History, undoable).
+        const autoApply = result.ok && !!result.plan && appliesOnItsOwn(result.plan, memory.permissions);
         // Usually done long before the answer; never hold the answer more than a few seconds for it.
         const noted = await Promise.race([
           remembering,
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
         ]);
         const remembered = noted ? [...noted.added, ...noted.updated].map((n) => n.text) : [];
-        send({ type: "result", ...result, ...(result.ok && remembered.length ? { remembered } : {}) });
+        send({
+          type: "result",
+          ...result,
+          ...(result.ok && remembered.length ? { remembered } : {}),
+          ...(autoApply ? { autoApply } : {}),
+        });
       } catch (e) {
         console.error(JSON.stringify({ event: "assistant_failed", message: String(e) }));
         send({ type: "result", ok: false, message: "Something went wrong. Try again." });

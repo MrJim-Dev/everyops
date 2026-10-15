@@ -9,19 +9,25 @@ import {
   type MemorySource,
   type WorkspaceMemory,
 } from "@/lib/assistant/memory";
+import { type AssistantPermissions, normalizePermissions } from "@/lib/assistant/permissions";
 import { type Database, db } from "./db";
 
 type Ex = Kysely<Database> | Transaction<Database>;
-type Row = { instructions: string; notes: MemoryNote[]; updated_at: Date };
+type Row = { instructions: string; notes: MemoryNote[]; permissions: unknown; updated_at: Date };
 
 const toMemory = (row: Row | undefined): WorkspaceMemory =>
   row
-    ? { instructions: row.instructions, notes: row.notes ?? [], updatedAt: row.updated_at.toISOString() }
+    ? {
+        instructions: row.instructions,
+        notes: row.notes ?? [],
+        permissions: normalizePermissions(row.permissions),
+        updatedAt: row.updated_at.toISOString(),
+      }
     : EMPTY_MEMORY;
 
 /** A workspace's memory. Access is checked by the caller. */
 export async function readMemory(workspaceId: string, ex: Ex = db): Promise<WorkspaceMemory> {
-  const { rows } = await sql<Row>`select instructions, notes, updated_at from workspace_memory
+  const { rows } = await sql<Row>`select instructions, notes, permissions, updated_at from workspace_memory
     where workspace_id = ${workspaceId}`.execute(ex);
   return toMemory(rows[0]);
 }
@@ -31,7 +37,7 @@ async function lockMemory(trx: Transaction<Database>, workspaceId: string) {
   await sql`insert into workspace_memory (workspace_id) values (${workspaceId}) on conflict do nothing`.execute(
     trx,
   );
-  const { rows } = await sql<Row>`select instructions, notes, updated_at from workspace_memory
+  const { rows } = await sql<Row>`select instructions, notes, permissions, updated_at from workspace_memory
     where workspace_id = ${workspaceId} for update`.execute(trx);
   return toMemory(rows[0]);
 }
@@ -68,7 +74,11 @@ export function rememberEdits(workspaceId: string, edits: MemoryEdit[], source: 
  */
 export async function saveMemory(
   workspaceId: string,
-  input: { instructions: string; notes: { id?: string; kind: MemoryNote["kind"]; text: string }[] },
+  input: {
+    instructions: string;
+    notes: { id?: string; kind: MemoryNote["kind"]; text: string }[];
+    permissions?: AssistantPermissions;
+  },
 ): Promise<WorkspaceMemory> {
   return db.transaction().execute(async (trx) => {
     const memory = await lockMemory(trx, workspaceId);
@@ -88,7 +98,10 @@ export async function saveMemory(
     const changed = new Set(result.updated.map((n) => n.id));
     const notes = result.notes.map((n) => (changed.has(n.id) ? { ...n, source: "owner" as const } : n));
     await writeNotes(trx, workspaceId, notes, input.instructions.slice(0, MAX_INSTRUCTIONS));
-    const { rows } = await sql<Row>`select instructions, notes, updated_at from workspace_memory
+    if (input.permissions)
+      await sql`update workspace_memory set permissions = ${JSON.stringify(normalizePermissions(input.permissions))}::jsonb
+        where workspace_id = ${workspaceId}`.execute(trx);
+    const { rows } = await sql<Row>`select instructions, notes, permissions, updated_at from workspace_memory
       where workspace_id = ${workspaceId}`.execute(trx);
     return toMemory(rows[0]);
   });

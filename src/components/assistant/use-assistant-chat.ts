@@ -43,6 +43,8 @@ type Reply =
       sources?: Navigation[];
       /** Notes this message added to the workspace's memory. */
       remembered?: string[];
+      /** The workspace's permissions let this plan apply without anyone pressing Apply. */
+      autoApply?: boolean;
     }
   | { ok: false; message: string };
 
@@ -248,6 +250,11 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
           ...(body.sources?.length ? { sources: body.sources } : {}),
           ...(body.remembered?.length ? { remembered: body.remembered } : {}),
         });
+        if (body.plan && body.autoApply) {
+          const state = useAssistant.getState();
+          const index = (state.threads[state.active[ws.id] ?? ""]?.length ?? 0) - 1;
+          if (index >= 0) apply(index, body.plan, { auto: true });
+        }
         if (body.navigate?.open) go(body.navigate);
       } else
         push(ws.id, {
@@ -299,7 +306,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
     void ask(question.text, turns.slice(0, at), question.attachments ?? []);
   };
 
-  const apply = (index: number, plan: ChangePlan) => {
+  const apply = (index: number, plan: ChangePlan, options: { auto?: boolean } = {}) => {
     const current = useWorkspaces.getState().workspaces[ws.id];
     // A plan from an older conversation was checked against an older design: ask for it again instead.
     if (current && plan.ops.length && plan.baseVersion && blueprintOf(current).version !== plan.baseVersion) {
@@ -321,8 +328,12 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
         ...(entry.replacedRecords ?? []).map((r) => r.id),
       ]),
     ]);
-    useAssistant.getState().patch(ws.id, index, { planState: "applied", changeId: entry.id });
-    toast.success(`${plan.title} applied`, {
+    useAssistant.getState().patch(ws.id, index, {
+      planState: "applied",
+      changeId: entry.id,
+      ...(options.auto ? { autoApplied: true } : {}),
+    });
+    toast.success(options.auto ? `${plan.title} applied automatically` : `${plan.title} applied`, {
       description: "Saved to History. You can undo it there or here.",
     });
   };

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MAX_INSTRUCTIONS, MAX_NOTE_CHARS, MAX_NOTES, MEMORY_KINDS } from "@/lib/assistant/memory";
+import { AUTONOMY_LEVELS } from "@/lib/assistant/permissions";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { readMemory, saveMemory } from "@/server/workspace-memory";
 import { roleIn } from "@/server/workspaces";
@@ -25,9 +26,12 @@ const body = z.object({
       }),
     )
     .max(MAX_NOTES),
+  permissions: z
+    .object({ autonomy: z.enum(AUTONOMY_LEVELS), confirmDeletes: z.boolean(), learn: z.boolean() })
+    .optional(),
 });
 
-/** Owners and admins set the instructions and edit, add or delete notes. */
+/** Owners and admins set the instructions and permissions, and edit, add or delete notes. */
 export async function PUT(request: Request, { params }: RouteContext<"/api/workspaces/[id]/memory">) {
   const { user, error } = await apiUser(request);
   if (error) return error;
