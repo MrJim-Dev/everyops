@@ -3,7 +3,7 @@ import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import { memoryContext, type WorkspaceMemory } from "@/lib/assistant/memory";
 import { permissionsText } from "@/lib/assistant/permissions";
-import { fieldUsage, renameInPages } from "@/lib/assistant/related";
+import { fieldUsage, renameInDesign, renameInPages } from "@/lib/assistant/related";
 import {
   describeScreen,
   type Navigation,
@@ -1241,6 +1241,9 @@ ${input.messages
     status("Checking the plan against your workspace");
 
     const design = toDesignOps(bp, a.plan.ops, a.plan.renames, a.plan.formulas, input.workspaceName);
+    // A rename reaches every place that spells the old name: other tabs, cards, automations, forms, website sections.
+    const elsewhere = renameInDesign(bp, design.ops, input.docs);
+    design.ops.push(...elsewhere.ops);
     // Operations that fit no shape were set aside; Gemini gets them back to fix with the rest of the plan.
     const errors = [...setAside, ...design.errors];
     // A layout page's new text is its whole layout: a design change (replace_view), so it's checked and undone like one.
@@ -1314,7 +1317,7 @@ ${input.messages
     const docOps = toDocOps(next, records, pageTexts, errors);
     // Document and HTML pages that spell out a name this plan changes get the new name in the same plan.
     const related = renameInPages(bp, design.ops, input.docs, docOps);
-    docOps.push(...related.docOps);
+    docOps.push(...related.docOps, ...elsewhere.docOps);
     if (docOps.length && !input.canEditRecords) errors.push("This person can't edit pages.");
     const teamOps = toTeamOps(input.team, a.plan.team, errors);
     if (teamOps.length && !input.canDesign) errors.push("Only owners and admins can change the team.");
@@ -1365,9 +1368,13 @@ ${input.messages
           title: a.plan.title || "Workspace change",
           facts: facts.slice(0, 6),
           steps: [
-            ...a.plan.steps.slice(0, Math.max(0, 10 - implied.length - related.steps.length)),
+            ...a.plan.steps.slice(
+              0,
+              Math.max(0, 10 - implied.length - related.steps.length - elsewhere.steps.length),
+            ),
             ...implied.map(({ label, detail }) => ({ kind: "add" as const, label, detail })),
             ...related.steps,
+            ...elsewhere.steps,
           ],
           ops: design.ops,
           recordOps: recordPart.ops,

@@ -1,5 +1,6 @@
 import "server-only";
 import { type Kysely, sql, type Transaction } from "kysely";
+import type { Checkup } from "@/lib/assistant/checkup";
 import {
   applyMemoryEdits,
   EMPTY_MEMORY,
@@ -105,4 +106,16 @@ export async function saveMemory(
       where workspace_id = ${workspaceId}`.execute(trx);
     return toMemory(rows[0]);
   });
+}
+
+/** The last "Things to fix" check, if any. */
+export async function readCheckup(workspaceId: string): Promise<Checkup | null> {
+  const { rows } = await sql<{ checkup: Checkup | null }>`select checkup from workspace_memory
+    where workspace_id = ${workspaceId}`.execute(db);
+  return rows[0]?.checkup ?? null;
+}
+
+export async function saveCheckup(workspaceId: string, checkup: Checkup) {
+  await sql`insert into workspace_memory (workspace_id, checkup) values (${workspaceId}, ${JSON.stringify(checkup)}::jsonb)
+    on conflict (workspace_id) do update set checkup = excluded.checkup`.execute(db);
 }
