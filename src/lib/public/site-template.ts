@@ -33,6 +33,8 @@ export type SiteCopy = {
 
 const PEOPLE =
   /player|client|customer|member|guest|staff|employee|people|person|team|contact|supplier|student|patient|stylist|barber|therapist|doctor|dentist|trainer|coach|instructor|tutor|technician|driver|agent|teacher|artist|groomer/i;
+/** The people a business serves: a list that links to one of these holds customers' records. */
+const CUSTOMERS = /customer|client|guest|patient|member|player|student|renter|tenant|buyer|booker/i;
 /** Lists that sort what is offered (unit types, service categories) rather than being it. */
 const GROUPING = /categor|(^|_|\s)types?($|_|\s)|group|\btags?\b|kinds?$|class(es)?_?type/i;
 const PRIVATE_FIELD = /phone|e-?mail|contact|cost|internal|note|stock|quantity|qty|supplier|margin|password/i;
@@ -63,7 +65,18 @@ const OFFER_WORDS =
  * the offer (unit types, service categories).
  */
 export function offeringOf(bp: Blueprint): Entity | undefined {
+  // What visitors send through a public form (a booking, an order, a quote request) and its lines are customers'
+  // records, never the offer; nor is anything that links to customers. Showing them would publish their details.
+  const submitted = new Set(bp.views.filter((v) => v.type === "form" && v.public).map((v) => v.entityId));
+  const fromVisitors = (e: Entity) => submitted.has(e.id) || (!!e.parent && submitted.has(e.parent.entityId));
+  const aboutCustomers = (e: Entity) =>
+    e.fields.some((f) => {
+      const to = f.type === "relation" ? bp.entities.find((x) => x.id === f.relation?.entityId) : undefined;
+      return !!to && CUSTOMERS.test(words(to));
+    });
   const eligible = (e: Entity) =>
+    !fromVisitors(e) &&
+    !aboutCustomers(e) &&
     !e.parent &&
     !e.booking &&
     !PEOPLE.test(words(e)) &&
@@ -73,10 +86,14 @@ export function offeringOf(bp: Blueprint): Entity | undefined {
   const booked = new Set(
     bp.entities.flatMap((e) => (e.booking ? [resourceOf(bp, e)?.id] : [])).filter((id): id is string => !!id),
   );
-  // What bookings and their lines link to: a salon appointment's service, a stay's unit.
+  // What bookings, orders and requests (and their lines) link to: a salon appointment's service, a stay's unit, the
+  // gear on a rental request.
   const linked = new Set(
     bp.entities
-      .filter((e) => e.booking || bp.entities.some((p) => p.booking && e.parent?.entityId === p.id))
+      .filter(
+        (e) =>
+          e.booking || fromVisitors(e) || bp.entities.some((p) => p.booking && e.parent?.entityId === p.id),
+      )
       .flatMap((e) => e.fields.map((f) => f.relation?.entityId))
       .filter((id): id is string => !!id),
   );

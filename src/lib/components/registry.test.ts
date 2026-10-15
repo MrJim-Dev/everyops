@@ -7,7 +7,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { applyOps } from "@/lib/engine/changes";
 import { toDesignOps } from "@/server/ai/assistant";
-import { COMPONENTS, catalogText, parseLayout } from "./registry";
+import { COMPONENT_USE, COMPONENTS, catalogText, parseLayout } from "./registry";
 
 const sample = () => courtBookingsSample(new Date("2026-10-15T09:00:00+08:00"));
 
@@ -165,5 +165,12 @@ describe("layout component library", () => {
       { ...raw[0], view: { ...(raw[0] as { view: object }).view, starter: "not json" } },
     ] as Parameters<typeof toDesignOps>[1]);
     expect(bad.errors.join()).toMatch(/isn't valid JSON/);
+  });
+});
+
+describe("guidance for the AI", () => {
+  it("says when to use every component", () => {
+    for (const c of COMPONENTS) expect(COMPONENT_USE[c.id], c.id).toBeTruthy();
+    expect(catalogText()).toContain("Use for");
   });
 });

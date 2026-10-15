@@ -34,6 +34,26 @@ export type BookingPageOptions = {
   heading: string;
   intro?: string;
   palette: Palette;
+  /**
+   * How the page is laid out (site-sections.ts, booking): split (summary right), summary-left, centered (one column),
+   * topbar (summary above the steps), intro-side (heading and summary in a column beside the steps) or card.
+   */
+  layout?: string;
+};
+
+/** Grid areas per layout: the header, the step pills, the step panel and the summary. Phones always stack them. */
+const LAYOUTS: Record<string, string> = {
+  split:
+    "main.book { grid-template-columns: minmax(0, 1fr) 320px; grid-template-areas: 'head head' 'prog prog' 'panel sum'; }",
+  "summary-left":
+    "main.book { grid-template-columns: 320px minmax(0, 1fr); grid-template-areas: 'head head' 'prog prog' 'sum panel'; }",
+  centered:
+    "main.book { max-width: 720px; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'prog' 'panel' 'sum'; } main.book header.top { text-align: center; } main.book .lead { margin: 0 auto; } main.book .progress { justify-content: center; } main.book aside.summary { position: static; }",
+  topbar:
+    "main.book { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'prog' 'sum' 'panel'; } main.book aside.summary { top: 68px; z-index: 2; margin-bottom: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 14px 20px; box-shadow: 0 12px 30px -24px rgb(0 0 0 / .4); } main.book aside.summary h3 { margin: 0; } main.book aside.summary dl { display: flex; flex-wrap: wrap; gap: 6px 20px; } main.book aside.summary dl div { gap: 6px; } main.book aside.summary .total { border: 0; padding: 0; margin: 0; }",
+  "intro-side":
+    "main.book { grid-template-columns: 340px minmax(0, 1fr); grid-template-rows: auto 1fr; grid-template-areas: 'head prog' 'sum panel'; column-gap: 40px; } main.book .progress { align-self: end; margin-bottom: 16px; } main.book aside.summary { top: 76px; align-self: start; margin-top: 20px; }",
+  card: "body { background: var(--tint); } main.book { margin-top: 32px; margin-bottom: 48px; background: #fff; border-radius: 28px; padding: 8px 32px 32px; box-shadow: 0 40px 80px -60px rgb(0 0 0 / .45); grid-template-columns: minmax(0, 1fr) 300px; grid-template-areas: 'head head' 'prog prog' 'panel sum'; } main.book .panel { border: 0; padding: 0; } main.book aside.summary { background: var(--tint); border: 0; }",
 };
 
 /** Marks a booking page setup wrote, with the form it books through. */
@@ -79,7 +99,9 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
   .progress li span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; background: var(--tint); color: var(--accent); font-weight: 700; font-size: 12px; }
   .progress li[aria-current="step"] { color: var(--ink); border-color: var(--accent); }
   .progress li[aria-current="step"] span, .progress li.done span { background: var(--accent); color: #fff; }
-  .layout { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; padding-bottom: 64px; }
+  main.book { display: grid; column-gap: 20px; row-gap: 0; align-items: start; padding-bottom: 64px; }
+  main.book header.top { grid-area: head; } main.book .progress { grid-area: prog; } main.book .panel { grid-area: panel; } main.book aside.summary { grid-area: sum; }
+  ${LAYOUTS[o.layout ?? "split"] ?? LAYOUTS.split}
   .panel { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; scroll-margin-top: 80px; }
   .panel h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: -0.015em; }
   .panel .hint { margin: 0 0 18px; color: var(--soft); font-size: 14.5px; }
@@ -110,6 +132,16 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
   .month button.in { background: var(--tint); border-color: var(--accent); }
   .month button.edge { background: var(--accent); color: #fff; border-color: var(--accent); }
   .month button:disabled { opacity: .35; text-decoration: line-through; cursor: not-allowed; }
+  .grid-wrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px 4px; }
+  .court-grid { width: 100%; min-width: 420px; border-collapse: separate; border-spacing: 6px; font-size: 13.5px; }
+  .court-grid th { font-size: 12px; font-weight: 600; color: var(--soft); text-align: left; white-space: nowrap; }
+  .court-grid thead th { text-align: center; padding: 8px 4px; border-radius: 10px; border: 1px solid var(--line); transition: border-color 150ms ease, color 150ms ease; }
+  .court-grid thead th:first-child { border: 0; text-align: left; }
+  .court-grid thead th.on { border-color: var(--accent); color: var(--ink); }
+  .court-grid .cell { width: 100%; padding: 9px 0; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; font-weight: 600; font-size: 13px; color: var(--accent); transition: transform 160ms var(--ease-out), background-color 150ms ease; }
+  .court-grid .cell:active { transform: scale(0.97); }
+  .court-grid .cell[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .court-grid .cell:disabled { color: var(--soft); opacity: .5; cursor: not-allowed; text-decoration: line-through; }
   .monthbar { display: flex; align-items: center; justify-content: space-between; max-width: 420px; margin-bottom: 10px; font-weight: 600; }
   .monthbar button { border: 1px solid var(--line); background: #fff; border-radius: 999px; width: 34px; height: 34px; cursor: pointer; }
   .monthbar button:disabled { opacity: .4; cursor: not-allowed; }
@@ -155,31 +187,29 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
   .skeleton { height: 120px; border-radius: 12px; background: linear-gradient(90deg, var(--tint), #fff, var(--tint)); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
   @keyframes shimmer { to { background-position: -200% 0; } }
   @media (hover: hover) and (pointer: fine) {
-    .choice:hover, .day:hover, .time:hover:not(:disabled) { border-color: var(--accent); }
+    .choice:hover, .day:hover, .time:hover:not(:disabled), .court-grid .cell:hover:not(:disabled) { border-color: var(--accent); }
     .button.primary:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 88%, #000); }
     nav a.back:hover { color: var(--ink); }
   }
   @media (prefers-reduced-motion: reduce) {
     .rise, .step, .done .tick { animation-name: fadeonly; transform: none; }
-    .choice:active, .day:active, .time:active, .button:active, .qty button:active, .month button:active { transform: none; }
+    .choice:active, .day:active, .time:active, .button:active, .qty button:active, .month button:active, .court-grid .cell:active { transform: none; }
   }
   @keyframes fadeonly { from { opacity: 0; } to { opacity: 1; } }
-  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } aside.summary { position: static; } }
+  @media (max-width: 860px) { main.book { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'prog' 'panel' 'sum'; row-gap: 20px; padding-left: 20px; padding-right: 20px; } main.book header.top { position: static; text-align: left; } main.book .progress { align-self: start; margin-bottom: 0; } main.book aside.summary { position: static; display: block; } }
 </style>
 </head>
 <body ${BOOKING_PAGE_MARK}="${esc(o.formId)}">
 <nav><div class="wrap"><strong>${esc(o.name)}</strong><a class="back" href="${esc(o.homeHref)}" target="_top">← Back to home</a></div></nav>
-<main class="wrap">
+<main class="wrap book layout-${esc(o.layout ?? "split")}">
   <header class="top">
     <span class="eyebrow rise">${esc(o.name)}</span>
     <h1 class="rise">${esc(o.heading)}</h1>
     ${intro}
   </header>
   <ol class="progress" id="progress" aria-label="Booking steps"></ol>
-  <div class="layout">
-    <section class="panel" id="panel" aria-live="polite"><div class="skeleton"></div></section>
-    <aside class="summary" id="summary" aria-label="Your booking"><h3>Your booking</h3><p class="empty">Pick what you want to book to see it here.</p></aside>
-  </div>
+  <section class="panel" id="panel" aria-live="polite"><div class="skeleton"></div></section>
+  <aside class="summary" id="summary" aria-label="Your booking"><h3>Your booking</h3><p class="empty">Pick what you want to book to see it here.</p></aside>
 </main>
 <script>
 (function () {
@@ -191,7 +221,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
   var progress = document.getElementById("progress");
   var form = null, steps = [], at = 0, quoting = 0;
   var state = { resource: "", day: "", slots: [], slotsFor: "", from: "", to: "", stay: { start: "", end: "" }, days: [],
-    month: 0, extras: {}, values: {}, payment: "", quote: null, sending: false, errors: {}, message: "" };
+    month: 0, calMonth: 0, grid: null, gridDay: "", extras: {}, values: {}, payment: "", quote: null, sending: false, errors: {}, message: "" };
 
   function el(tag, attrs, kids) {
     var n = document.createElement(tag);
@@ -330,6 +360,10 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
 
   function whenStep(box) {
     var b = booking();
+    // The calendar the business picked for its form (FormView.bookingLayout): courts side by side ("grid"), a month
+    // calendar ("month") or a strip of days ("days"). Whole-day bookings always use the month of check-in and out.
+    var layout = b.dates ? "month" : (b.layout || "days");
+    if (layout === "grid" && b.resources.length > 1) return gridStep(box);
     var resources = b.resources.map(function (r) {
       return { id: r.id, title: r.title, note: b.dates ? "" : "Open " + r.opensAt + " \u2013 " + r.closesAt };
     });
@@ -344,13 +378,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     if (!state.resource) return;
     if (b.dates) return stayPicker(box);
     box.appendChild(el("p", { class: "label", text: "Pick a day" }));
-    var today = dayKey(new Date()), strip = el("div", { class: "days" });
-    for (var i = 0; i < 21; i++) (function (k) {
-      var d = fromKey(k);
-      strip.appendChild(el("button", { type: "button", class: "day", "aria-pressed": String(k === state.day), "aria-label": dayLabel(k), onclick: function () { state.day = k; loadSlots(); } },
-        [el("small", { text: fmt(d, { weekday: "short" }) }), el("b", { text: fmt(d, { day: "numeric" }) }), el("small", { text: fmt(d, { month: "short" }) })]));
-    })(addDays(today, i));
-    box.appendChild(strip);
+    box.appendChild(layout === "month" ? dayMonth(function (k) { state.day = k; loadSlots(); }) : dayStrip(function (k) { state.day = k; loadSlots(); }));
     if (!state.day) return;
     box.appendChild(el("p", { class: "label", text: b.multiple ? "Pick a start time. For a longer booking, then pick the last hour." : "Pick a time" }));
     if (state.slotsFor !== state.resource + state.day) { box.appendChild(el("div", { class: "skeleton" })); return; }
@@ -360,6 +388,86 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
       var on = range && s.start >= range.start && s.end <= range.end;
       return el("button", { type: "button", class: "time", disabled: !s.free, "aria-pressed": String(!!on), onclick: function () { pickSlot(s); } }, [timeOf(s.start)]);
     })));
+  }
+  /** Three weeks of days to pick from. */
+  function dayStrip(onPick) {
+    var today = dayKey(new Date()), strip = el("div", { class: "days" });
+    for (var i = 0; i < 21; i++) (function (k) {
+      var d = fromKey(k);
+      strip.appendChild(el("button", { type: "button", class: "day", "aria-pressed": String(k === state.day), "aria-label": dayLabel(k), onclick: function () { onPick(k); } },
+        [el("small", { text: fmt(d, { weekday: "short" }) }), el("b", { text: fmt(d, { day: "numeric" }) }), el("small", { text: fmt(d, { month: "short" }) })]));
+    })(addDays(today, i));
+    return strip;
+  }
+  /** A month calendar to pick one day from (today and the next three months). */
+  function dayMonth(onPick) {
+    var today = dayKey(new Date());
+    var shown = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 + state.calMonth, 15, 4));
+    var monthKey = dayKey(shown).slice(0, 7);
+    var wrap = el("div");
+    wrap.appendChild(el("div", { class: "monthbar" }, [
+      el("button", { type: "button", "aria-label": "Previous month", disabled: state.calMonth === 0, onclick: function () { state.calMonth--; draw(); } }, ["\u2039"]),
+      el("span", { text: fmt(shown, { month: "long", year: "numeric" }) }),
+      el("button", { type: "button", "aria-label": "Next month", disabled: state.calMonth >= 2, onclick: function () { state.calMonth++; draw(); } }, ["\u203a"])
+    ]));
+    var grid = el("div", { class: "month" });
+    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].forEach(function (d) { grid.appendChild(el("span", { class: "dow", text: d })); });
+    var pad = fromKey(monthKey + "-01").getUTCDay();
+    for (var i = 0; i < pad; i++) grid.appendChild(el("span"));
+    for (var d = 1; d <= 31; d++) {
+      var k = monthKey + "-" + (d < 10 ? "0" + d : d);
+      if (dayKey(fromKey(k)).slice(0, 7) !== monthKey) break;
+      (function (k) {
+        grid.appendChild(el("button", { type: "button", class: k === state.day ? "edge" : null, "aria-pressed": String(k === state.day), disabled: k < today, "aria-label": dayLabel(k), onclick: function () { onPick(k); } }, [String(Number(k.slice(8)))]));
+      })(k);
+    }
+    wrap.appendChild(grid);
+    return wrap;
+  }
+  /** Every court (room, studio) on one day, side by side: times down, courts across; a cell books one of them. */
+  function loadGrid() {
+    var day = state.day;
+    state.gridDay = day; state.grid = null; state.from = ""; state.to = "";
+    Promise.all(booking().resources.map(function (r) {
+      return EveryOps.slots(FORM, r.id, day).then(function (x) { return [r.id, x && x.ok ? x.slots : []]; });
+    })).then(function (pairs) {
+      if (state.gridDay !== day) return;
+      var all = {};
+      pairs.forEach(function (p) { all[p[0]] = p[1]; });
+      state.grid = all;
+      if (state.resource && all[state.resource]) { state.slots = all[state.resource]; state.slotsFor = state.resource + day; }
+      draw();
+    });
+  }
+  function gridStep(box) {
+    var b = booking();
+    if (!state.day) state.day = dayKey(new Date());
+    if (state.gridDay !== state.day) loadGrid();
+    box.appendChild(el("p", { class: "label", text: "Pick a day" }));
+    box.appendChild(dayStrip(function (k) { state.day = k; loadGrid(); draw(); }));
+    box.appendChild(el("p", { class: "label", text: b.multiple ? "Pick a start time in one of the columns. For a longer booking, then pick the last hour." : "Pick a time in one of the columns" }));
+    if (!state.grid) { box.appendChild(el("div", { class: "skeleton" })); return; }
+    var times = [];
+    b.resources.forEach(function (r) { (state.grid[r.id] || []).forEach(function (s) { if (times.indexOf(s.start) < 0) times.push(s.start); }); });
+    times.sort();
+    if (!times.length) { box.appendChild(el("p", { class: "muted", text: "No open times that day. Try another day." })); return; }
+    var range = picked();
+    var head = el("tr", {}, [el("th", { text: "Time" })].concat(b.resources.map(function (r) {
+      return el("th", { class: r.id === state.resource && range ? "on" : null, text: r.title });
+    })));
+    var rows = times.map(function (t) {
+      return el("tr", {}, [el("th", { text: timeOf(t) })].concat(b.resources.map(function (r) {
+        var s = (state.grid[r.id] || []).find(function (x) { return x.start === t; });
+        if (!s) return el("td");
+        var on = r.id === state.resource && range && s.start >= range.start && s.end <= range.end;
+        return el("td", {}, [el("button", { type: "button", class: "cell", disabled: !s.free, "aria-pressed": String(!!on), "aria-label": r.title + ", " + dayLabel(state.day) + " " + timeOf(s.start) + (s.free ? "" : ", taken"), onclick: function () {
+          if (r.id !== state.resource) { state.resource = r.id; state.from = ""; state.to = ""; }
+          state.slots = state.grid[r.id]; state.slotsFor = r.id + state.day;
+          pickSlot(s);
+        } }, [s.free ? (on ? "\u2713" : "Free") : "Taken"])]);
+      })));
+    });
+    box.appendChild(el("div", { class: "grid-wrap" }, [el("table", { class: "court-grid" }, [el("thead", {}, [head]), el("tbody", {}, rows)])]));
   }
   function pickSlot(s) {
     if (!booking().multiple || !state.from || state.to) { state.from = s.start; state.to = ""; }
