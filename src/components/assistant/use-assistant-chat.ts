@@ -7,6 +7,7 @@ import { useAttachments } from "@/components/ai/use-attachments";
 import { useVoiceInput } from "@/components/ai/use-voice-input";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
+import type { DataEvidence } from "@/lib/assistant/evidence";
 import { type AssistantTurn, type ThreadSummary, useAssistant } from "@/lib/assistant/panel-store";
 import type { Navigation, Screen } from "@/lib/assistant/screen";
 import { type BlockRef, useScreen } from "@/lib/assistant/screen-store";
@@ -41,6 +42,7 @@ type Reply =
       plan?: ChangePlan;
       navigate?: Navigation;
       sources?: Navigation[];
+      evidence?: DataEvidence;
       /** Notes this message added to the workspace's memory. */
       remembered?: string[];
       /** The workspace's permissions let this plan apply without anyone pressing Apply. */
@@ -247,6 +249,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
           ...worked,
           ...(body.plan ? { plan: body.plan, planState: "pending" as const } : {}),
           ...(body.navigate ? { navigate: body.navigate } : {}),
+          ...(body.evidence ? { evidence: body.evidence } : {}),
           ...(body.sources?.length ? { sources: body.sources } : {}),
           ...(body.remembered?.length ? { remembered: body.remembered } : {}),
         });

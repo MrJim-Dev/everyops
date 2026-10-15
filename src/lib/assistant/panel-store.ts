@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
+import type { DataEvidence } from "@/lib/assistant/evidence";
 import type { Navigation } from "@/lib/assistant/screen";
 import type { ChangePlan } from "@/lib/engine/changes";
 
@@ -18,6 +19,7 @@ export type AssistantTurn = {
   navigate?: Navigation;
   /** The records and pages the reply is based on, as links. */
   sources?: Navigation[];
+  evidence?: DataEvidence;
   /** What this message added to the workspace's memory (Settings → Assistant). */
   remembered?: string[];
   /** The plan applied without Apply, as the workspace's permissions allow. */

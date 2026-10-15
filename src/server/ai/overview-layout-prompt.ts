@@ -43,6 +43,7 @@ What makes a good Overview:
 - Then what needs attention: a list or table of pending, unpaid or upcoming records (filtered), and the workspace's
   existing agenda or heatmap cards with the widget component (widgetId) when they exist.
 - 3 to 5 sections with short titles. columns 1 to 4; wide components (stat_cards, tables, chart_interactive) fill the row.
+- Use the button component with a real viewId for shortcuts. Do not invent URLs or put navigation links in markdown.
 - Only record type ids, field ids, option ids and card ids listed below. Sums and averages use number or money fields;
   dates use date, datetime or time range fields; status_overview uses a status field; groupBy uses select, status or
   link fields.

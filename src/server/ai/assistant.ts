@@ -1,6 +1,7 @@
 import "server-only";
 import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
+import type { DataEvidence } from "@/lib/assistant/evidence";
 import { memoryContext, type WorkspaceMemory } from "@/lib/assistant/memory";
 import { permissionsText } from "@/lib/assistant/permissions";
 import { fieldUsage, renameInDesign, renameInPages } from "@/lib/assistant/related";
@@ -65,11 +66,13 @@ import {
   designOp,
 } from "./assistant-prompt";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
+import { reviewCoverage } from "./coverage";
 import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
 import { view } from "./design-prompt";
 import { dataDigest } from "./digest";
 import { generateJsonHedged } from "./gemini";
 import { lookupData } from "./lookup";
+import { lookupProblem } from "./lookup-result";
 
 export type AssistantMessage = { role: "user" | "assistant"; text: string; attachments?: AttachmentRef[] };
 export type AssistantResult =
@@ -83,6 +86,7 @@ export type AssistantResult =
       navigate?: Navigation;
       /** What the reply is based on, as links that open the record or page. */
       sources?: Navigation[];
+      evidence?: DataEvidence;
     }
   | { ok: false; message: string };
 
@@ -1053,6 +1057,7 @@ export async function assistantTurn(input: {
   memory?: WorkspaceMemory;
   /** The one-line description setup wrote for the workspace. */
   summary?: string;
+  signal?: AbortSignal;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
   const role = input.canDesign
@@ -1093,7 +1098,11 @@ export async function assistantTurn(input: {
     today: `${weekday}, ${today}`,
     messages: input.messages,
     onStatus: status,
+    signal: input.signal,
   });
+  const problem = lookupProblem(looked);
+  if (problem)
+    return { ok: true, kind: "clarify", reply: problem, suggestions: [], evidence: looked.evidence };
   const about = input.memory ? memoryContext(input.memory, input.summary) : (input.summary ?? "");
   const usage = fieldUsage(bp);
   const written = pageExcerpts(bp, input.docs);
@@ -1173,14 +1182,10 @@ What the person is looking at:
 ${screen.text}
 
 Data (a digest: counts and totals per record type, then records on screen and small record types in full):
-${digest}${
-  looked
-    ? `
+${digest}
 
-Looked up just now for this message (exact, from the database):
-${looked}`
-    : ""
-}${requestGuide(input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")}
+Lookup evidence for this message:
+${looked.text}${requestGuide(input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")}
 
 Conversation:
 ${input.messages
@@ -1226,6 +1231,7 @@ ${input.messages
         system: ASSISTANT_SYSTEM,
         prompt,
         task: "assistant",
+        signal: input.signal,
         repair: (json) => setAsideBadOps(fixOpNames(json), setAside),
         timeoutMs: 60_000,
         thinking: "LOW",
@@ -1253,7 +1259,11 @@ ${input.messages
       screen: input.screen,
       canManage: input.canDesign,
     });
-    const withNav = { ...(navigate ? { navigate } : {}), ...(sources.length ? { sources } : {}) };
+    const withNav = {
+      ...(looked.evidence ? { evidence: looked.evidence } : {}),
+      ...(navigate ? { navigate } : {}),
+      ...(sources.length ? { sources } : {}),
+    };
     if (a.kind !== "plan") return { ok: true, kind: a.kind, reply: a.reply, suggestions, ...withNav };
     status("Checking the plan against your workspace");
 
@@ -1361,6 +1371,49 @@ ${input.messages
       if (design.ops.length)
         errors.push(...strandedOptions(bp, next, optionUsage(bp, rehearsal?.data.records ?? staged.records)));
     }
+    let coverage: ChangePlan["coverage"];
+    if (!errors.length && (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)) {
+      status("Checking each part of your request");
+      const checked = await reviewCoverage({
+        blueprint: bp,
+        plan: {
+          request: input.messages.at(-1)?.text ?? "",
+          title: a.plan.title,
+          facts: [],
+          steps: [],
+          ops: design.ops,
+          recordOps: recordPart.ops,
+          docOps,
+          teamOps,
+        },
+        conversation: input.messages
+          .slice(-8)
+          .map((m) => `${m.role}: ${m.text}`)
+          .join("\n"),
+        lookup: `${looked.text}\nOn screen: ${screen.text}\nDigest: ${digest}`,
+        today,
+        signal: input.signal,
+      });
+      if (!checked)
+        return {
+          ok: true,
+          kind: "clarify",
+          reply:
+            "I couldn't finish checking this plan against your request. Nothing has changed. Please try again.",
+          suggestions: [],
+          ...withNav,
+        };
+      if (checked.questions.length)
+        return {
+          ok: true,
+          kind: "clarify",
+          reply: checked.questions.join("\n\n"),
+          suggestions: [],
+          ...withNav,
+        };
+      errors.push(...checked.errors.map((e) => `Request coverage: ${e}`));
+      coverage = checked.covered;
+    }
     if (!errors.length && (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)) {
       // Cards the plan adds or changes show their real new value, worked out on the rehearsed workspace.
       const cardFacts = design.ops.flatMap((op) => {
@@ -1387,6 +1440,7 @@ ${input.messages
           // History shows the person's own words, without the note about which section they clicked.
           request: (input.messages.at(-1)?.text ?? "").replace(/^\(About the .+? section I clicked\)\n?/, ""),
           baseVersion: bp.version,
+          coverage,
           title: a.plan.title || "Workspace change",
           facts: facts.slice(0, 6),
           steps: [

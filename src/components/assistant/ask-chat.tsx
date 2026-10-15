@@ -35,8 +35,8 @@ export function AskChat() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-5">
-        <h1 className="flex-1 text-[15px] font-semibold">Ask EveryOps</h1>
+      <header className="flex h-14 shrink-0 items-center gap-1 border-b px-3 sm:gap-2 sm:px-5">
+        <h1 className="min-w-0 flex-1 whitespace-nowrap text-[15px] font-semibold">Ask EveryOps</h1>
         <Button size="sm" variant="ghost" className="hidden md:inline-flex" onClick={toPanel}>
           <ArrowsInSimpleIcon data-icon="inline-start" />
           Side panel
@@ -44,25 +44,33 @@ export function AskChat() {
         <Button
           size="sm"
           variant="ghost"
+          aria-label="History"
           render={<Link href={`${ws.basePath}/history`} />}
           nativeButton={false}
         >
           <ClockCounterClockwiseIcon data-icon="inline-start" />
-          History
+          <span className="hidden sm:inline">History</span>
         </Button>
         <Button
           size="sm"
           variant={chat.showHistory ? "secondary" : "ghost"}
+          aria-label="Conversations"
           aria-pressed={chat.showHistory}
           onClick={() => chat.setShowHistory(!chat.showHistory)}
         >
           <ListIcon data-icon="inline-start" />
-          Conversations
+          <span className="hidden sm:inline">Conversations</span>
         </Button>
         {started ? (
-          <Button size="sm" variant="outline" onClick={chat.clear} disabled={!!chat.pending}>
+          <Button
+            aria-label="New chat"
+            size="sm"
+            variant="outline"
+            onClick={chat.clear}
+            disabled={!!chat.pending}
+          >
             <ChatsCircleIcon data-icon="inline-start" />
-            New chat
+            <span className="hidden sm:inline">New chat</span>
           </Button>
         ) : null}
       </header>

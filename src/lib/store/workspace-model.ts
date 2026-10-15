@@ -53,6 +53,7 @@ export type AskQuestion = {
 };
 /** A workspace Gemini designed, waiting for the owner to create it. */
 export type SetupDraft = {
+  coverage?: { request: string; detail: string }[];
   name: string;
   summary: string;
   data: WorkspaceData;

@@ -11,14 +11,16 @@ staff and more). You get the record types, a digest of the data (counts and tota
 records), what the person is looking at, and the conversation. Another step writes the reply; your job is only to
 call the tools so it has exact facts for the latest message.
 
-- Call tools when the latest message needs numbers or records the digest doesn't already give exactly: filtered or
+- Always call tools for filtered numbers, date-scoped numbers and record edits, even if you can infer the answer from the digest. A zero option tally is not a substitute for checking the requested filters. Use tools for filtered or
   grouped counts and totals ("GCash sales", "this week", "per court", "best seller": aggregate grouped by the line
   item's product field, sum of the quantity), specific records by name, code or date (search_records), or one record
   with its linked records such as an order's lines (get_record).
 - Changes to records ("mark order #1002 as held", "delete Ana's booking") need the record's id: search for it.
+- When a named person or record has no matches, try one relevant spelling or relation lookup if needed, then stop. Never fetch an unfiltered list to replace a missing named record.
 - Make independent calls in the same round. Two or three calls are usually enough.
 - Use field ids and option ids from the record types. Dates are YYYY-MM-DD in Manila time.
-- Call nothing for greetings, design changes (new fields, pages, cards), navigation, or questions the digest answers.
+- Never search a record type that does not exist in the supplied blueprint. Adding a new area to track coaches, clinics or another new kind of work is a design request, not a search for existing records.
+- Call nothing for greetings, design changes (new fields, pages, cards), navigation, or general descriptions the digest answers.
 Then return the note.`;
 
 /** Record types with their fields, options and links: what the tools take as ids. */
@@ -47,7 +49,7 @@ const NAVIGATE =
   /^(please\s+)?(open|go to|take me to|bring me to|show me)\s+(the\s+|my\s+)?[\w\s'&-]{1,40}?\s+(page|tab|settings|history)[\s.!]*$|^(please\s+)?(open|go to|take me to)\s+(settings|history|team|publish)[\s.!]*$/i;
 /** A change to the design: fields, pages, tabs, cards, forms, the website. */
 const DESIGN =
-  /\b(add|create|make|rename|remove|delete|hide|show|move|reorder|put|change|turn)\b[^.?!]*\b(fields?|columns?|pages?|tabs?|cards?|charts?|forms?|automations?|sections?|website|landing page|headline|button|steps?|layout|dashboard|record types?|sidebar)\b/i;
+  /\b(add|create|make|rename|remove|delete|hide|show|move|reorder|put|change|turn)\b[^.?!]*\b(fields?|columns?|pages?|tabs?|cards?|charts?|forms?|automations?|sections?|website|landing page|headline|button|steps?|layout|dashboard|record types?|sidebar|a way to (track|manage))\b/i;
 /** Telling the assistant something about the business ("heads up: we now close at 11"). */
 const STATEMENT = /^(heads up|fyi|just so you know|for your info|note)\b[^?]*$/i;
 /** Advice about the workspace ("what should I set up next?", "how do I share the booking page?"). */
@@ -69,4 +71,12 @@ export function needsLookup(message: string): boolean {
   if (ADVICE.test(text) && !DATA.test(text)) return false;
   if (DESIGN.test(text) && !DATA.test(text)) return false;
   return true;
+}
+
+/** Scoped facts need fresh query evidence, even when the digest appears to imply zero. */
+export function requiresLookupEvidence(message: string): boolean {
+  return (
+    needsLookup(message) &&
+    (DATA.test(message) || /how (many|much)|total|revenue|collected|magkano|ilan|gcash|maya/i.test(message))
+  );
 }

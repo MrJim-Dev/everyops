@@ -9,6 +9,7 @@ describe("needsLookup", () => {
       "Open the courts page",
       "take me to settings",
       "Add a notes field to bookings",
+      "We hired coaches for weekend clinics. Add a way to track coaches and their clinic sessions.",
       "Rename the Players page to Members",
       "Remove the Rates tab",
       "Heads up: on weekends we now close at 11 PM.",

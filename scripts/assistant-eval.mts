@@ -4,16 +4,27 @@
  * business memory, a website and a rules page, sends each request in a fresh conversation, checks the answer against
  * what the request should produce, prints the time each took, and deletes the workspace.
  *
- *   node scripts/assistant-eval.mts                 # against http://localhost:3000 with the demo account
- *   EVAL_BASE=… EVAL_EMAIL=… EVAL_PASSWORD=… node scripts/assistant-eval.mts
+ *   pnpm eval:assistant                 # against http://localhost:3000 with the demo account
+ *   EVAL_BASE=… EVAL_EMAIL=… EVAL_PASSWORD=… pnpm eval:assistant
  */
 
+import { writeFileSync } from "node:fs";
+import type { ChangePlan } from "@/lib/engine/changes";
+import { applyOps } from "@/lib/engine/changes";
+import { applyRecordOps } from "@/lib/engine/records";
+import { qualityFixture } from "./fixtures/assistant-quality";
+
+const fixture = qualityFixture();
+const REPEAT = Math.max(1, Math.min(5, Number(process.env.EVAL_REPEAT) || 1));
+const REPORT = process.env.EVAL_REPORT;
+const KEEP = process.env.EVAL_KEEP === "1";
 const BASE = process.env.EVAL_BASE ?? "http://localhost:3000";
 const EMAIL = process.env.EVAL_EMAIL ?? "james@everyops.app";
 const PASSWORD = process.env.EVAL_PASSWORD ?? "everyops2026";
 const ONLY = process.env.EVAL_ONLY; // run one case by name
 
 let cookie = "";
+let cleanupFailed = false;
 async function call(path: string, init: RequestInit = {}) {
   const res = await fetch(BASE + path, {
     ...init,
@@ -40,15 +51,17 @@ type Result = {
   suggestions?: string[];
   navigate?: { path: string };
   remembered?: string[];
-  plan?: {
-    steps: { label: string; detail: string }[];
-    ops: { op: string; field?: { formula?: { expr: string } }; patch?: { formula?: { expr: string } } }[];
-    recordOps?: { op: string }[];
-    docOps?: { viewId: string }[];
-  };
+  evidence?: { status: string; queries: { scope: string; matched?: number }[] };
+  sources?: { recordId?: string }[];
+  plan?: ChangePlan;
 };
 
-type Case = { name: string; ask: string; expect: (r: Result) => string | null };
+type Case = {
+  name: string;
+  ask: string;
+  history?: { role: "user" | "assistant"; text: string }[];
+  expect: (r: Result) => string | null;
+};
 
 const ops = (r: Result) => [
   ...(r.plan?.ops ?? []).map((o) => o.op),
@@ -56,17 +69,85 @@ const ops = (r: Result) => [
 ];
 const need = (cond: boolean, why: string) => (cond ? null : why);
 
+const amounts = (r: Result) =>
+  [...(r.reply ?? "").matchAll(/(?:₱|PHP\s*|P(?=\d))\s*([\d,]+(?:\.\d{1,2})?)/gi)].map((m) =>
+    Number(m[1].replaceAll(",", "")),
+  );
 const CASES: Case[] = [
+  {
+    name: "multi-part request",
+    ask: "Rename Players to Members and Courts to Venues. Keep Bookings unchanged.",
+    expect: (r) => {
+      if (!r.plan) return "must propose a plan";
+      const next = applyOps(fixture.blueprint, r.plan.ops);
+      return (
+        need(
+          next.systems.find((s) => s.id === "players")?.name === "Members" &&
+            next.systems.find((s) => s.id === "courts")?.name === "Venues" &&
+            next.systems.find((s) => s.id === "bookings")?.name === "Bookings" &&
+            JSON.stringify(next.entities.find((e) => e.id === "booking")) ===
+              JSON.stringify(fixture.blueprint.entities.find((e) => e.id === "booking")) &&
+            JSON.stringify(next.views.filter((v) => v.entityId === "booking")) ===
+              JSON.stringify(fixture.blueprint.views.filter((v) => v.entityId === "booking")),
+          "must fulfill both renames and preserve Bookings",
+        ) ?? need((r.plan.coverage?.length ?? 0) >= 2, "must review each requested change")
+      );
+    },
+  },
+  {
+    name: "taglish total",
+    ask: "Magkano ang nakolekta natin this month, paid bookings lang?",
+    expect: (r) =>
+      need(r.kind === "answer" && amounts(r).includes(1200), "must answer ₱1,200 for Taglish too"),
+  },
+  {
+    name: "follow-up filter",
+    ask: "GCash lang please.",
+    history: [
+      { role: "user", text: "How much have we collected this month?" },
+      { role: "assistant", text: "₱1,200 from paid bookings this month." },
+    ],
+    expect: (r) =>
+      need(
+        r.kind === "answer" && amounts(r).includes(400) && !amounts(r).includes(1200),
+        "must preserve this month and paid, then filter to GCash: ₱400",
+      ),
+  },
+  {
+    name: "empty result",
+    ask: "How many paid bookings used Maya this month?",
+    expect: (r) =>
+      need(
+        r.kind === "answer" && /\b0\b|no paid|no bookings|none|zero/i.test(r.reply ?? ""),
+        "must report no matches, not a retrieval failure",
+      ) ?? need(r.evidence?.status === "no_matches", "must distinguish an empty result"),
+  },
   { name: "greeting", ask: "Hi!", expect: (r) => need(r.kind === "answer", "should just answer") },
   {
     name: "collected this month",
     ask: "How much have we collected this month?",
-    expect: (r) => need(r.kind === "answer" && /₱/.test(r.reply ?? ""), "should answer with an amount"),
+    expect: (r) =>
+      need(
+        r.kind === "answer" &&
+          amounts(r).includes(fixture.expected.monthlyCollected) &&
+          !amounts(r).includes(2400),
+        "must report exactly ₱1,200 collected, excluding unpaid, cancelled and last month",
+      ) ?? need(r.evidence?.status === "success", "must include successful retrieval evidence"),
   },
   {
     name: "unpaid today",
     ask: "Who still hasn't paid for today's bookings?",
-    expect: (r) => need(r.kind === "answer", "should answer"),
+    expect: (r) =>
+      need(
+        r.kind === "answer" &&
+          /Miguel Santos/.test(r.reply ?? "") &&
+          !/Ana Reyes|Bea Lim/.test(r.reply ?? ""),
+        "must identify only Miguel as unpaid today",
+      ) ??
+      need(
+        !!r.sources?.some((s) => s.recordId === fixture.expected.unpaidId),
+        "must link the exact unpaid booking",
+      ),
   },
   {
     name: "navigate",
@@ -91,13 +172,40 @@ const CASES: Case[] = [
   {
     name: "record update",
     ask: "Mark Miguel Santos's booking today as paid",
-    expect: (r) => need(ops(r).includes("update_record"), "should update the booking"),
+    expect: (r) => {
+      const edits = r.plan?.recordOps ?? [];
+      const intended = edits.find(
+        (o) => o.op === "update_record" && o.recordId === fixture.expected.unpaidId,
+      );
+      if (!intended || intended.op !== "update_record" || intended.patch.status !== "paid")
+        return "must mark the exact Miguel booking paid";
+      const changed = applyRecordOps(fixture, edits);
+      if (changed.errors.length) return changed.errors.join("; ");
+      const changedIds = fixture.records
+        .filter(
+          (before) =>
+            JSON.stringify(before.data) !==
+            JSON.stringify(changed.data.records.find((after) => after.id === before.id)?.data),
+        )
+        .map((r) => r.id);
+      return (
+        need(
+          changedIds.length === 1 && changedIds[0] === fixture.expected.unpaidId,
+          "must preserve every unrelated record",
+        ) ?? need(!!r.plan?.coverage?.length, "must review request coverage")
+      );
+    },
   },
   {
     name: "record delete",
     ask: "Delete Kevin Sy's Friday 8 PM booking",
     expect: (r) =>
-      need(ops(r).includes("delete_record") || r.kind === "clarify", "should delete or ask which"),
+      need(
+        !r.plan &&
+          (r.kind === "clarify" ||
+            (r.kind === "answer" && !!r.evidence?.queries.some((q) => q.matched === 0))),
+        "must report the absent booking or clarify without deleting another record",
+      ),
   },
   {
     name: "future price change",
@@ -105,11 +213,17 @@ const CASES: Case[] = [
     expect: (r) => {
       if (r.kind === "clarify") return null;
       const exprs = (r.plan?.ops ?? [])
-        .map((o) => o.field?.formula?.expr ?? o.patch?.formula?.expr ?? "")
+        .map((o) =>
+          o.op === "add_field"
+            ? (o.field.formula?.expr ?? "")
+            : o.op === "update_field"
+              ? (o.patch.formula?.expr ?? "")
+              : "",
+        )
         .join(" ");
       // Next Monday in Manila, as the formula should name it.
       const today = new Date(
-        new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" }) + "T12:00:00+08:00",
+        `${new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })}T12:00:00+08:00`,
       );
       const monday = new Date(today.getTime() + ((8 - today.getUTCDay()) % 7 || 7) * 86_400_000);
       const iso = monday.toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
@@ -132,7 +246,7 @@ const CASES: Case[] = [
   {
     name: "remembers",
     ask: "Heads up: on weekends we now close at 11 PM.",
-    expect: (r) => need((r.remembered?.length ?? 0) > 0, "should save it to memory"),
+    expect: (r) => need(r.kind === "answer", "should acknowledge the business update"),
   },
 ];
 
@@ -142,19 +256,12 @@ async function makeWorkspace() {
     body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
   });
   if (signin.status !== 200) throw new Error(`sign-in failed: ${signin.status}`);
-  const list = JSON.parse((await call("/api/workspaces")).text).workspaces as {
-    slug: string;
-    source?: { systemId: string };
-  }[];
-  const court = list.find((w) => (w.source?.systemId ?? "").includes("court"));
-  if (!court) throw new Error("no court-bookings workspace to copy");
-  const full = JSON.parse((await call(`/api/workspaces/${court.slug}`)).text).workspace;
-  const bp = full.versions[full.currentVersion - 1];
+  const bp = fixture.blueprint;
   const form = bp.views.find((v: { type: string }) => v.type === "form");
   const blueprint = {
     ...bp,
     version: 1,
-    workspaceName: "Rally House",
+    workspaceName: "Rally House · AI quality",
     systems: [
       ...bp.systems,
       { id: "website", name: "Website", icon: "house", viewIds: ["home"], widgetIds: [] },
@@ -196,7 +303,7 @@ async function makeWorkspace() {
     },
   };
   const meta = {
-    name: "Rally House",
+    name: "Rally House · AI quality",
     summary: "Pickleball court bookings",
     createdAt: now,
     openedAt: now,
@@ -208,7 +315,7 @@ async function makeWorkspace() {
       create: true,
       meta: { ...meta, setup },
       versions: [{ version: 1, blueprint }],
-      records: { put: full.records.map((record: unknown) => ({ record, rev: null })), delete: [] },
+      records: { put: fixture.records.map((record: unknown) => ({ record, rev: null })), delete: [] },
       pages: {
         house_rules: { body: "# House rules\n\n- Check the Players page for your visits.\n", updatedAt: now },
       },
@@ -222,11 +329,11 @@ async function makeWorkspace() {
   return slug;
 }
 
-async function ask(slug: string, text: string) {
+async function ask(slug: string, text: string, history: Case["history"] = []) {
   const started = Date.now();
   const res = await call("/api/ai/assistant", {
     method: "POST",
-    body: JSON.stringify({ workspaceId: slug, messages: [{ role: "user", text }] }),
+    body: JSON.stringify({ workspaceId: slug, messages: [...history, { role: "user", text }] }),
   });
   // A dropped connection or a crash leaves no result line: that counts as a failure, not a script error.
   const lines = res.text.split("\n").flatMap((l) => {
@@ -249,12 +356,27 @@ async function ask(slug: string, text: string) {
 
 const slug = await makeWorkspace();
 console.log(`workspace ${slug}\n`);
-const rows: { name: string; ms: number; pass: boolean; note: string }[] = [];
+const rows: { name: string; ms: number; pass: boolean; note: string; result: Result; steps: string[] }[] = [];
 try {
-  for (const c of CASES.filter((x) => !ONLY || x.name === ONLY)) {
-    const { result, ms } = await ask(slug, c.ask);
-    const problem = result.ok ? c.expect(result) : (result.message ?? "failed");
+  for (const c of Array.from({ length: REPEAT }, () =>
+    CASES.filter((x) => !ONLY || x.name === ONLY),
+  ).flat()) {
+    const { result, ms, steps } = await ask(slug, c.ask, c.history);
+    let problem = result.ok ? c.expect(result) : (result.message ?? "failed");
+    if (!problem && c.name === "remembers") {
+      const saved = await call(`/api/workspaces/${slug}/memory`);
+      const notes = JSON.parse(saved.text).memory?.notes ?? [];
+      const matches = notes.filter(
+        (n: { text: string }) => /weekend/i.test(n.text) && /11\s*(PM|p\.m)|23:00/i.test(n.text),
+      );
+      problem = need(
+        saved.status === 200 && matches.length === 1,
+        "must persist the weekend closing time once, including after a repeated request",
+      );
+    }
     rows.push({
+      result,
+      steps,
       name: c.name,
       ms,
       pass: !problem,
@@ -265,11 +387,26 @@ try {
     );
   }
 } finally {
-  await call(`/api/workspaces/${slug}`, { method: "DELETE" });
+  if (!KEEP) {
+    const deleted = await call(`/api/workspaces/${slug}`, { method: "DELETE" });
+    if (deleted.status !== 200) {
+      cleanupFailed = true;
+      console.error(`Evaluation cleanup failed: ${deleted.status}`);
+    }
+  }
+  if (REPORT)
+    writeFileSync(
+      REPORT,
+      JSON.stringify(
+        { workspace: slug, base: BASE, at: new Date().toISOString(), expected: fixture.expected, rows },
+        null,
+        2,
+      ),
+    );
 }
 const times = rows.map((r) => r.ms).sort((a, b) => a - b);
 const median = times[Math.floor(times.length / 2)] ?? 0;
 console.log(
   `\n${rows.filter((r) => r.pass).length}/${rows.length} passed · median ${(median / 1000).toFixed(1)} s · slowest ${((times.at(-1) ?? 0) / 1000).toFixed(1)} s`,
 );
-process.exitCode = rows.every((r) => r.pass) ? 0 : 1;
+process.exitCode = rows.length > 0 && rows.every((r) => r.pass) && !cleanupFailed ? 0 : 1;

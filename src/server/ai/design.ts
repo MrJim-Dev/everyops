@@ -34,6 +34,8 @@ import { MAX_HTML_BYTES } from "@/lib/public/html-page";
 import { copyFromBlocks, type SiteCopy, standardBlocks } from "@/lib/public/site-template";
 import { hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
+import { CHOICE_REPAIR_SYSTEM, choicePatch, choiceRepairAnswer } from "./choice-repair-prompt";
+import { reviewCoverage } from "./coverage";
 import {
   DESIGN_SYSTEM,
   type Design,
@@ -857,7 +859,13 @@ const EXAMPLES = (() => {
 })();
 
 export type DesignResult =
-  | { ok: true; name: string; summary: string; data: WorkspaceData }
+  | {
+      ok: true;
+      name: string;
+      summary: string;
+      data: WorkspaceData;
+      coverage?: { request: string; detail: string }[];
+    }
   | { ok: false; message: string };
 
 /** How long the design rounds may take in all. Samples and the Overview (60 s at most) come after, inside Cloud Run's limit. */
@@ -1033,25 +1041,53 @@ export async function designWorkspace(
       stats.repairs++;
       onEvent?.({ type: "stage", stage: "fix", issues: errors.length });
       stats.calls++;
-      const result = await generateJsonHedged(
-        designPatch,
-        {
-          system: DESIGN_SYSTEM,
-          prompt: `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour design:\n${JSON.stringify(previous.data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\n\n${PATCH_INSTRUCTIONS}`,
-          task: "design-fix",
-          timeoutMs: 120_000,
-          idleMs: 30_000,
-          firstPartMs: 60_000,
-          thinking: "LOW",
-          maxOutputTokens: 12_000,
-          enumLiterals: true,
-          signal,
-        },
-        { hedgeMs: 40_000, attempts: 3, afterSilence: true },
-      );
-      if (!result.ok) return failed(result.error);
-      stats.output += result.tokens.output;
-      ({ design: designed, removed } = applyDesignPatch(previous.data, result.data));
+      // The large design schema can repeatedly omit optional choices. A tiny required schema repairs them directly.
+      let choices: DesignPatch | null = null;
+      if (
+        round === 1 &&
+        errors.some((e) => e.startsWith("Brief coverage:") && /options|choices|stages/i.test(e))
+      ) {
+        const result = await generateJsonHedged(
+          choiceRepairAnswer,
+          {
+            system: CHOICE_REPAIR_SYSTEM,
+            task: "design-choices",
+            thinking: "LOW",
+            signal,
+            prompt: `Brief: ${brief}\nProblems: ${errors.join("\n")}\nExisting choice fields: ${JSON.stringify(previous.data.entities.map((e) => ({ id: e.id, name: e.name, fields: e.fields.filter((f) => ["status", "select", "multi_select"].includes(f.type)) })))}`,
+            timeoutMs: 30_000,
+            maxOutputTokens: 2500,
+          },
+          { hedgeMs: 12_000, afterSilence: true, attempts: 2 },
+        );
+        if (result.ok) {
+          stats.output += result.tokens.output;
+          choices = choicePatch(previous.data, result.data);
+        }
+      }
+      if (choices) {
+        ({ design: designed, removed } = applyDesignPatch(previous.data, choices));
+      } else {
+        const result = await generateJsonHedged(
+          designPatch,
+          {
+            system: DESIGN_SYSTEM,
+            prompt: `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour design:\n${JSON.stringify(previous.data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\n\n${PATCH_INSTRUCTIONS}`,
+            task: "design-fix",
+            timeoutMs: 120_000,
+            idleMs: 30_000,
+            firstPartMs: 60_000,
+            thinking: "LOW",
+            maxOutputTokens: 12_000,
+            enumLiterals: true,
+            signal,
+          },
+          { hedgeMs: 40_000, attempts: 3, afterSilence: true },
+        );
+        if (!result.ok) return failed(result.error);
+        stats.output += result.tokens.output;
+        ({ design: designed, removed } = applyDesignPatch(previous.data, result.data));
+      }
     }
     const build = (data: Design) => {
       const raw = toBlueprint(data);
@@ -1089,6 +1125,26 @@ export async function designWorkspace(
     }
     const { data, samples, name, bp, partial } = built;
     errors = built.errors;
+    let coverage: { request: string; detail: string }[] = [];
+    if (!errors.length) {
+      onEvent?.({ type: "stage", stage: "check" });
+      stats.calls++;
+      const checked = await reviewCoverage({
+        blueprint: bp,
+        plan: { request: brief, title: name, facts: [], steps: [], ops: [] },
+        conversation: "New workspace setup. The brief contains the owner's requirements.",
+        lookup: `Planned sample records (illustrative, not live business records): ${JSON.stringify(samples)}`,
+        today: todayKey(now),
+        signal,
+        mode: "setup",
+      });
+      if (!checked)
+        return failed("I couldn't finish checking the design against your brief. Please try again.");
+      if (checked.questions.length)
+        return failed(`I need a detail before I can finish: ${checked.questions.join(" ")}`);
+      errors.push(...checked.errors.map((e) => `Brief coverage: ${e}`));
+      coverage = checked.covered;
+    }
     if (!errors.length) {
       show(sketchOf(bp, true));
       onEvent?.({ type: "stage", stage: "finish" });
@@ -1106,7 +1162,7 @@ export async function designWorkspace(
       const blueprint = withCustomSite(laidOut, records, name, now);
       const sketch = sketchOf(blueprint, true);
       show(sketch && { ...sketch, samples: records.length });
-      return done({ ok: true, name, summary: data.summary, data: { blueprint, records } });
+      return done({ ok: true, name, summary: data.summary, data: { blueprint, records }, coverage });
     }
     console.warn(JSON.stringify({ event: "design_rejected", round, errors: errors.slice(0, 15) }));
     if (!partial.length)

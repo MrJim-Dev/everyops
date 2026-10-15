@@ -10,10 +10,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { getEntity, recordTitle } from "@/lib/blueprint/lookup";
 import type { LayoutItem } from "@/lib/blueprint/types";
+import { viewMarkdown } from "@/lib/components/view-markdown";
 import { cn } from "@/lib/utils";
 import { Nothing, PartCard, PartGrid, useRows, useViewHref } from "./shared";
 
 type P<T> = { props: T };
+
+function ViewMarkdown({ children, className }: { children: string; className?: string }) {
+  const hrefFor = useViewHref();
+  return <Markdown className={className}>{viewMarkdown(children, hrefFor)}</Markdown>;
+}
 
 export function HeadingPart({ props }: P<{ title: string; description?: string }>) {
   return (
@@ -27,7 +33,7 @@ export function HeadingPart({ props }: P<{ title: string; description?: string }
 export function TextPart({ props }: P<{ markdown: string }>) {
   return (
     <div className="h-full bg-background px-5 py-4">
-      <Markdown className="text-[13px]">{props.markdown}</Markdown>
+      <ViewMarkdown className="text-[13px]">{props.markdown}</ViewMarkdown>
     </div>
   );
 }
@@ -38,7 +44,7 @@ export function CardPart({
   return (
     <PartCard title={props.title} description={props.description} footer={props.footer}>
       {props.markdown ? (
-        <Markdown className="text-[13px] text-muted-foreground">{props.markdown}</Markdown>
+        <ViewMarkdown className="text-[13px] text-muted-foreground">{props.markdown}</ViewMarkdown>
       ) : null}
     </PartCard>
   );
@@ -135,7 +141,7 @@ export function AccordionItems({ items }: { items: { title: string; body: string
         <AccordionItem key={`${i}-${it.title}`} value={String(i)}>
           <AccordionTrigger className="py-2.5">{it.title}</AccordionTrigger>
           <AccordionContent>
-            <Markdown className="text-[13px] text-muted-foreground">{it.body}</Markdown>
+            <ViewMarkdown className="text-[13px] text-muted-foreground">{it.body}</ViewMarkdown>
           </AccordionContent>
         </AccordionItem>
       ))}

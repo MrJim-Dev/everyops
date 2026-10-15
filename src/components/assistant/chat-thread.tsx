@@ -20,6 +20,7 @@ import type { Navigation } from "@/lib/assistant/screen";
 import type { Blueprint } from "@/lib/blueprint/types";
 import type { ChangePlan } from "@/lib/engine/changes";
 import { cn } from "@/lib/utils";
+import { DataEvidenceNote } from "./data-evidence";
 import { PlanCard } from "./plan-card";
 import { ActivityLog, type Link, Linked, recordName, SourceLinks } from "./reply-extras";
 import { RevertDialog } from "./revert-dialog";
@@ -299,6 +300,7 @@ export function ChatThread({
                     className={cn(fresh && !failed && "animate-rise")}
                     style={fresh && !failed ? { animationDelay: `${typingMs(t.text)}ms` } : undefined}
                   >
+                    {t.evidence ? <DataEvidenceNote evidence={t.evidence} /> : null}
                     {t.sources?.length ? <SourceLinks sources={t.sources} onGo={chat.go} /> : null}
                     {t.remembered?.length ? <RememberedNote notes={t.remembered} /> : null}
                     {failed && i === turns.length - 1 && !pending ? (

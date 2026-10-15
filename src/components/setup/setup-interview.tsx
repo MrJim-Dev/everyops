@@ -474,6 +474,24 @@ export function SetupInterview({
                     <p className="text-[12.5px] text-muted-foreground">{draft.summary}</p>
                   </div>
                   <ul className="divide-y">
+                    {draft.coverage?.length ? (
+                      <li className="rounded-md border border-primary/20 bg-primary/5 p-3">
+                        <p className="mb-2 font-medium">
+                          Brief checked · {draft.coverage.length} requirements
+                        </p>
+                        <ul className="space-y-1.5">
+                          {draft.coverage.map((item) => (
+                            <li key={item.request} className="flex gap-2">
+                              <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                              <span>
+                                {item.request}
+                                <span className="block text-muted-foreground">{item.detail}</span>
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ) : null}
                     {draft.preview.map((item) => (
                       <li key={item.label} className="flex gap-4 px-4 py-3 text-[13px]">
                         <span className="w-28 shrink-0 font-medium">{item.label}</span>
