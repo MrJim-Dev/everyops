@@ -1,8 +1,9 @@
 import "server-only";
 import { attachmentNames, attachmentsIn } from "@/lib/assistant/attachments";
+import { partialString } from "@/lib/partial-json";
 import type { AskQuestion, ChatTurn, SetupQuestion } from "@/lib/store/workspace-model";
 import { promptWithFiles } from "./attachments";
-import { generateJson } from "./gemini";
+import { generateJsonHedged } from "./gemini";
 import { INTERVIEW_SYSTEM, type Turn, turn } from "./interview-prompt";
 import { referencesText, setupReferences } from "./references";
 import {
@@ -20,6 +21,13 @@ export type InterviewTurn = Omit<Turn, "questions"> & {
   suggestions: string[];
 };
 export type InterviewResult = { ok: true; turn: InterviewTurn } | { ok: false; message: string };
+
+/** A reply while Gemini writes it: the message so far, then what it is writing after it. */
+export type InterviewPartial = {
+  message: string;
+  /** After the message: the brief (a design turn) or the questions, profile and plan (an ask turn). */
+  next?: "brief" | "questions";
+};
 
 const checklistText = (questions: SetupQuestion[]) =>
   questions.length
@@ -39,6 +47,8 @@ export async function interviewTurn(
   messages: Pick<ChatTurn, "role" | "text" | "attachments">[],
   userId: string,
   previous: SetupQuestion[] = [],
+  /** The reply as it streams in; `undefined` when a rejected answer is being written again. */
+  onPartial?: (partial: InterviewPartial | undefined) => void,
 ): Promise<InterviewResult> {
   const transcript = messages
     .map((m) => {
@@ -62,17 +72,54 @@ export async function interviewTurn(
   );
   let prompt = base;
   let held: { turn: InterviewTurn; open: SetupQuestion[] } | null = null;
+  // The reply streams to the owner from whichever hedged twin is furthest along, a few times a second.
+  let leader = -1;
+  let longest = 0;
+  let sentAt = 0;
+  let sent = "";
+  const onText = (text: string, attempt: number) => {
+    if (!onPartial || (attempt !== leader && text.length <= longest)) return;
+    leader = attempt;
+    longest = text.length;
+    const message = partialString(text, "message");
+    if (!message?.value.trim()) return;
+    const action = /"action"\s*:\s*"(ask|design)"/.exec(text)?.[1];
+    const partial: InterviewPartial = {
+      message: named(message.value),
+      ...(message.done ? { next: action === "design" ? "brief" : "questions" } : {}),
+    };
+    const key = JSON.stringify(partial);
+    if (key === sent || (Date.now() - sentAt < 120 && !message.done)) return;
+    sent = key;
+    sentAt = Date.now();
+    onPartial(partial);
+  };
   for (let attempt = 0; attempt < 3; attempt++) {
-    const result = await generateJson(turn, {
-      system: INTERVIEW_SYSTEM,
-      prompt,
-      task: "interview",
-      // A full brief for a business with public pages, add-ons and payments runs 3–8k characters (every status and
-      // list type spelled out) and takes 10–20 s; a real runaway is still caught early (filler without spaces,
-      // endless numbers) or past 12k characters.
-      timeoutMs: 40_000,
-      maxStringChars: 12_000,
-    });
+    if (attempt) {
+      onPartial?.(undefined);
+      leader = -1;
+      longest = 0;
+      sent = "";
+    }
+    // A full brief for a business with public pages, add-ons and payments runs 3–8k characters (every status and
+    // list type spelled out) and takes 25–40 s on 3.7 Flash; a fixed 40 s limit cut such answers off while they
+    // were still streaming and started over. A call is judged by its streaming instead: a twin starts after 15 s
+    // without a part, a call silent for 15 s mid-answer (25 s before its first part) is stopped. A real runaway is
+    // still caught early (filler without spaces, endless numbers) or past 12k characters.
+    const result = await generateJsonHedged(
+      turn,
+      {
+        system: INTERVIEW_SYSTEM,
+        prompt,
+        task: "interview",
+        timeoutMs: 100_000,
+        idleMs: 15_000,
+        firstPartMs: 25_000,
+        maxStringChars: 12_000,
+        onText,
+      },
+      { hedgeMs: 15_000, attempts: 3, afterSilence: true },
+    );
     if (result.ok) {
       const t = result.data;
       if (t.action === "design" && t.brief.trim().length < 40) {

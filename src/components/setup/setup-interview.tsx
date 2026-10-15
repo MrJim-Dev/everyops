@@ -127,34 +127,18 @@ function QuestionList({
   );
 }
 
-async function post<T>(
+/**
+ * Posts to a setup endpoint that answers in JSON lines and hands each line to onEvent until the final one
+ * (type "done" or "error"), which it returns. Errors before the stream starts (sign-in, rate limit) come as JSON.
+ */
+async function streamLines<T extends { type: string }>(
   url: string,
   body: unknown,
-): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
+  onEvent: (event: T) => void,
+): Promise<{ ok: true; last: T } | { ok: false; message: string }> {
+  const dropped = "The connection dropped before EveryOps answered. Try again.";
   try {
     const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = (await res.json().catch(() => null)) as (T & { ok?: boolean; message?: string }) | null;
-    if (res.ok && data?.ok) return { ok: true, data };
-    return { ok: false, message: data?.message ?? "Something went wrong. Try again." };
-  } catch {
-    return { ok: false, message: "You seem to be offline. Check your connection and try again." };
-  }
-}
-
-/**
- * Asks for the design and follows its progress: the route streams JSON lines (the step, a sketch of the pages as
- * they're written, then the draft or an error). Errors before the stream starts (sign-in, rate limit) come as JSON.
- */
-async function streamDesign(
-  body: unknown,
-  onEvent: (event: DesignStreamEvent) => void,
-): Promise<{ ok: true; draft: SetupDraft } | { ok: false; message: string }> {
-  try {
-    const res = await fetch("/api/ai/design", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -173,17 +157,36 @@ async function streamDesign(
       buffer = lines.pop() ?? "";
       for (const line of lines) {
         if (!line.trim()) continue;
-        const event = JSON.parse(line) as DesignStreamEvent;
-        if (event.type === "done") return { ok: true, draft: event.draft as SetupDraft };
-        if (event.type === "error") return { ok: false, message: event.message };
+        const event = JSON.parse(line) as T;
+        if (event.type === "done" || event.type === "error") return { ok: true, last: event };
         onEvent(event);
       }
     }
-    return { ok: false, message: "The connection dropped before your workspace was ready. Try again." };
+    return { ok: false, message: dropped };
   } catch {
-    return { ok: false, message: "The connection dropped before your workspace was ready. Try again." };
+    return { ok: false, message: dropped };
   }
 }
+
+/** Asks for the design and follows its progress: the step, a sketch of the pages as they're written, then the draft. */
+async function streamDesign(
+  body: unknown,
+  onEvent: (event: DesignStreamEvent) => void,
+): Promise<{ ok: true; draft: SetupDraft } | { ok: false; message: string }> {
+  const result = await streamLines<DesignStreamEvent>("/api/ai/design", body, onEvent);
+  if (!result.ok) return result;
+  const last = result.last;
+  if (last.type === "done") return { ok: true, draft: last.draft as SetupDraft };
+  return { ok: false, message: last.type === "error" ? last.message : "Something went wrong. Try again." };
+}
+
+/** A reply while Gemini writes it (see /api/ai/interview). */
+type LiveReply = { message: string; next?: "brief" | "questions" };
+type InterviewEvent =
+  | { type: "partial"; partial: LiveReply | null }
+  | { type: "ping" }
+  | { type: "done"; result: ({ ok: true } & InterviewReply) | { ok: false; message: string } }
+  | { type: "error"; message: string };
 
 type InterviewReply = {
   turn: {
@@ -231,6 +234,7 @@ export function SetupInterview({
   const [draft, setDraft] = useState<SetupDraft | undefined>(progress?.draft);
   const [phase, setPhase] = useState<Phase>("idle");
   const [build, setBuild] = useState<DesignBuild | null>(null);
+  const [live, setLive] = useState<LiveReply | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [input, setInput] = useState("");
   const files = useAttachments();
@@ -291,10 +295,34 @@ export function SetupInterview({
     async (history: ChatTurn[], checklist: SetupQuestion[]) => {
       setPhase("thinking");
       setFailure(null);
-      const result = await post<InterviewReply>("/api/ai/interview", {
-        messages: history.map(({ role, text, attachments }) => ({ role, text, attachments })),
-        questions: checklist,
-      });
+      setLive(null);
+      let shown = false;
+      const streamed = await streamLines<InterviewEvent>(
+        "/api/ai/interview",
+        {
+          messages: history.map(({ role, text, attachments }) => ({ role, text, attachments })),
+          questions: checklist,
+        },
+        (event) => {
+          if (event.type !== "partial") return;
+          shown = !!event.partial;
+          setLive(event.partial);
+        },
+      );
+      setLive(null);
+      const result: { ok: true; data: InterviewReply } | { ok: false; message: string } = !streamed.ok
+        ? streamed
+        : streamed.last.type === "done" && streamed.last.result.ok
+          ? { ok: true, data: streamed.last.result }
+          : {
+              ok: false,
+              message:
+                streamed.last.type === "error"
+                  ? streamed.last.message
+                  : streamed.last.type === "done" && !streamed.last.result.ok
+                    ? streamed.last.result.message
+                    : "Something went wrong. Try again.",
+            };
       if (!result.ok) {
         setPhase("idle");
         return setFailure({ message: result.message, retry: () => void ask(history, checklist) });
@@ -311,6 +339,8 @@ export function SetupInterview({
         ...(turn.action === "design" ? { brief: turn.brief, workspaceName: turn.workspaceName } : {}),
       };
       const next = [...history, reply];
+      // The reply was read as it streamed in: it shows whole instead of typing itself out again.
+      if (shown) seen.current = next.length;
       setMessages(next);
       if (turn.action === "design") await design(next, turn.brief, turn.workspaceName);
       else setPhase("idle");
@@ -464,7 +494,27 @@ export function SetupInterview({
               </AssistantMessage>
             ) : null}
 
-            {phase === "thinking" ? (
+            {phase === "thinking" && live ? (
+              <AssistantMessage key="live">
+                <TypedRich text={live.message} typing={false} />
+                {live.next ? (
+                  <div className="mt-3">
+                    <Thinking
+                      label={
+                        live.next === "brief"
+                          ? "Writing the plan for your workspace"
+                          : "Getting your questions ready"
+                      }
+                      slowLabel={
+                        live.next === "brief"
+                          ? "Writing the plan for your workspace"
+                          : "Getting your questions ready"
+                      }
+                    />
+                  </div>
+                ) : null}
+              </AssistantMessage>
+            ) : phase === "thinking" ? (
               <Thinking key="thinking" label="Thinking" avatar="round" />
             ) : phase === "designing" && build ? (
               <DesignProgress key="designing" build={build} />
