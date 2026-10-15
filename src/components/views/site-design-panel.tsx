@@ -6,10 +6,17 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { useWorkspace } from "@/components/workspace/workspace-context";
-import type { HtmlPageView } from "@/lib/blueprint/types";
+import type { BookingLayout, HtmlPageView } from "@/lib/blueprint/types";
 import { designOf, redesignSite, THEMES } from "@/lib/public/custom-site";
 import { REFERENCES, SECTION_STYLES, type SectionKind, type SiteDesign } from "@/lib/public/site-sections";
+import { mainForm } from "@/lib/public/site-template";
 import { useWorkspaces } from "@/lib/store/workspaces";
+
+const CALENDARS: Record<BookingLayout, string> = {
+  days: "Day strip, then times",
+  grid: "Courts side by side",
+  month: "Month calendar, then times",
+};
 
 const KIND_NAMES: Record<SectionKind, string> = {
   nav: "Top bar",
@@ -54,6 +61,16 @@ export function SiteDesignPanel({
   const undoChange = useWorkspaces((s) => s.undoChange);
   const saved = useMemo(() => designOf(ws.blueprint, view), [ws.blueprint, view]);
   const [draft, setDraft] = useState<SiteDesign>(saved);
+  // The booking form's calendar (day strip, courts side by side, month), for timed bookings.
+  const form = mainForm(ws.blueprint);
+  const timed = form && ws.blueprint.entities.find((e) => e.id === form.entityId)?.booking;
+  const timedField =
+    timed &&
+    ws.blueprint.entities
+      .find((e) => e.id === form?.entityId)
+      ?.fields.find((f) => f.id === timed.timeFieldId);
+  const calendarFor = timed && timedField?.range !== "dates" ? form : undefined;
+  const [calendar, setCalendar] = useState<BookingLayout>(calendarFor?.bookingLayout ?? "days");
   const edited = !!ws.docs[view.id]?.body;
 
   const show = (next: SiteDesign) => {
@@ -79,6 +96,9 @@ export function SiteDesignPanel({
           detail:
             [
               ...(draft.theme !== saved.theme ? [`Theme: ${draft.theme ?? "automatic"}`] : []),
+              ...(calendarFor && calendar !== (calendarFor.bookingLayout ?? "days")
+                ? [`Calendar: ${CALENDARS[calendar]}`]
+                : []),
               ...changed.map(
                 (k) => `${KIND_NAMES[k]}: ${SECTION_STYLES[k].find((s) => s.id === draft[k])?.label}`,
               ),
@@ -91,6 +111,9 @@ export function SiteDesignPanel({
           viewId: view.id,
           view: { ...view, html: out.html, live: { blocks: view.live?.blocks ?? [], design: { ...draft } } },
         },
+        ...(calendarFor && calendar !== (calendarFor.bookingLayout ?? "days")
+          ? [{ op: "update_view" as const, viewId: calendarFor.id, patch: { bookingLayout: calendar } }]
+          : []),
         ...(out.booking && booking?.type === "html"
           ? [
               {
@@ -177,6 +200,22 @@ export function SiteDesignPanel({
             </NativeSelect>
           </div>
         ))}
+        {calendarFor ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-muted-foreground">Booking calendar</span>
+            <NativeSelect
+              aria-label="Booking calendar"
+              value={calendar}
+              onChange={(e) => setCalendar(e.target.value as BookingLayout)}
+            >
+              {(Object.keys(CALENDARS) as BookingLayout[]).map((id) => (
+                <NativeSelectOption key={id} value={id}>
+                  {CALENDARS[id]}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </div>
+        ) : null}
       </div>
       <div className="flex flex-col gap-2 border-t px-4 py-3">
         {edited ? (
