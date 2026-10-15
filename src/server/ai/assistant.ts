@@ -4,7 +4,12 @@ import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import type { DataEvidence } from "@/lib/assistant/evidence";
 import { memoryContext, type WorkspaceMemory } from "@/lib/assistant/memory";
-import { permissionsText } from "@/lib/assistant/permissions";
+import {
+  type AssistantPermissions,
+  appliesOnItsOwn,
+  permissionsText,
+  removesSomething,
+} from "@/lib/assistant/permissions";
 import { withoutPickedNote } from "@/lib/assistant/picked";
 import { fieldUsage, renameInDesign, renameInPages } from "@/lib/assistant/related";
 import {
@@ -1385,7 +1390,26 @@ ${input.messages
     }
     let coverage: ChangePlan["coverage"];
     let missed: string[] = [];
-    if (!errors.length && (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)) {
+    const quick =
+      !errors.length &&
+      skipsReview(
+        input.messages.at(-1)?.text ?? "",
+        // What Gemini wrote, not the follow-on changes code adds (a renamed page's other tabs, cards and pages).
+        a.plan.ops.length +
+          a.plan.renames.length +
+          a.plan.formulas.length +
+          a.plan.recordOps.length +
+          a.plan.pageTexts.length +
+          a.plan.team.length,
+        { ops: design.ops, recordOps: recordPart.ops, docOps, teamOps },
+        input.memory?.permissions,
+      );
+    if (quick) console.info(JSON.stringify({ event: "request_coverage", skipped: "single_ask" }));
+    if (
+      !quick &&
+      !errors.length &&
+      (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)
+    ) {
       status("Checking each part of your request");
       const checked = await reviewCoverage({
         blueprint: bp,
@@ -1511,6 +1535,32 @@ ${input.messages
     ok: false,
     message: "I couldn't put together a valid change for that. Try describing it a little differently.",
   };
+}
+
+/** Most changes Gemini may write for a plan that skips the request review. */
+const MAX_QUICK_CHANGES = 3;
+
+/**
+ * Whether a plan can go to the person without the request review (a second Gemini call, 8–26 s): a short request that
+ * asks for one thing, a plan of a few changes written by Gemini (`asked`; renaming a page, it renames the page's tab
+ * too) that removes nothing, and only when the person approves it before it applies. There's no other part of the
+ * request to miss, and the plan card already shows what it will do. A one-line request for a lot ("add stock
+ * management") makes a bigger plan and is still reviewed.
+ */
+export function skipsReview(
+  request: string,
+  asked: number,
+  plan: Pick<ChangePlan, "ops" | "recordOps" | "docOps" | "teamOps">,
+  permissions?: AssistantPermissions,
+): boolean {
+  if (asked < 1 || asked > MAX_QUICK_CHANGES || plan.teamOps?.length || removesSomething(plan)) return false;
+  if (permissions && appliesOnItsOwn(plan, permissions)) return false;
+  const ask = withoutPickedNote(request.replace(/^\(About the .+? section I clicked\)\n?/, "")).trim();
+  return (
+    ask.length > 0 &&
+    ask.length <= 160 &&
+    !/[,;\n&]|\b(and|also|then|plus|as well|but|except|unless)\b/i.test(ask)
+  );
 }
 
 /**
