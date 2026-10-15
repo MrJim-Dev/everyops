@@ -1,9 +1,10 @@
 "use client";
 
-import { CheckIcon, PencilSimpleIcon, PlusIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
+import { CheckIcon, PencilSimpleIcon, PlusIcon, SparkleIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -51,6 +52,9 @@ export function AssistantSettings() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [fresh, setFresh] = useState<Draft>({ kind: "business", text: "" });
+  const [drafts, setDrafts] = useState<Draft[] | null>(null);
+  const [picked, setPicked] = useState<number[]>([]);
+  const [drafting, setDrafting] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -105,7 +109,22 @@ export function AssistantSettings() {
       </SettingsPage>
     );
 
-  const drafts = (notes: MemoryNote[]): Draft[] => notes.map(({ id, kind, text }) => ({ id, kind, text }));
+  const toDrafts = (notes: MemoryNote[]): Draft[] => notes.map(({ id, kind, text }) => ({ id, kind, text }));
+
+  const draft = async () => {
+    setDrafting(true);
+    try {
+      const res = await fetch(`/api/workspaces/${ws.id}/memory/draft`, { method: "POST" });
+      const body = (await res.json()) as { ok: boolean; notes?: Draft[]; message?: string };
+      if (!body.ok || !body.notes) throw new Error(body.message ?? "Couldn't draft notes");
+      setDrafts(body.notes);
+      setPicked(body.notes.map((_, i) => i));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't draft notes");
+    } finally {
+      setDrafting(false);
+    }
+  };
   const changed = instructions.trim() !== memory.instructions.trim();
   const permsChanged = JSON.stringify(perms) !== JSON.stringify(memory.permissions);
   const saveNotes = (notes: Draft[], done: string) =>
@@ -129,7 +148,7 @@ export function AssistantSettings() {
               disabled={!permsChanged || saving}
               onClick={() =>
                 void save(
-                  { instructions: memory.instructions, notes: drafts(memory.notes), permissions: perms },
+                  { instructions: memory.instructions, notes: toDrafts(memory.notes), permissions: perms },
                   "Permissions saved",
                 )
               }
@@ -192,7 +211,7 @@ export function AssistantSettings() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (changed) void save({ instructions, notes: drafts(memory.notes) }, "Instructions saved");
+          if (changed) void save({ instructions, notes: toDrafts(memory.notes) }, "Instructions saved");
         }}
       >
         <SettingsSection
@@ -237,7 +256,56 @@ export function AssistantSettings() {
             ? `${memory.notes.length} notes · updated ${formatDateTime(memory.updatedAt)}`
             : "Nothing saved yet."
         }
+        action={
+          manager ? (
+            <Button size="sm" variant="outline" disabled={drafting} onClick={() => void draft()}>
+              <SparkleIcon data-icon="inline-start" className={cn(drafting && "animate-pulse")} />
+              {drafting ? "Reading the workspace…" : "Draft from workspace"}
+            </Button>
+          ) : null
+        }
       >
+        {drafts ? (
+          <div className="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/[0.04] p-3">
+            <p className="text-[13px] font-medium">
+              {drafts.length
+                ? `Drafted from ${ws.name}: keep what's right`
+                : "Nothing new to add: the memory already covers what the workspace shows."}
+            </p>
+            {drafts.map((d, i) => (
+              // biome-ignore lint/a11y/noLabelWithoutControl: the checkbox inside is the control
+              <label key={d.text} className="flex cursor-pointer items-start gap-2.5 text-[13px]">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={picked.includes(i)}
+                  onCheckedChange={(on) => setPicked(on ? [...picked, i] : picked.filter((x) => x !== i))}
+                />
+                <span className="min-w-0">
+                  {d.text}
+                  <span className="ml-1.5 text-[11.5px] text-muted-foreground">{KIND_LABEL[d.kind]}</span>
+                </span>
+              </label>
+            ))}
+            <div className="flex gap-2 pt-1">
+              {drafts.length ? (
+                <Button
+                  size="sm"
+                  disabled={!picked.length || saving}
+                  onClick={async () => {
+                    const kept = drafts.filter((_, i) => picked.includes(i));
+                    const label = `${kept.length} ${kept.length === 1 ? "note" : "notes"} added`;
+                    if (await saveNotes([...toDrafts(memory.notes), ...kept], label)) setDrafts(null);
+                  }}
+                >
+                  Add {picked.length} {picked.length === 1 ? "note" : "notes"}
+                </Button>
+              ) : null}
+              <Button size="sm" variant="ghost" onClick={() => setDrafts(null)}>
+                {drafts.length ? "Discard" : "Close"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {MEMORY_KINDS.map((kind) => {
           const notes = memory.notes.filter((n) => n.kind === kind);
           return (
@@ -252,7 +320,7 @@ export function AssistantSettings() {
                           className="flex min-w-0 flex-1 items-center gap-2"
                           onSubmit={async (e) => {
                             e.preventDefault();
-                            const next = drafts(memory.notes).map((d) =>
+                            const next = toDrafts(memory.notes).map((d) =>
                               d.id === n.id ? { ...d, text: editText } : d,
                             );
                             if (await saveNotes(next, "Note saved")) setEditing(null);
@@ -305,7 +373,7 @@ export function AssistantSettings() {
                                 disabled={saving}
                                 onClick={() =>
                                   void saveNotes(
-                                    drafts(memory.notes.filter((x) => x.id !== n.id)),
+                                    toDrafts(memory.notes.filter((x) => x.id !== n.id)),
                                     "Note forgotten",
                                   )
                                 }
@@ -333,7 +401,7 @@ export function AssistantSettings() {
             onSubmit={async (e) => {
               e.preventDefault();
               if (!fresh.text.trim()) return;
-              if (await saveNotes([...drafts(memory.notes), fresh], "Note added"))
+              if (await saveNotes([...toDrafts(memory.notes), fresh], "Note added"))
                 setFresh({ kind: fresh.kind, text: "" });
             }}
           >

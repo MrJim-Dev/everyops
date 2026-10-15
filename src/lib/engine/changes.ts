@@ -149,6 +149,8 @@ export type TeamOp =
 export type PlanStep = { kind: "add" | "change" | "remove"; label: string; detail: string };
 
 export type ChangePlan = {
+  /** Requirements reviewed against validated operations before presenting the plan. */
+  coverage?: { request: string; detail: string }[];
   request: string;
   title: string;
   /** Plain-language facts the owner should confirm, e.g. "Peak hours: 5–10 PM". */

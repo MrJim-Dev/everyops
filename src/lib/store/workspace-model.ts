@@ -53,6 +53,7 @@ export type AskQuestion = {
 };
 /** A workspace Gemini designed, waiting for the owner to create it. */
 export type SetupDraft = {
+  coverage?: { request: string; detail: string }[];
   name: string;
   summary: string;
   data: WorkspaceData;
@@ -89,6 +90,9 @@ export type ChangeEntry = {
   replacedDocs?: Record<string, PageDoc | null>;
   /** The team as it was before the change invited people or changed roles. Restored on undo. */
   teamBefore?: { members: Member[]; invites: Invite[] };
+  /** Who applied it (their name), and whether Ask EveryOps applied it on its own, as the permissions allow. */
+  appliedBy?: string;
+  auto?: boolean;
 };
 
 export type Workspace = {

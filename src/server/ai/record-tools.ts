@@ -214,8 +214,9 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
 
   async function where(e: Entity, filters: unknown, query?: unknown) {
     const parts: RawBuilder<unknown>[] = [sql`workspace_id = ${workspaceId}`, sql`entity_id = ${e.id}`];
-    for (const f of Array.isArray(filters) ? (filters as Filter[]).slice(0, 10) : [])
-      parts.push(await condition(e, f));
+    if (Array.isArray(filters) && filters.length > 10)
+      throw new ToolError("Use at most 10 filters; no conditions were applied.");
+    for (const f of Array.isArray(filters) ? (filters as Filter[]) : []) parts.push(await condition(e, f));
     const q = typeof query === "string" ? query.trim() : "";
     if (q) parts.push(sql`(data::text ilike ${`%${q}%`} or id = ${q})`);
     return sql.join(parts, sql` and `);
@@ -304,7 +305,7 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
         }
         const { rows } = await sql<{ key: string | null; value: string | number | null; n: number }>`
           select ${key} as key, ${value} as value, count(*)::int as n from workspace_record where ${cond}
-          group by 1 order by ${args.dateFieldId ? sql`1` : sql`2 desc nulls last`} limit 60`.execute(db);
+          group by 1 order by ${args.dateFieldId ? sql`1` : sql`2 desc nulls last`} limit 61`.execute(db);
         const names =
           groupField && kindOf(groupField) === "relation"
             ? await titles(rows.map((r) => r.key).filter((k): k is string => !!k))
@@ -315,7 +316,8 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
           return names?.get(k) ?? option?.label ?? k;
         };
         return {
-          groups: rows.map((r) => ({
+          truncated: rows.length > 60,
+          groups: rows.slice(0, 60).map((r) => ({
             key: r.key,
             label: label(r.key),
             value: r.value === null ? null : Number(r.value),
@@ -367,7 +369,7 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
               records: await present(l.entity, kids),
             };
         }
-        return { record: (await present(e, [row]))[0], type: e.id, linked };
+        return { record: (await present(e, [row]))[0], type: e.id, linked, truncated: links.length > 6 };
       }
       return { error: `Unknown tool "${name}"` };
     } catch (error) {

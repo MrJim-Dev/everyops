@@ -1,0 +1,717 @@
+{
+  "at": "2026-10-15T06:03:52.343Z",
+  "base": "http://localhost:3017",
+  "brief": "Build a small repair shop called Fixwell. Track customers with name and phone, repair jobs linked to customers with item description and quoted price, and job statuses Received, In progress, Ready, Collected and Cancelled. Give staff a jobs table and status board, a customers table, and an overview showing jobs awaiting collection. Keep all pages private. No online booking or checkout.",
+  "rows": [
+    {
+      "run": 1,
+      "ms": 33862,
+      "pass": true,
+      "checks": {
+        "valid": true,
+        "reviewed": true,
+        "customerFields": true,
+        "jobFields": true,
+        "statuses": true,
+        "jobsTable": true,
+        "customersTable": true,
+        "board": true,
+        "awaitingCollection": true,
+        "private": true,
+        "noBookingOrCheckout": true
+      },
+      "stages": [
+        {
+          "type": "stage",
+          "stage": "design"
+        },
+        {
+          "type": "stage",
+          "stage": "check"
+        },
+        {
+          "type": "stage",
+          "stage": "finish"
+        }
+      ],
+      "draft": {
+        "name": "Fixwell",
+        "summary": "Repair jobs and customers",
+        "data": {
+          "blueprint": {
+            "version": 1,
+            "workspaceName": "Fixwell",
+            "systems": [
+              {
+                "id": "overview",
+                "name": "Overview",
+                "icon": "gauge",
+                "viewIds": ["overview_layout"],
+                "widgetIds": ["ready_for_collection"],
+                "layout": "overview"
+              },
+              {
+                "id": "jobs",
+                "name": "Jobs",
+                "icon": "briefcase",
+                "viewIds": ["jobs_table", "jobs_board", "new_job_form"],
+                "widgetIds": []
+              },
+              {
+                "id": "customers",
+                "name": "Customers",
+                "icon": "users",
+                "viewIds": ["customers_table"],
+                "widgetIds": []
+              }
+            ],
+            "entities": [
+              {
+                "id": "customer",
+                "name": "Customer",
+                "pluralName": "Customers",
+                "primaryFieldId": "name",
+                "fields": [
+                  {
+                    "id": "name",
+                    "name": "Name",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "phone",
+                    "name": "Phone",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "notes",
+                    "name": "Notes",
+                    "type": "text"
+                  },
+                  {
+                    "id": "total_jobs",
+                    "name": "Total jobs",
+                    "type": "rollup",
+                    "rollup": {
+                      "childEntityId": "repair_job",
+                      "viaFieldId": "customer",
+                      "op": "count"
+                    }
+                  },
+                  {
+                    "id": "total_spent",
+                    "name": "Total spent",
+                    "type": "rollup",
+                    "rollup": {
+                      "childEntityId": "repair_job",
+                      "viaFieldId": "customer",
+                      "op": "sum",
+                      "fieldId": "quoted_price"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "repair_job",
+                "name": "Repair Job",
+                "pluralName": "Repair Jobs",
+                "primaryFieldId": "code",
+                "fields": [
+                  {
+                    "id": "code",
+                    "name": "Job #",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "customer",
+                    "name": "Customer",
+                    "type": "relation",
+                    "required": true,
+                    "relation": {
+                      "entityId": "customer"
+                    }
+                  },
+                  {
+                    "id": "item_description",
+                    "name": "Item description",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "issue_details",
+                    "name": "Issue details",
+                    "type": "long_text"
+                  },
+                  {
+                    "id": "received_date",
+                    "name": "Date received",
+                    "type": "date",
+                    "required": true
+                  },
+                  {
+                    "id": "status",
+                    "name": "Status",
+                    "type": "status",
+                    "required": true,
+                    "options": [
+                      {
+                        "id": "received",
+                        "label": "Received",
+                        "tone": "neutral"
+                      },
+                      {
+                        "id": "in_progress",
+                        "label": "In progress",
+                        "tone": "accent"
+                      },
+                      {
+                        "id": "ready",
+                        "label": "Ready",
+                        "tone": "warning"
+                      },
+                      {
+                        "id": "collected",
+                        "label": "Collected",
+                        "tone": "success"
+                      },
+                      {
+                        "id": "cancelled",
+                        "label": "Cancelled",
+                        "tone": "danger"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "quoted_price",
+                    "name": "Quoted price",
+                    "type": "money",
+                    "required": true
+                  },
+                  {
+                    "id": "payment_status",
+                    "name": "Payment status",
+                    "type": "select",
+                    "required": true,
+                    "options": [
+                      {
+                        "id": "unpaid",
+                        "label": "Unpaid",
+                        "tone": "warning"
+                      },
+                      {
+                        "id": "paid",
+                        "label": "Paid",
+                        "tone": "success"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "payment_method",
+                    "name": "Payment method",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "cash",
+                        "label": "Cash",
+                        "tone": "neutral"
+                      },
+                      {
+                        "id": "gcash",
+                        "label": "GCash",
+                        "tone": "neutral"
+                      },
+                      {
+                        "id": "maya",
+                        "label": "Maya",
+                        "tone": "neutral"
+                      },
+                      {
+                        "id": "bank_transfer",
+                        "label": "Bank Transfer",
+                        "tone": "neutral"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "views": [
+              {
+                "id": "jobs_table",
+                "entityId": "repair_job",
+                "name": "All jobs",
+                "type": "table",
+                "fieldIds": [
+                  "code",
+                  "customer",
+                  "item_description",
+                  "received_date",
+                  "status",
+                  "quoted_price",
+                  "payment_status"
+                ],
+                "sort": [
+                  {
+                    "fieldId": "received_date",
+                    "dir": "desc"
+                  }
+                ],
+                "totals": true
+              },
+              {
+                "id": "jobs_board",
+                "entityId": "repair_job",
+                "name": "Status board",
+                "type": "kanban",
+                "statusFieldId": "status",
+                "cardFieldIds": ["customer", "item_description", "quoted_price", "payment_status"]
+              },
+              {
+                "id": "new_job_form",
+                "entityId": "repair_job",
+                "name": "New job",
+                "type": "form",
+                "fieldIds": [
+                  "code",
+                  "customer",
+                  "item_description",
+                  "issue_details",
+                  "received_date",
+                  "status",
+                  "quoted_price",
+                  "payment_status",
+                  "payment_method"
+                ],
+                "intro": "Log a new repair job and customer quote."
+              },
+              {
+                "id": "customers_table",
+                "entityId": "customer",
+                "name": "All customers",
+                "type": "table",
+                "fieldIds": ["name", "phone", "total_jobs", "total_spent", "notes"],
+                "sort": [
+                  {
+                    "fieldId": "name",
+                    "dir": "asc"
+                  }
+                ]
+              },
+              {
+                "id": "overview_layout",
+                "name": "Overview",
+                "entityId": "",
+                "type": "layout",
+                "sections": [
+                  {
+                    "id": "section_1",
+                    "title": "Today",
+                    "columns": 4,
+                    "items": [
+                      {
+                        "id": "stat_cards",
+                        "component": "stat_cards",
+                        "span": 4,
+                        "props": {
+                          "stats": [
+                            {
+                              "title": "Jobs Received Today",
+                              "entityId": "repair_job",
+                              "op": "count",
+                              "filter": "is_today(received_date)",
+                              "compare": {
+                                "dateFieldId": "received_date",
+                                "period": "day"
+                              }
+                            },
+                            {
+                              "title": "Jobs Ready for Pickup",
+                              "entityId": "repair_job",
+                              "op": "count",
+                              "filter": "status == 'ready'"
+                            },
+                            {
+                              "title": "Active Repairs",
+                              "entityId": "repair_job",
+                              "op": "count",
+                              "filter": "status == 'received' || status == 'in_progress'"
+                            },
+                            {
+                              "title": "Collected Revenue (Month)",
+                              "entityId": "repair_job",
+                              "op": "sum",
+                              "fieldId": "quoted_price",
+                              "filter": "status == 'collected' && is_this_month(received_date)",
+                              "format": "money"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "section_2",
+                    "title": "Action Needed",
+                    "columns": 2,
+                    "items": [
+                      {
+                        "id": "widget",
+                        "component": "widget",
+                        "span": 1,
+                        "props": {
+                          "widgetId": "ready_for_collection"
+                        }
+                      },
+                      {
+                        "id": "table",
+                        "component": "table",
+                        "span": 1,
+                        "props": {
+                          "title": "In Progress Repairs",
+                          "entityId": "repair_job",
+                          "fieldIds": [
+                            "code",
+                            "customer",
+                            "item_description",
+                            "quoted_price",
+                            "payment_status"
+                          ],
+                          "filter": "status == 'in_progress'",
+                          "sort": [
+                            {
+                              "fieldId": "received_date",
+                              "dir": "asc"
+                            }
+                          ],
+                          "limit": 5,
+                          "viewId": "jobs_table"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "section_3",
+                    "title": "Shop Operations & Pipeline",
+                    "columns": 3,
+                    "items": [
+                      {
+                        "id": "status_overview",
+                        "component": "status_overview",
+                        "span": 2,
+                        "props": {
+                          "title": "Job Pipeline Status",
+                          "entityId": "repair_job",
+                          "statusFieldId": "status"
+                        }
+                      },
+                      {
+                        "id": "chart_pie",
+                        "component": "chart_pie",
+                        "span": 1,
+                        "props": {
+                          "title": "Payment Methods",
+                          "entityId": "repair_job",
+                          "op": "count",
+                          "filter": "payment_status == 'paid'",
+                          "groupByFieldId": "payment_method",
+                          "donut": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "section_4",
+                    "title": "Performance & Revenue",
+                    "columns": 4,
+                    "items": [
+                      {
+                        "id": "chart_interactive",
+                        "component": "chart_interactive",
+                        "span": 3,
+                        "props": {
+                          "title": "Completed Repair Revenue",
+                          "description": "Daily quoted value of collected repair jobs",
+                          "entityId": "repair_job",
+                          "op": "sum",
+                          "fieldId": "quoted_price",
+                          "filter": "status == 'collected'",
+                          "dateFieldId": "received_date"
+                        }
+                      },
+                      {
+                        "id": "leaderboard",
+                        "component": "leaderboard",
+                        "span": 1,
+                        "props": {
+                          "title": "Top Customers",
+                          "entityId": "customer",
+                          "op": "sum",
+                          "fieldId": "total_spent",
+                          "groupByFieldId": "name",
+                          "limit": 5
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "widgets": [
+              {
+                "id": "ready_for_collection",
+                "title": "Jobs ready for pickup",
+                "entityId": "repair_job",
+                "filter": "status == 'ready'",
+                "type": "list",
+                "metric": {
+                  "op": "count"
+                },
+                "list": {
+                  "fieldIds": ["code", "customer", "item_description", "quoted_price"],
+                  "limit": 5,
+                  "viewId": "jobs_table"
+                },
+                "span": "main"
+              },
+              {
+                "id": "status_overview",
+                "title": "Jobs by status",
+                "entityId": "repair_job",
+                "type": "chart",
+                "metric": {
+                  "op": "count"
+                },
+                "chart": {
+                  "kind": "donut",
+                  "groupByFieldId": "status",
+                  "bucket": "day"
+                },
+                "span": "side"
+              },
+              {
+                "id": "recent_jobs_list",
+                "title": "Recently received",
+                "entityId": "repair_job",
+                "filter": "status == 'received'",
+                "type": "list",
+                "metric": {
+                  "op": "count"
+                },
+                "list": {
+                  "fieldIds": ["code", "customer", "item_description", "received_date"],
+                  "limit": 5,
+                  "viewId": "jobs_table"
+                },
+                "span": "main"
+              },
+              {
+                "id": "overview_count_today",
+                "title": "Repair Jobs today",
+                "entityId": "repair_job",
+                "type": "stat",
+                "filter": "status != 'cancelled'",
+                "metric": {
+                  "op": "count"
+                },
+                "compare": {
+                  "dateFieldId": "received_date",
+                  "period": "day"
+                },
+                "sparkline": true
+              },
+              {
+                "id": "overview_collected_today",
+                "title": "Sales today",
+                "entityId": "repair_job",
+                "type": "stat",
+                "filter": "status != 'cancelled'",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "quoted_price"
+                },
+                "compare": {
+                  "dateFieldId": "received_date",
+                  "period": "day"
+                },
+                "sparkline": true
+              },
+              {
+                "id": "overview_by_day",
+                "title": "Revenue this month",
+                "entityId": "repair_job",
+                "type": "chart",
+                "filter": "status != 'cancelled'",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "quoted_price"
+                },
+                "chart": {
+                  "kind": "bar",
+                  "dateFieldId": "received_date",
+                  "bucket": "day"
+                }
+              }
+            ],
+            "rules": []
+          },
+          "records": [
+            {
+              "id": "customer_1",
+              "entityId": "customer",
+              "data": {
+                "name": "Juan Dela Cruz",
+                "phone": "09171234567",
+                "notes": "Regular customer",
+                "total_jobs": 2,
+                "total_spent": 1050
+              },
+              "createdAt": "2026-10-15T06:03:18.491Z",
+              "updatedAt": "2026-10-15T06:03:18.491Z"
+            },
+            {
+              "id": "customer_2",
+              "entityId": "customer",
+              "data": {
+                "name": "Maria Santos",
+                "phone": "09189876543",
+                "notes": "Prefers GCash payments",
+                "total_jobs": 1,
+                "total_spent": 1800
+              },
+              "createdAt": "2026-10-15T06:03:18.491Z",
+              "updatedAt": "2026-10-15T06:03:18.491Z"
+            },
+            {
+              "id": "customer_3",
+              "entityId": "customer",
+              "data": {
+                "name": "Arnel Reyes",
+                "phone": "09205551234",
+                "notes": "Referred by neighbor",
+                "total_jobs": 1,
+                "total_spent": 1200
+              },
+              "createdAt": "2026-10-15T06:03:18.491Z",
+              "updatedAt": "2026-10-15T06:03:18.491Z"
+            },
+            {
+              "id": "repair_job_4",
+              "entityId": "repair_job",
+              "data": {
+                "code": "JOB-1001",
+                "customer": "customer_1",
+                "item_description": "Panasonic Stand Fan",
+                "issue_details": "Motor not spinning, capacitor replacement needed",
+                "received_date": "2026-10-12",
+                "status": "ready",
+                "quoted_price": 450,
+                "payment_status": "unpaid"
+              },
+              "createdAt": "2026-10-15T06:03:18.491Z",
+              "updatedAt": "2026-10-15T06:03:18.491Z"
+            },
+            {
+              "id": "repair_job_5",
+              "entityId": "repair_job",
+              "data": {
+                "code": "JOB-1002",
+                "customer": "customer_2",
+                "item_description": "Asus Vivobook Laptop",
+                "issue_details": "Broken charging port and thermal paste repasting",
+                "received_date": "2026-10-14",
+                "status": "in_progress",
+                "quoted_price": 1800,
+                "payment_status": "unpaid"
+              },
+              "createdAt": "2026-10-15T06:03:18.491Z",
+              "updatedAt": "2026-10-15T06:03:18.491Z"
+            },
+            {
+              "id": "repair_job_6",
+              "entityId": "repair_job",
+              "data": {
+                "code": "JOB-1003",
+                "customer": "customer_3",
+                "item_description": "Samsung Microwave Oven",
+                "issue_details": "Not heating, replaced fuse and door switch",
+                "received_date": "2026-10-10",
+                "status": "collected",
+                "quoted_price": 1200,
+                "payment_status": "paid",
+                "payment_method": "gcash"
+              },
+              "createdAt": "2026-10-15T06:03:18.491Z",
+              "updatedAt": "2026-10-15T06:03:18.491Z"
+            },
+            {
+              "id": "repair_job_7",
+              "entityId": "repair_job",
+              "data": {
+                "code": "JOB-1004",
+                "customer": "customer_1",
+                "item_description": "Makita Impact Drill",
+                "issue_details": "Sparks coming from carbon brushes",
+                "received_date": "2026-10-15",
+                "status": "received",
+                "quoted_price": 600,
+                "payment_status": "unpaid"
+              },
+              "createdAt": "2026-10-15T06:03:18.491Z",
+              "updatedAt": "2026-10-15T06:03:18.491Z"
+            }
+          ]
+        },
+        "preview": [
+          {
+            "label": "Customers",
+            "detail": "Phone, Notes · 3 sample records"
+          },
+          {
+            "label": "Repair Jobs",
+            "detail": "Customer, Item description, Issue details, Date received, Status, Quoted price, Payment status, Payment method · 4 sample records"
+          },
+          {
+            "label": "Screens",
+            "detail": "All jobs, Status board (Board), New job (form), All customers, Overview (Overview layout)"
+          },
+          {
+            "label": "Dashboard",
+            "detail": "Jobs ready for pickup, Jobs by status, Recently received, Repair Jobs today, Sales today, Revenue this month"
+          }
+        ],
+        "coverage": [
+          {
+            "request": "Track customers with name and phone",
+            "detail": "Customer entity is created with required Name and Phone text fields."
+          },
+          {
+            "request": "Track repair jobs linked to customers with item description and quoted price",
+            "detail": "Repair Job entity includes a relation to Customer, an Item description field, and a Quoted price money field."
+          },
+          {
+            "request": "Support job statuses Received, In progress, Ready, Collected, and Cancelled",
+            "detail": "The Status field includes options for Received, In progress, Ready, Collected, and Cancelled."
+          },
+          {
+            "request": "Provide staff with a jobs table and status board",
+            "detail": "The Jobs page includes an 'All jobs' table view and a 'Status board' kanban view."
+          },
+          {
+            "request": "Provide staff with a customers table",
+            "detail": "The Customers page includes an 'All customers' table view displaying customer details."
+          },
+          {
+            "request": "Provide an overview showing jobs awaiting collection",
+            "detail": "The Overview page includes a 'Jobs ready for pickup' list widget filtered to jobs with 'ready' status."
+          },
+          {
+            "request": "Keep all pages private with no online booking or checkout",
+            "detail": "All created pages are standard private internal staff pages without public booking or checkout forms."
+          }
+        ]
+      }
+    }
+  ]
+}

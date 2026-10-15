@@ -1,9 +1,10 @@
 import "server-only";
 import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
+import type { DataEvidence } from "@/lib/assistant/evidence";
 import { memoryContext, type WorkspaceMemory } from "@/lib/assistant/memory";
 import { permissionsText } from "@/lib/assistant/permissions";
-import { fieldUsage, renameInPages } from "@/lib/assistant/related";
+import { fieldUsage, renameInDesign, renameInPages } from "@/lib/assistant/related";
 import {
   describeScreen,
   type Navigation,
@@ -65,11 +66,13 @@ import {
   designOp,
 } from "./assistant-prompt";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
+import { reviewCoverage } from "./coverage";
 import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
 import { view } from "./design-prompt";
 import { dataDigest } from "./digest";
 import { generateJsonHedged } from "./gemini";
 import { lookupData } from "./lookup";
+import { lookupProblem } from "./lookup-result";
 
 export type AssistantMessage = { role: "user" | "assistant"; text: string; attachments?: AttachmentRef[] };
 export type AssistantResult =
@@ -83,6 +86,7 @@ export type AssistantResult =
       navigate?: Navigation;
       /** What the reply is based on, as links that open the record or page. */
       sources?: Navigation[];
+      evidence?: DataEvidence;
     }
   | { ok: false; message: string };
 
@@ -371,9 +375,14 @@ export function toDesignOps(
     const newName = "name" in o ? o.name.trim() : "";
     switch (o.op) {
       case "add_field":
-        if (o.entityId && o.field)
-          ops.push({ op: "add_field", entityId: o.entityId, field: o.field as Field });
-        else errors.push(`${at}: needs entityId and field`);
+        if (o.entityId && o.field) {
+          const owner = bp.entities.find((e) => e.id === o.entityId)?.name ?? o.entityId;
+          ops.push({
+            op: "add_field",
+            entityId: o.entityId,
+            field: withStatusOptions(o.field as Field, owner),
+          });
+        } else errors.push(`${at}: needs entityId and field`);
         break;
       case "update_field":
         if (o.entityId && o.fieldId && o.patch)
@@ -389,8 +398,13 @@ export function toDesignOps(
         else errors.push(`${at}: needs name`);
         break;
       case "add_entity":
-        if (o.entity) ops.push({ op: "add_entity", entity: toEntity(o.entity) });
-        else errors.push(`${at}: needs entity`);
+        if (o.entity) {
+          const entity = toEntity(o.entity);
+          ops.push({
+            op: "add_entity",
+            entity: { ...entity, fields: entity.fields.map((f) => withStatusOptions(f, entity.name)) },
+          });
+        } else errors.push(`${at}: needs entity`);
         break;
       case "add_view":
         if (o.view && !VIEW_TYPES.has(o.view.type))
@@ -1043,6 +1057,7 @@ export async function assistantTurn(input: {
   memory?: WorkspaceMemory;
   /** The one-line description setup wrote for the workspace. */
   summary?: string;
+  signal?: AbortSignal;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
   const role = input.canDesign
@@ -1083,61 +1098,63 @@ export async function assistantTurn(input: {
     today: `${weekday}, ${today}`,
     messages: input.messages,
     onStatus: status,
+    signal: input.signal,
   });
+  const problem = lookupProblem(looked);
+  if (problem)
+    return { ok: true, kind: "clarify", reply: problem, suggestions: [], evidence: looked.evidence };
   const about = input.memory ? memoryContext(input.memory, input.summary) : (input.summary ?? "");
   const usage = fieldUsage(bp);
   const written = pageExcerpts(bp, input.docs);
-  const context = `Today in Manila: ${weekday}, ${today}
-
-About this business (the workspace's memory; read it first: it's what you are helping build):
+  const sidebar = bp.systems
+    .map(
+      (s) =>
+        `- ${s.name} (${s.id}): ${
+          [
+            ...s.viewIds.map((id) => {
+              const v = bp.views.find((x) => x.id === id);
+              if (!v) return id;
+              const extra =
+                v.type === "form" || v.type === "landing"
+                  ? `${isPublic(v) ? ", public" : ", team only"}${
+                      v.blocks?.length
+                        ? `, blocks: ${v.blocks.map((b) => `${b.type} ${b.id}`).join(" / ")}`
+                        : ""
+                    }${
+                      // The form's fields as update_view writes them: steps and the blocks each step shows.
+                      v.type === "form" ? `, fields: ${JSON.stringify(markersOf(v))}` : ""
+                    }${v.type === "form" ? visitorView(bp, v) : ""}`
+                  : v.type === "layout"
+                    ? `${isPublic(v) ? ", public" : ", team only"}, its layout (rewrite it whole with pageTexts): ${layoutJson(v)}`
+                    : v.type === "html"
+                      ? isPublic(v)
+                        ? ", public"
+                        : ", team only"
+                      : v.type === "checkout"
+                        ? // What the Register really shows, so "where do I pick the branch" gets a true answer.
+                          `, the register asks: products, payment method${registerFields(bp, v)
+                            .map(
+                              ({ field }) =>
+                                `, ${field.name} (${field.id}${field.required ? ", required" : ""})`,
+                            )
+                            .join(
+                              "",
+                            )}${v.fieldIds?.length ? `, fieldIds: ${JSON.stringify(v.fieldIds)}` : ""}`
+                        : "";
+              return `${v.name} (${v.id}, ${v.type}${v.entityId ? ` of ${v.entityId}` : ""}${extra})`;
+            }),
+            ...(s.widgetIds.length ? [`${s.widgetIds.length} dashboard widgets`] : []),
+          ].join(", ") || "empty"
+        }`,
+    )
+    .join("\n");
+  // Stable parts first (the business, its pages, the blueprint, page text), then what changes every message: Gemini
+  // reuses an identical prompt start (implicit caching), which reads faster and costs less.
+  const context = `About this business (the workspace's memory; read it first: it's what you are helping build):
 ${about || "Nothing saved yet. Work it out from the workspace's pages and records."}
 
-${permissions}${team}
-
-What the person is looking at:
-${screen.text}
-
 Sidebar pages (in order), with their tabs:
-${bp.systems
-  .map(
-    (s) =>
-      `- ${s.name} (${s.id}): ${
-        [
-          ...s.viewIds.map((id) => {
-            const v = bp.views.find((x) => x.id === id);
-            if (!v) return id;
-            const extra =
-              v.type === "form" || v.type === "landing"
-                ? `${isPublic(v) ? ", public" : ", team only"}${
-                    v.blocks?.length
-                      ? `, blocks: ${v.blocks.map((b) => `${b.type} ${b.id}`).join(" / ")}`
-                      : ""
-                  }${
-                    // The form's fields as update_view writes them: steps and the blocks each step shows.
-                    v.type === "form" ? `, fields: ${JSON.stringify(markersOf(v))}` : ""
-                  }${v.type === "form" ? visitorView(bp, v) : ""}`
-                : v.type === "layout"
-                  ? `${isPublic(v) ? ", public" : ", team only"}, its layout (rewrite it whole with pageTexts): ${layoutJson(v)}`
-                  : v.type === "html"
-                    ? isPublic(v)
-                      ? ", public"
-                      : ", team only"
-                    : v.type === "checkout"
-                      ? // What the Register really shows, so "where do I pick the branch" gets a true answer.
-                        `, the register asks: products, payment method${registerFields(bp, v)
-                          .map(
-                            ({ field }) =>
-                              `, ${field.name} (${field.id}${field.required ? ", required" : ""})`,
-                          )
-                          .join("")}${v.fieldIds?.length ? `, fieldIds: ${JSON.stringify(v.fieldIds)}` : ""}`
-                      : "";
-            return `${v.name} (${v.id}, ${v.type}${v.entityId ? ` of ${v.entityId}` : ""}${extra})`;
-          }),
-          ...(s.widgetIds.length ? [`${s.widgetIds.length} dashboard widgets`] : []),
-        ].join(", ") || "empty"
-      }`,
-  )
-  .join("\n")}
+${sidebar}
 
 Blueprint:
 ${JSON.stringify(bp)}
@@ -1156,15 +1173,19 @@ ${written}`
     : ""
 }
 
-Data (a digest: counts and totals per record type, then records on screen and small record types in full):
-${digest}${
-  looked
-    ? `
+Today in Manila: ${weekday}, ${today}
+Coming days: ${comingDays(today)}
 
-Looked up just now for this message (exact, from the database):
-${looked}`
-    : ""
-}${requestGuide(input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")}
+${permissions}${team}
+
+What the person is looking at:
+${screen.text}
+
+Data (a digest: counts and totals per record type, then records on screen and small record types in full):
+${digest}
+
+Lookup evidence for this message:
+${looked.text}${requestGuide(input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")}
 
 Conversation:
 ${input.messages
@@ -1202,13 +1223,15 @@ ${input.messages
           : "Gemini's first answer didn't come through, trying again",
     );
     const setAside: string[] = [];
-    // Answers take 3–8 s and plans with pages 10–25 s. A stalled call gets a parallel twin after 28 s.
+    // Answers take 3–8 s and plans with pages 10–25 s, the first part arriving within 3–17 s. A call that has sent
+    // nothing for 18 s has stalled and gets a parallel twin; a long plan that keeps streaming never gets one.
     const result = await generateJsonHedged(
       assistantAnswer,
       {
         system: ASSISTANT_SYSTEM,
         prompt,
         task: "assistant",
+        signal: input.signal,
         repair: (json) => setAsideBadOps(fixOpNames(json), setAside),
         timeoutMs: 60_000,
         thinking: "LOW",
@@ -1219,7 +1242,7 @@ ${input.messages
         maxStringChars: 24_000,
         textLimits: ASSISTANT_TEXT_LIMITS,
       },
-      { hedgeMs: 28_000, retryNote: ASSISTANT_RETRY_NOTE },
+      { hedgeMs: 18_000, afterSilence: true, retryNote: ASSISTANT_RETRY_NOTE },
     );
     if (!result.ok) {
       // Every hedged try went wrong (a loop, a cut-off answer): start over once before telling the person.
@@ -1236,11 +1259,18 @@ ${input.messages
       screen: input.screen,
       canManage: input.canDesign,
     });
-    const withNav = { ...(navigate ? { navigate } : {}), ...(sources.length ? { sources } : {}) };
+    const withNav = {
+      ...(looked.evidence ? { evidence: looked.evidence } : {}),
+      ...(navigate ? { navigate } : {}),
+      ...(sources.length ? { sources } : {}),
+    };
     if (a.kind !== "plan") return { ok: true, kind: a.kind, reply: a.reply, suggestions, ...withNav };
     status("Checking the plan against your workspace");
 
     const design = toDesignOps(bp, a.plan.ops, a.plan.renames, a.plan.formulas, input.workspaceName);
+    // A rename reaches every place that spells the old name: other tabs, cards, automations, forms, website sections.
+    const elsewhere = renameInDesign(bp, design.ops, input.docs);
+    design.ops.push(...elsewhere.ops);
     // Operations that fit no shape were set aside; Gemini gets them back to fix with the rest of the plan.
     const errors = [...setAside, ...design.errors];
     // A layout page's new text is its whole layout: a design change (replace_view), so it's checked and undone like one.
@@ -1297,6 +1327,11 @@ ${input.messages
       ? misplacedStock(bp, next, input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")
       : undefined;
     if (stockNote) errors.push(stockNote);
+    const later = startsLaterProblem(
+      input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "",
+      design.ops,
+    );
+    if (later) errors.push(later);
     // Whatever the plan adds must be there once it is applied; an op that quietly did nothing never shows as Applied.
     errors.push(...missingAfterApply(design.ops, next));
     embedForms(next, records, design.ops, errors);
@@ -1314,7 +1349,7 @@ ${input.messages
     const docOps = toDocOps(next, records, pageTexts, errors);
     // Document and HTML pages that spell out a name this plan changes get the new name in the same plan.
     const related = renameInPages(bp, design.ops, input.docs, docOps);
-    docOps.push(...related.docOps);
+    docOps.push(...related.docOps, ...elsewhere.docOps);
     if (docOps.length && !input.canEditRecords) errors.push("This person can't edit pages.");
     const teamOps = toTeamOps(input.team, a.plan.team, errors);
     if (teamOps.length && !input.canDesign) errors.push("Only owners and admins can change the team.");
@@ -1335,6 +1370,49 @@ ${input.messages
       // An option can only go once no record (after this plan's own edits) still uses it.
       if (design.ops.length)
         errors.push(...strandedOptions(bp, next, optionUsage(bp, rehearsal?.data.records ?? staged.records)));
+    }
+    let coverage: ChangePlan["coverage"];
+    if (!errors.length && (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)) {
+      status("Checking each part of your request");
+      const checked = await reviewCoverage({
+        blueprint: bp,
+        plan: {
+          request: input.messages.at(-1)?.text ?? "",
+          title: a.plan.title,
+          facts: [],
+          steps: [],
+          ops: design.ops,
+          recordOps: recordPart.ops,
+          docOps,
+          teamOps,
+        },
+        conversation: input.messages
+          .slice(-8)
+          .map((m) => `${m.role}: ${m.text}`)
+          .join("\n"),
+        lookup: `${looked.text}\nOn screen: ${screen.text}\nDigest: ${digest}`,
+        today,
+        signal: input.signal,
+      });
+      if (!checked)
+        return {
+          ok: true,
+          kind: "clarify",
+          reply:
+            "I couldn't finish checking this plan against your request. Nothing has changed. Please try again.",
+          suggestions: [],
+          ...withNav,
+        };
+      if (checked.questions.length)
+        return {
+          ok: true,
+          kind: "clarify",
+          reply: checked.questions.join("\n\n"),
+          suggestions: [],
+          ...withNav,
+        };
+      errors.push(...checked.errors.map((e) => `Request coverage: ${e}`));
+      coverage = checked.covered;
     }
     if (!errors.length && (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)) {
       // Cards the plan adds or changes show their real new value, worked out on the rehearsed workspace.
@@ -1362,12 +1440,17 @@ ${input.messages
           // History shows the person's own words, without the note about which section they clicked.
           request: (input.messages.at(-1)?.text ?? "").replace(/^\(About the .+? section I clicked\)\n?/, ""),
           baseVersion: bp.version,
+          coverage,
           title: a.plan.title || "Workspace change",
           facts: facts.slice(0, 6),
           steps: [
-            ...a.plan.steps.slice(0, Math.max(0, 10 - implied.length - related.steps.length)),
+            ...a.plan.steps.slice(
+              0,
+              Math.max(0, 10 - implied.length - related.steps.length - elsewhere.steps.length),
+            ),
             ...implied.map(({ label, detail }) => ({ kind: "add" as const, label, detail })),
             ...related.steps,
+            ...elsewhere.steps,
           ],
           ops: design.ops,
           recordOps: recordPart.ops,
@@ -1724,4 +1807,69 @@ export function pageExcerpts(
     out.push(`- ${v.name} (${v.id}, ${kind}):\n${indented}`);
   }
   return out.join("\n");
+}
+
+/** "From next Monday", "starting Nov 1": the person wants the change to take effect later, not now. */
+const LATER =
+  /\b(starting|from|beginning|effective|as of|takes? effect)\s+(on\s+)?((next|this coming)\s+\w+|tomorrow|the \d+\w*|\d{1,2}(st|nd|rd|th)?\b|(mon|tues|wednes|thurs|fri|satur|sun)day|(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*(\s+\d{1,2})?\b)/i;
+
+/**
+ * A plan that changes a formula for a request that starts later must keep the old value until then (on_or_after);
+ * otherwise "raise the rate starting next Monday" would reprice every upcoming booking today.
+ */
+export function startsLaterProblem(request: string, ops: ChangeOp[]): string | null {
+  const said = request.match(LATER)?.[0];
+  if (!said) return null;
+  const exprs = ops.flatMap((op) =>
+    op.op === "add_field" && op.field.formula
+      ? [op.field.formula.expr]
+      : op.op === "update_field" && op.patch.formula
+        ? [op.patch.formula.expr]
+        : [],
+  );
+  if (!exprs.length || exprs.some((e) => e.includes("on_or_after("))) return null;
+  return `The person said the change starts later ("${said}"), but the new formula applies now. Keep the old value before that date with on_or_after(<the record's date field>, 'YYYY-MM-DD') ? new : old, and say the date in the step, or ask (kind clarify) whether to change it today.`;
+}
+
+/**
+ * A status field Gemini left without choices gets the usual ones for what the record is, instead of sending the whole
+ * plan back ("Status needs options" alone used to burn every repair round on a new area like coaching sessions).
+ */
+export function withStatusOptions(field: Field, entityName: string): Field {
+  if (field.type !== "status" || field.options?.length) return field;
+  const what = `${entityName} ${field.name}`;
+  const options: Field["options"] =
+    /session|class|clinic|booking|appointment|reservation|lesson|event|shift|visit|match|game/i.test(what)
+      ? [
+          { id: "scheduled", label: "Scheduled", tone: "neutral" },
+          { id: "done", label: "Done", tone: "success" },
+          { id: "cancelled", label: "Cancelled", tone: "danger" },
+        ]
+      : /order|delivery|purchase|request|task|job|ticket|repair|application/i.test(what)
+        ? [
+            { id: "open", label: "Open", tone: "neutral" },
+            { id: "in_progress", label: "In progress", tone: "accent" },
+            { id: "done", label: "Done", tone: "success" },
+            { id: "cancelled", label: "Cancelled", tone: "danger" },
+          ]
+        : [
+            { id: "active", label: "Active", tone: "success" },
+            { id: "inactive", label: "Inactive", tone: "neutral" },
+          ];
+  return { ...field, options };
+}
+
+/** The next two weeks as "Mon, Oct 19 (2026-10-19)", so dates like "next Monday" are read off, not worked out. */
+export function comingDays(today: string, count = 14): string {
+  const start = new Date(`${today}T12:00:00+08:00`).getTime();
+  return Array.from({ length: count }, (_, i) => {
+    const day = new Date(start + (i + 1) * 86_400_000);
+    const label = day.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      timeZone: "Asia/Manila",
+    });
+    return `${label} (${day.toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })})`;
+  }).join("; ");
 }
