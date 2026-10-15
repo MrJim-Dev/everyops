@@ -1,7 +1,7 @@
 import "server-only";
 import type { Blueprint } from "@/lib/blueprint/types";
 import { generateJsonHedged } from "./gemini";
-import { describeTypes, LOOKUP_SYSTEM, lookupAnswer } from "./lookup-prompt";
+import { describeTypes, LOOKUP_SYSTEM, lookupAnswer, needsLookup } from "./lookup-prompt";
 import { recordTools } from "./record-tools";
 
 const MAX_RESULT_CHARS = 14_000;
@@ -21,6 +21,12 @@ export async function lookupData(input: {
   messages: { role: "user" | "assistant"; text: string }[];
   onStatus?: (text: string) => void;
 }): Promise<string> {
+  // Greetings, navigation and design changes need no records: skip the round instead of asking Gemini.
+  const last = input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "";
+  if (!needsLookup(last)) {
+    console.info(JSON.stringify({ event: "lookup_skipped" }));
+    return "";
+  }
   const tools = recordTools(input.workspaceId, input.blueprint, input.onStatus);
   const log: string[] = [];
   const run = async (name: string, args: Record<string, unknown>) => {
@@ -55,7 +61,9 @@ ${input.messages
       maxOutputTokens: 1500,
       tools: { ...tools, run, maxRounds: 3 },
     },
-    { hedgeMs: 20_000, attempts: 2 },
+    // Lookups take 2 to 9 s; a call with nothing back after 10 s has stalled (the global endpoint does that now and
+    // then), so its twin starts then instead of after 20.
+    { hedgeMs: 10_000, afterSilence: true, attempts: 2 },
   );
   if (!result.ok || !log.length) return "";
   // Hedged twins can both have run tools; the log keeps every call, which is harmless (they're the same lookups).

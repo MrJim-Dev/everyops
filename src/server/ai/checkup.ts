@@ -16,6 +16,8 @@ export async function runCheckup(input: {
   docs?: Record<string, { body: string }>;
   memory: WorkspaceMemory;
   summary: string;
+  /** Findings the team said aren't problems. */
+  dismissed?: string[];
 }): Promise<Finding[]> {
   const bp = input.blueprint;
   const prompt = `Today in Manila: ${todayKey()}
@@ -33,7 +35,14 @@ Pages with written text:
 ${pageExcerpts(bp, input.docs) || "(none)"}
 
 Data digest:
-${dataDigest(bp, input.records, { ids: [] })}`;
+${dataDigest(bp, input.records, { ids: [] })}${
+  input.dismissed?.length
+    ? `
+
+The team marked these as not a problem. Never report them again, or the same thing in other words:
+${input.dismissed.map((t) => `- ${t}`).join("\n")}`
+    : ""
+}`;
   const result = await generateJsonHedged(
     checkupAnswer,
     {

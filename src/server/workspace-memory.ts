@@ -116,6 +116,25 @@ export async function readCheckup(workspaceId: string): Promise<Checkup | null> 
 }
 
 export async function saveCheckup(workspaceId: string, checkup: Checkup) {
+  // Findings the team hid stay hidden (and ruled out) when the check runs again.
   await sql`insert into workspace_memory (workspace_id, checkup) values (${workspaceId}, ${JSON.stringify(checkup)}::jsonb)
-    on conflict (workspace_id) do update set checkup = excluded.checkup`.execute(db);
+    on conflict (workspace_id) do update set checkup = excluded.checkup
+      || jsonb_build_object('hidden', coalesce(workspace_memory.checkup->'hidden', '[]'::jsonb),
+                            'dismissed', coalesce(workspace_memory.checkup->'dismissed', '[]'::jsonb))`.execute(
+    db,
+  );
+}
+
+/** Hides one finding for the whole team, and keeps its title so later checks don't raise it again. */
+export async function hideFinding(workspaceId: string, findingId: string) {
+  const checkup = await readCheckup(workspaceId);
+  if (!checkup || checkup.hidden?.includes(findingId)) return;
+  const title = checkup.findings.find((f) => f.id === findingId)?.title;
+  const next: Checkup = {
+    ...checkup,
+    hidden: [...(checkup.hidden ?? []), findingId],
+    dismissed: title ? [...(checkup.dismissed ?? []), title].slice(-30) : checkup.dismissed,
+  };
+  await sql`update workspace_memory set checkup = ${JSON.stringify(next)}::jsonb
+    where workspace_id = ${workspaceId}`.execute(db);
 }

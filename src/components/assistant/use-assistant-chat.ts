@@ -315,7 +315,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
       });
       return;
     }
-    const entry = applyChange(ws.id, plan, user?.name);
+    const entry = applyChange(ws.id, plan, user?.name, options.auto);
     if (!entry) return;
     // Words the team typed over a section by hand would hide the assistant's rewrite; the rewrite wins.
     for (const op of plan.ops)

@@ -271,7 +271,8 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
   const contents: Content[] = [
     { role: "user", parts: typeof input.prompt === "string" ? [{ text: input.prompt }] : input.prompt },
   ];
-  const usage = { input: 0, output: 0, thinking: 0 };
+  // cached: input tokens Gemini reused from an identical prompt start (implicit caching), billed and read for less.
+  const usage = { input: 0, output: 0, thinking: 0, cached: 0 };
   let calls = 0;
   try {
     const rounds = input.tools ? (input.tools.maxRounds ?? 3) + 1 : 1;
@@ -303,7 +304,12 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       // Parts are kept as Gemini sent them: calls carry thought signatures it needs back on the next round.
       const parts: Part[] = [];
       let roundUsage:
-        | { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
+        | {
+            promptTokenCount?: number;
+            candidatesTokenCount?: number;
+            thoughtsTokenCount?: number;
+            cachedContentTokenCount?: number;
+          }
         | undefined;
       text = "";
       for await (const chunk of stream) {
@@ -328,6 +334,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       usage.input += roundUsage?.promptTokenCount ?? 0;
       usage.output += roundUsage?.candidatesTokenCount ?? 0;
       usage.thinking += roundUsage?.thoughtsTokenCount ?? 0;
+      usage.cached += roundUsage?.cachedContentTokenCount ?? 0;
       const wanted = parts.filter((p) => p.functionCall);
       if (runaway || !wanted.length || !input.tools) break;
       calls += wanted.length;

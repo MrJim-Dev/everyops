@@ -60,7 +60,7 @@ type State = {
   saveSetup: (slug: string, progress: SetupProgress) => void;
   finishSetup: (slug: string, data: WorkspaceData, name: string, summary: string) => void;
   /** by: who made it, for invites the plan sends. */
-  applyChange: (slug: string, plan: ChangePlan, by?: string) => ChangeEntry | null;
+  applyChange: (slug: string, plan: ChangePlan, by?: string, auto?: boolean) => ChangeEntry | null;
   undoChange: (slug: string, changeId: string) => void;
   /** Puts back the latest undone design change. */
   redoChange: (slug: string, changeId: string) => void;
@@ -451,11 +451,11 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
       });
     },
 
-    applyChange: (slug, plan, by) => {
+    applyChange: (slug, plan, by, auto) => {
       const ws = get().workspaces[slug];
       // Plans need the records and every version; workspaces are loaded before anything can plan on them.
       if (!ws || ws.loaded === false) return null;
-      const { workspace, entry } = applyPlan(ws, plan, { by });
+      const { workspace, entry } = applyPlan(ws, plan, { by, auto });
       update(slug, () => workspace);
       return entry;
     },

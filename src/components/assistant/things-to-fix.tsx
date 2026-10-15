@@ -7,8 +7,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { type Checkup, KIND_LABEL } from "@/lib/assistant/checkup";
 import { cn } from "@/lib/utils";
 
-const hiddenKey = (workspaceId: string) => `everyops.checkup-hidden.${workspaceId}`;
-
 /**
  * What the assistant noticed when it compared the workspace with what it knows about the business. Fix sends the
  * finding's request as a message, so the workspace's permissions decide whether it waits for approval.
@@ -36,6 +34,7 @@ export function ThingsToFix({
         const body = (await res.json()) as { ok: boolean; checkup?: Checkup };
         if (!body.ok || !body.checkup) throw new Error();
         setCheckup(body.checkup);
+        setHidden(body.checkup.hidden ?? []);
         setState("ready");
       } catch {
         setState("failed");
@@ -45,16 +44,17 @@ export function ThingsToFix({
   );
 
   useEffect(() => {
-    try {
-      setHidden(JSON.parse(sessionStorage.getItem(hiddenKey(workspaceId)) ?? "[]"));
-    } catch {}
     void load();
-  }, [workspaceId, load]);
+  }, [load]);
 
+  // Hidden for the whole team, kept across checks.
   const hide = (id: string) => {
-    const next = [...hidden, id];
-    setHidden(next);
-    sessionStorage.setItem(hiddenKey(workspaceId), JSON.stringify(next));
+    setHidden([...hidden, id]);
+    void fetch("/api/ai/checkup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId, hide: id }),
+    }).catch(() => {});
   };
 
   const findings = (checkup?.findings ?? []).filter((f) => !hidden.includes(f.id));

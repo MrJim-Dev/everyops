@@ -17,7 +17,15 @@ export type Finding = {
   fix: string;
 };
 
-export type Checkup = { key: string; findings: Finding[]; checkedAt: string };
+export type Checkup = {
+  key: string;
+  findings: Finding[];
+  checkedAt: string;
+  /** Findings the team hid ("not a problem"); kept across checks and for everyone. */
+  hidden?: string[];
+  /** Their titles, given to the next check so it doesn't report the same thing in other words. */
+  dismissed?: string[];
+};
 
 export const KIND_LABEL: Record<FindingKind, string> = {
   mismatch: "Doesn't match",
