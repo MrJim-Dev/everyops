@@ -72,3 +72,31 @@ describe("repairing generated automations", () => {
     expect(repairRules(bp)).toEqual([]);
   });
 });
+
+describe("status-changed automations without their field", () => {
+  it("watch the record's only status field, or the one with the option they wait for", () => {
+    const bp = withRules([]);
+    bp.entities.push({
+      id: "bill",
+      name: "Bill",
+      pluralName: "Bills",
+      primaryFieldId: "title",
+      fields: [
+        f.text("title", "Title"),
+        f.select("kind", "Kind", [["rent", "Rent"]]),
+        f.status("status", "Status", [
+          ["unpaid", "Unpaid"],
+          ["paid", "Paid"],
+        ]),
+      ],
+    });
+    const notify = (id: string, to?: string): Rule => ({
+      id,
+      name: "Notify when Bill is Paid",
+      trigger: { entityId: "bill", event: "status_changed", ...(to ? { to } : {}) },
+      actions: [{ type: "notify", message: "Bill paid" }],
+    });
+    bp.rules = [notify("a", "paid"), notify("b"), notify("c", "rent")];
+    expect(repairRules(bp).map((r) => r.trigger.fieldId)).toEqual(["status", "status", "kind"]);
+  });
+});

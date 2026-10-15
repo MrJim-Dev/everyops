@@ -486,6 +486,31 @@ export const designRequest = (design as unknown as Shape).extend({
   widgets: z.array(designWidget),
 }) as unknown as typeof design;
 
+/**
+ * A repair's answer: only the parts it changes or adds, each whole, plus the ids it deletes. Writing back the whole
+ * design took as long as the design itself (12–16k tokens, up to two minutes); a patch is a few hundred tokens.
+ */
+export const designPatch = (designRequest as unknown as Shape)
+  .partial()
+  .omit({ workspaceName: true, summary: true })
+  .extend({
+    remove: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Ids to delete: a record type (order), a field (order.discount), a view, widget, rule or sidebar section",
+      ),
+  }) as unknown as z.ZodType<DesignPatch>;
+export type DesignPatch = Partial<Omit<Design, "workspaceName" | "summary">> & { remove?: string[] };
+
+export const PATCH_INSTRUCTIONS = `Return only what changes, as a patch:
+- Each record type, view, widget, rule or sidebar section you change or add, whole, with its id. A record type you
+  return keeps any of its fields you leave out, so return only the fields you change or add.
+- Leave everything else out: it stays exactly as it is.
+- Ids to delete go in remove ("order" for a record type, "order.discount" for a field, or a view, widget, rule or
+  section id). Delete only what a problem needs.
+- Sample records only for record types you add.`;
+
 /** How public pages, payments and FAQs are built. Shared by the designer and the workspace assistant. */
 export const PUBLIC_PAGES_GUIDE = `Public pages (customers use them without an account, at /s/<workspace>/<view>):
 - A public form is a form view with public true, e.g. a public booking page. Visitors see only its fields; statuses

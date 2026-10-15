@@ -16,11 +16,27 @@ import { z } from "zod";
 const PROJECT = process.env.GOOGLE_CLOUD_PROJECT ?? "everyops-prod";
 const LOCATION = process.env.GEMINI_LOCATION ?? "global";
 export const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.7-flash";
+/**
+ * Setup's design calls (tasks starting with "design") can run on another model, e.g. GEMINI_DESIGN_MODEL=gemini-3.5-flash
+ * with GEMINI_DESIGN_LOCATION=asia-southeast1: it writes a design about 2.5 times as fast as 3.7 Flash.
+ */
+const DESIGN_MODEL = process.env.GEMINI_DESIGN_MODEL || GEMINI_MODEL;
+const DESIGN_LOCATION = process.env.GEMINI_DESIGN_LOCATION || LOCATION;
 
-let client: GoogleGenAI | undefined;
-function gemini() {
-  client ??= new GoogleGenAI({ vertexai: true, project: PROJECT, location: LOCATION });
+const clients = new Map<string, GoogleGenAI>();
+function gemini(location: string) {
+  let client = clients.get(location);
+  if (!client) {
+    client = new GoogleGenAI({ vertexai: true, project: PROJECT, location });
+    clients.set(location, client);
+  }
   return client;
+}
+
+function modelFor(task: string) {
+  return task.startsWith("design")
+    ? { model: DESIGN_MODEL, location: DESIGN_LOCATION }
+    : { model: GEMINI_MODEL, location: LOCATION };
 }
 
 export type GenerateResult<T> =
@@ -60,6 +76,8 @@ type Input = {
   firstPartMs?: number;
   /** Called with each part that streams in (generateJsonHedged uses it to tell a stalled call from a slow one). */
   onProgress?: () => void;
+  /** Called with the answer so far each time a part streams in (setup draws the design as it's written). */
+  onText?: (text: string, attempt: number) => void;
   /** Fixes known harmless slips in Gemini's JSON before it's checked against the schema. */
   repair?: (json: unknown) => unknown;
   /** Overrides the model's default reasoning depth. Leave unset for Gemini 3 models. */
@@ -230,6 +248,7 @@ export function runawayWatcher(maxStringChars = 3000, textLimits: Record<string,
 /** Asks Gemini for JSON that matches `schema`, then parses it with the same schema. */
 export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promise<GenerateResult<T>> {
   const started = Date.now();
+  const { model: MODEL, location } = modelFor(input.task);
   // Our own controller stops a runaway; the caller's signal (a hedged twin answered) and the timeout stop it too.
   const stop = new AbortController();
   // A call with no new part for idleMs is stalled: this controller stops it.
@@ -259,8 +278,8 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
     for (let round = 0; round < rounds; round++) {
       const last = round === rounds - 1;
       quietFor(input.firstPartMs ?? input.idleMs);
-      const stream = await gemini().models.generateContentStream({
-        model: GEMINI_MODEL,
+      const stream = await gemini(location).models.generateContentStream({
+        model: MODEL,
         contents,
         config: {
           systemInstruction: input.system,
@@ -298,6 +317,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           .join("");
         text += part;
         if (chunk.usageMetadata) roundUsage = chunk.usageMetadata;
+        if (part) input.onText?.(text, 0);
         runaway = watch(part);
         if (runaway) {
           stop.abort();
@@ -333,7 +353,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
         JSON.stringify({
           event: "gemini_runaway",
           task: input.task,
-          model: GEMINI_MODEL,
+          model: MODEL,
           ms,
           why: runaway,
           chars: text.length,
@@ -348,7 +368,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       JSON.stringify({
         event: "gemini",
         task: input.task,
-        model: GEMINI_MODEL,
+        model: MODEL,
         ms,
         ...(firstMs === undefined ? {} : { firstMs }),
         ...tokens,
@@ -381,7 +401,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
         retryable: true,
       };
     }
-    return { ok: true, data: parsed.data, model: GEMINI_MODEL, ms, tokens };
+    return { ok: true, data: parsed.data, model: MODEL, ms, tokens };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (input.signal?.aborted) return { ok: false, error: "Cancelled.", retryable: false };
@@ -391,7 +411,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
         JSON.stringify({
           event: "gemini_stalled",
           task: input.task,
-          model: GEMINI_MODEL,
+          model: MODEL,
           ms: Date.now() - started,
           firstMs,
           chars: text.length,
@@ -399,7 +419,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       );
       return { ok: false, error: "Gemini took too long to answer.", retryable: true };
     }
-    console.error(JSON.stringify({ event: "gemini_error", task: input.task, model: GEMINI_MODEL, message }));
+    console.error(JSON.stringify({ event: "gemini_error", task: input.task, model: MODEL, message }));
     const timedOut = /abort|timeout/i.test(message);
     return {
       ok: false,
@@ -449,7 +469,14 @@ export function generateJsonHedged<T>(
         : [...input.prompt, { text: retryNote }];
   return hedged(
     (signal, progress, attempt) =>
-      generateJson(schema, { ...input, prompt: promptFor(attempt), signal, onProgress: progress }),
+      generateJson(schema, {
+        ...input,
+        prompt: promptFor(attempt),
+        // The caller's signal (the owner left, or setup ran out of time) stops every twin as well.
+        signal: input.signal ? AbortSignal.any([signal, input.signal]) : signal,
+        onProgress: progress,
+        onText: input.onText && ((text) => input.onText?.(text, attempt)),
+      }),
     {
       ...rest,
       onHedge: (attempt) =>

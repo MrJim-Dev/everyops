@@ -48,9 +48,29 @@ export function completeAction(bp: Blueprint, rule: Rule, action: Action): Actio
   return { ...action, target, fieldId: field.id, delta };
 }
 
+/**
+ * A "status changed" automation without its status field ("Notify when Bill is Paid") watches the record's only
+ * status field, or the one with the option it waits for. Left as it is when that isn't clear.
+ */
+export function completeTrigger(bp: Blueprint, rule: Rule): Rule["trigger"] {
+  const t = rule.trigger;
+  if (t.event !== "status_changed") return t;
+  const source = bp.entities.find((e) => e.id === t.entityId);
+  const choices = source?.fields.filter((f) => f.type === "status" || f.type === "select") ?? [];
+  if (choices.some((f) => f.id === t.fieldId)) return t;
+  const statuses = choices.filter((f) => f.type === "status");
+  const fits = t.to ? choices.filter((f) => f.options?.some((o) => o.id === t.to)) : [];
+  const field = fits.length === 1 ? fits[0] : statuses.length === 1 ? statuses[0] : undefined;
+  return field ? { ...t, fieldId: field.id } : t;
+}
+
 /** The rule with every blank it can fill filled in. Actions it can't complete stay as they were, for validation to report. */
 export function completeRule(bp: Blueprint, rule: Rule): Rule {
-  return { ...rule, actions: rule.actions.map((a) => completeAction(bp, rule, a) ?? a) };
+  return {
+    ...rule,
+    trigger: completeTrigger(bp, rule),
+    actions: rule.actions.map((a) => completeAction(bp, rule, a) ?? a),
+  };
 }
 
 /**
@@ -62,7 +82,7 @@ export function repairRules(bp: Blueprint): Rule[] {
   for (const rule of bp.rules) {
     if (!bp.entities.some((e) => e.id === rule.trigger.entityId)) continue;
     const actions = rule.actions.flatMap((a) => completeAction(bp, rule, a) ?? []);
-    if (actions.length) out.push({ ...rule, actions });
+    if (actions.length) out.push({ ...rule, trigger: completeTrigger(bp, rule), actions });
   }
   return out;
 }

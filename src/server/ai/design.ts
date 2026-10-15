@@ -1,6 +1,7 @@
 import "server-only";
 import type { Part } from "@google/genai";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
+import { type DesignSketch, type DesignStage, sketchOf } from "@/lib/assistant/design-sketch";
 import { displayKind } from "@/lib/blueprint/field-kind";
 import type {
   Block,
@@ -27,12 +28,20 @@ import { impliedRules } from "@/lib/engine/implied-rules";
 import { templateOverview } from "@/lib/engine/overview-template";
 import { isImagePath } from "@/lib/engine/records";
 import { repairRules } from "@/lib/engine/rule-repair";
+import { parsePartialJson } from "@/lib/partial-json";
 import { withCustomSite } from "@/lib/public/custom-site";
 import { MAX_HTML_BYTES } from "@/lib/public/html-page";
 import { copyFromBlocks, type SiteCopy, standardBlocks } from "@/lib/public/site-template";
 import { hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
-import { DESIGN_SYSTEM, type Design, designRequest } from "./design-prompt";
+import {
+  DESIGN_SYSTEM,
+  type Design,
+  type DesignPatch,
+  designPatch,
+  designRequest,
+  PATCH_INSTRUCTIONS,
+} from "./design-prompt";
 import { generateJsonHedged } from "./gemini";
 import { withOverviewLayout } from "./overview-layout";
 import { referencesText, setupReferences } from "./references";
@@ -661,6 +670,32 @@ export function shrunk(
   ];
 }
 
+/**
+ * Whether the brief asks for something: a mention counts unless its clause says it isn't wanted, before it ("no POS
+ * needed", "without a booking page") or after it ("POS / Public Website: None", "a booking page is not needed").
+ */
+export function asksFor(brief: string, pattern: RegExp): boolean {
+  for (const match of brief.matchAll(pattern)) {
+    const at = match.index ?? 0;
+    const before =
+      brief
+        .slice(0, at)
+        .split(/[.!?;,\n]/)
+        .at(-1) ?? "";
+    const after = brief.slice(at + match[0].length).split(/[.!?;\n]/)[0] ?? "";
+    if (/\b(no|not|without|never|instead of|don't|do not|doesn't|does not|isn't|aren't)\b/i.test(before))
+      continue;
+    if (
+      /^[^,]{0,40}?(:\s*(none|no|n\/a)\b|\b(not needed|not required|isn't needed|is not needed)\b)/i.test(
+        after,
+      )
+    )
+      continue;
+    return true;
+  }
+  return false;
+}
+
 function extraChecks(bp: Blueprint, brief: string): string[] {
   const errors: string[] = [];
   const entityIds = new Set(bp.entities.map((e) => e.id));
@@ -668,15 +703,14 @@ function extraChecks(bp: Blueprint, brief: string): string[] {
   if (!bp.systems.length) errors.push("The workspace has no systems.");
   // The brief is the plan the owner agreed to; a public booking page it lists can't be left out.
   if (
-    /public (booking|order|request|inquiry|reservation|form)|booking page|book online/i.test(brief) &&
+    asksFor(brief, /public (booking|order|request|inquiry|reservation|form)|booking page|book online/gi) &&
     !bp.views.some((v) => v.type === "form" && v.public)
   )
     errors.push("The brief asks for a public page customers use, but no form view has public true.");
-  // Same for a register: a POS without one is just tables of orders.
-  if (
-    /\bpos\b|point[- ]of[- ]sale|(cash|pos) register|checkout register|cashier/i.test(brief) &&
-    !bp.views.some((v) => v.type === "checkout")
-  )
+  // Same for a register: a POS without one is just tables of orders. Only "POS" or "point of sale" asks for one: a
+  // finance tracker's "Cashier / Manager" field and a "Cash Register" account type each cost repair rounds that
+  // added a register nobody wanted.
+  if (asksFor(brief, /\bpos\b|point[- ]of[- ]sale/gi) && !bp.views.some((v) => v.type === "checkout"))
     errors.push(
       "The brief asks for a point of sale, but there is no checkout view (products, orders with line items and a payment field).",
     );
@@ -826,13 +860,104 @@ export type DesignResult =
   | { ok: true; name: string; summary: string; data: WorkspaceData }
   | { ok: false; message: string };
 
-/** Designs a workspace from the interview brief. Invalid designs get up to two repairs with the validator's errors. */
+/** How long the design rounds may take in all. Samples and the Overview (60 s at most) come after, inside Cloud Run's limit. */
+const DESIGN_BUDGET_MS = 220_000;
+
+export type DesignProgress =
+  | { type: "stage"; stage: DesignStage; issues?: number }
+  | { type: "sketch"; sketch: DesignSketch };
+
+export type DesignOptions = {
+  /** The files from the setup conversation, so real items and prices end up in the workspace. */
+  files?: { userId: string; attachments: AttachmentRef[] };
+  /** Progress for the setup screen: the step it's on, and a sketch of the design as Gemini writes it. */
+  onEvent?: (event: DesignProgress) => void;
+  /** Stops the design, e.g. when the owner closes the page. */
+  signal?: AbortSignal;
+  budgetMs?: number;
+};
+
+/**
+ * Applies a repair's patch to the design it repairs: returned items replace the ones with their id (a record type's
+ * fields merge by id, so fields it leaves out stay), new ones are added, and ids in remove go.
+ */
+export function applyDesignPatch(
+  previous: Design,
+  patch: DesignPatch,
+): { design: Design; removed: Set<string> } {
+  const removed = new Set(patch.remove ?? []);
+  const merge = <T extends { id: string }>(
+    items: T[],
+    changes: T[] | undefined,
+    combine?: (old: T, next: T) => T,
+  ) => {
+    const out = items.filter((i) => !removed.has(i.id));
+    for (const change of changes ?? []) {
+      const at = out.findIndex((i) => i.id === change.id);
+      if (at < 0) out.push(change);
+      else out[at] = combine ? combine(out[at], change) : change;
+    }
+    return out;
+  };
+  const design = structuredClone(previous);
+  design.entities = merge(design.entities, patch.entities, (old, next) => ({
+    ...next,
+    fields: merge(old.fields, next.fields),
+  })).map((e) => ({ ...e, fields: e.fields.filter((f) => !removed.has(`${e.id}.${f.id}`)) }));
+  design.views = merge(design.views, patch.views);
+  design.widgets = merge(design.widgets, patch.widgets);
+  design.rules = merge(design.rules, patch.rules);
+  design.systems = merge(design.systems, patch.systems).map((s) => ({
+    ...s,
+    viewIds: s.viewIds.filter((id) => !removed.has(id)),
+    widgetIds: s.widgetIds.filter((id) => !removed.has(id)),
+  }));
+  if (patch.site) design.site = patch.site;
+  const entityIds = new Set(design.entities.map((e) => e.id));
+  const added = new Set((patch.samples ?? []).map((s) => s.ref));
+  design.samples = [
+    ...design.samples.filter((s) => entityIds.has(s.entityId) && !added.has(s.ref)),
+    ...(patch.samples ?? []).filter((s) => entityIds.has(s.entityId)),
+  ];
+  return { design, removed };
+}
+
+/**
+ * Designs a workspace from the interview brief. Invalid designs get up to two repairs with the validator's errors;
+ * a repair returns a patch, not the whole design again.
+ */
 export async function designWorkspace(
   brief: string,
   workspaceName: string,
-  files?: { userId: string; attachments: AttachmentRef[] },
+  options: DesignOptions = {},
 ): Promise<DesignResult> {
+  const { files, onEvent } = options;
   const now = new Date();
+  const started = Date.now();
+  const budget = AbortSignal.timeout(options.budgetMs ?? DESIGN_BUDGET_MS);
+  const signal = options.signal ? AbortSignal.any([budget, options.signal]) : budget;
+  const stats = { calls: 0, repairs: 0, output: 0 };
+  const done = (result: DesignResult): DesignResult => {
+    console.info(
+      JSON.stringify({
+        event: "design_done",
+        ok: result.ok,
+        ms: Date.now() - started,
+        calls: stats.calls,
+        repairs: stats.repairs,
+        output: stats.output,
+        ...(result.ok ? {} : { reason: result.message }),
+      }),
+    );
+    return result;
+  };
+  const failed = (error: string) =>
+    done({
+      ok: false,
+      message: budget.aborted
+        ? "Designing this one took too long, so I stopped. Try again, or leave out a detail or two."
+        : error,
+    });
   // What businesses like this one need and how similar community systems are built; the designer fills gaps from it.
   const references = referencesText(
     await setupReferences(brief).catch(() => ({ playbooks: [], systems: [] })),
@@ -840,38 +965,94 @@ export async function designWorkspace(
   const context = `Examples:\n${EXAMPLES}\n\nToday in Manila: ${todayKey(now)}\nWorkspace name: ${workspaceName || "choose one"}\n\nBrief:\n${brief}\n\nReferences:\n${references}`;
   // The owner's files go with the first request; a repair works from the previous design, which already used them.
   const fileParts = files ? await attachmentParts(files.userId, files.attachments) : [];
-  let prompt: string | Part[] = fileParts.length
+  const prompt: string | Part[] = fileParts.length
     ? [
         { text: context },
         ...fileParts,
         { text: "Design the workspace from the brief, using these files for real names, items and prices." },
       ]
     : context;
-  let repairs = 0;
-  /** The last whole design that was rejected: repairs start from it, and one that returns only part of it is caught. */
+
+  // The setup screen draws the design while it's written: a sketch of the answer so far, a few times a second, from
+  // whichever hedged twin is furthest along.
+  let drawing = -1;
+  let drawn = 0;
+  let drawnAt = 0;
+  let shown = "";
+  const show = (sketch: DesignSketch | undefined) => {
+    if (!sketch || !onEvent) return;
+    const key = JSON.stringify(sketch);
+    if (key === shown) return;
+    shown = key;
+    onEvent({ type: "sketch", sketch });
+  };
+  const onText = (text: string, attempt: number) => {
+    if (attempt !== drawing && text.length <= drawn) return;
+    drawing = attempt;
+    drawn = text.length;
+    if (Date.now() - drawnAt < 350) return;
+    drawnAt = Date.now();
+    show(sketchOf(parsePartialJson(text)));
+  };
+
+  /** The last whole design that was rejected: a repair's patch applies to it. */
   let previous: { entities: number; views: number; data: Design; flagged: Set<string> } | null = null;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    // Designs take 8–40 s, longer when Vertex is busy. A call is judged by whether its answer keeps streaming, not by
-    // the clock: one that has said nothing for 45 s gets a parallel twin, one silent for 30 s mid-answer (60 s before
-    // its first part, while it thinks) is stopped and retried, and a slow one that keeps streaming may run to 170 s
-    // (Cloud Run allows 300). A call that runs away (see runawayWatcher) is stopped within seconds and replaced. Real
-    // designs are 2–8k tokens: with the playbooks' category and status record types, a rental business is about 7.5k.
-    const result = await generateJsonHedged(
-      designRequest,
-      {
-        system: DESIGN_SYSTEM,
-        prompt,
-        task: "design",
-        timeoutMs: 170_000,
-        idleMs: 30_000,
-        firstPartMs: 60_000,
-        thinking: "LOW",
-        maxOutputTokens: 16_000,
-        enumLiterals: true,
-      },
-      { hedgeMs: 45_000, attempts: 4, afterSilence: true },
-    );
-    if (!result.ok) return { ok: false, message: result.error };
+  let errors: string[] = [];
+  for (let round = 0; round < 3; round++) {
+    let designed: Design;
+    let removed = new Set<string>();
+    if (!previous) {
+      onEvent?.({ type: "stage", stage: "design" });
+      // Designs take 8–40 s on 3.5 Flash and 60–150 s on 3.7 Flash, longer when Vertex is busy. A call is judged by
+      // whether its answer keeps streaming, not by the clock: one that has said nothing for 45 s gets a parallel twin,
+      // one silent for 30 s mid-answer (60 s before its first part, while it thinks) is stopped and retried. A call
+      // that runs away (see runawayWatcher) is stopped within seconds and replaced. Real designs are 2–16k tokens;
+      // the cap leaves room, because an answer cut off at the cap is thrown away whole.
+      stats.calls++;
+      const result = await generateJsonHedged(
+        designRequest,
+        {
+          system: DESIGN_SYSTEM,
+          prompt,
+          task: "design",
+          timeoutMs: 170_000,
+          idleMs: 30_000,
+          firstPartMs: 60_000,
+          thinking: "LOW",
+          maxOutputTokens: 24_000,
+          enumLiterals: true,
+          signal,
+          onText,
+        },
+        { hedgeMs: 45_000, attempts: 4, afterSilence: true },
+      );
+      if (!result.ok) return failed(result.error);
+      stats.output += result.tokens.output;
+      designed = result.data;
+    } else {
+      stats.repairs++;
+      onEvent?.({ type: "stage", stage: "fix", issues: errors.length });
+      stats.calls++;
+      const result = await generateJsonHedged(
+        designPatch,
+        {
+          system: DESIGN_SYSTEM,
+          prompt: `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour design:\n${JSON.stringify(previous.data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\n\n${PATCH_INSTRUCTIONS}`,
+          task: "design-fix",
+          timeoutMs: 120_000,
+          idleMs: 30_000,
+          firstPartMs: 60_000,
+          thinking: "LOW",
+          maxOutputTokens: 12_000,
+          enumLiterals: true,
+          signal,
+        },
+        { hedgeMs: 40_000, attempts: 3, afterSilence: true },
+      );
+      if (!result.ok) return failed(result.error);
+      stats.output += result.tokens.output;
+      ({ design: designed, removed } = applyDesignPatch(previous.data, result.data));
+    }
     const build = (data: Design) => {
       const raw = toBlueprint(data);
       const samples = mergeDateAndSlot(raw, data.samples);
@@ -887,11 +1068,11 @@ export async function designWorkspace(
       ];
       return { data, samples, name, bp, partial, errors };
     };
-    let built = build(result.data);
+    let built = build(designed);
     if (previous) {
-      // Record types and fields the repair dropped without being asked come back, then the design is checked again.
-      // They stay out if they bring problems the repair alone didn't have.
-      const back = restoreDropped(previous.data, result.data, previous.flagged);
+      // Fields a patch returned without what makes them work (a link without its record type, a status without its
+      // options) get it back, then the design is checked again. Not what the patch removed on purpose.
+      const back = restoreDropped(previous.data, designed, new Set([...previous.flagged, ...removed]));
       if (back.entities.length || back.fields.length || back.settings.length) {
         const restored = build(back.design);
         const kept = restored.errors.length <= built.errors.length;
@@ -906,26 +1087,28 @@ export async function designWorkspace(
         if (kept) built = restored;
       }
     }
-    const { data, samples, name, bp, partial, errors } = built;
+    const { data, samples, name, bp, partial } = built;
+    errors = built.errors;
     if (!errors.length) {
-      // Record types the design left without samples (line items, most often) get theirs from one small call.
-      const filled = await fillEmptySamples(bp, samples, now);
+      show(sketchOf(bp, true));
+      onEvent?.({ type: "stage", stage: "finish" });
+      // Record types the design left without samples (line items, most often) get theirs from one small call, while
+      // the Overview becomes a layout of library components (when that step fails the template layout stays).
+      const [filled, laidOut] = await Promise.all([
+        fillEmptySamples(bp, samples, now),
+        withOverviewLayout(bp, name, brief, now),
+      ]);
       // Samples in the wrong year (the right month and day, but 2023) move to this year.
-      const dated = samplesThisYear(bp, toRecords(bp, filled, now), now);
+      const dated = samplesThisYear(laidOut, toRecords(laidOut, filled, now), now);
       if (dated.fields) console.info(JSON.stringify({ event: "design_samples_moved", fields: dated.fields }));
-      const records = computeAll(bp, dated.records, now);
+      const records = computeAll(laidOut, dated.records, now);
       // Businesses whose customers book on their own get a custom HTML website and a calendar that suits them.
-      withCustomSite(bp, records, name, now);
-      // The Overview becomes a layout of library components; when that step fails the plain dashboard stays.
-      const blueprint = await withOverviewLayout(bp, name, brief, now);
-      return {
-        ok: true,
-        name,
-        summary: data.summary,
-        data: { blueprint, records },
-      };
+      const blueprint = withCustomSite(laidOut, records, name, now);
+      const sketch = sketchOf(blueprint, true);
+      show(sketch && { ...sketch, samples: records.length });
+      return done({ ok: true, name, summary: data.summary, data: { blueprint, records } });
     }
-    console.warn(JSON.stringify({ event: "design_rejected", attempt, errors: errors.slice(0, 15) }));
+    console.warn(JSON.stringify({ event: "design_rejected", round, errors: errors.slice(0, 15) }));
     if (!partial.length)
       previous = {
         entities: bp.entities.length,
@@ -933,13 +1116,11 @@ export async function designWorkspace(
         data,
         flagged: flaggedBy(bp, errors),
       };
-    if (++repairs > 2) break;
-    prompt = `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour previous design:\n${JSON.stringify(previous?.data ?? data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\nReturn the full corrected design. Change only what these problems need: keep every other record type, field id, view, widget, rule and sample exactly as it was.`;
   }
-  return {
+  return done({
     ok: false,
     message: "I couldn't design a valid workspace for that yet. Add a detail or two and try again.",
-  };
+  });
 }
 
 /**

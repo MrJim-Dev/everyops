@@ -29,6 +29,7 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useFollowBottom } from "@/hooks/use-follow-bottom";
 import { typingMs } from "@/hooks/use-typewriter";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
+import type { DesignStreamEvent } from "@/lib/assistant/design-sketch";
 import {
   type AskQuestion,
   type ChatTurn,
@@ -39,6 +40,7 @@ import {
   useWorkspaces,
 } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
+import { type DesignBuild, DesignProgress } from "./design-progress";
 import { AssistantMessage, UserMessage } from "./messages";
 import { QuestionCard } from "./question-card";
 
@@ -143,6 +145,46 @@ async function post<T>(
   }
 }
 
+/**
+ * Asks for the design and follows its progress: the route streams JSON lines (the step, a sketch of the pages as
+ * they're written, then the draft or an error). Errors before the stream starts (sign-in, rate limit) come as JSON.
+ */
+async function streamDesign(
+  body: unknown,
+  onEvent: (event: DesignStreamEvent) => void,
+): Promise<{ ok: true; draft: SetupDraft } | { ok: false; message: string }> {
+  try {
+    const res = await fetch("/api/ai/design", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok || !res.body || !res.headers.get("content-type")?.includes("ndjson")) {
+      const data = (await res.json().catch(() => null)) as { message?: string } | null;
+      return { ok: false, message: data?.message ?? "Something went wrong. Try again." };
+    }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line) as DesignStreamEvent;
+        if (event.type === "done") return { ok: true, draft: event.draft as SetupDraft };
+        if (event.type === "error") return { ok: false, message: event.message };
+        onEvent(event);
+      }
+    }
+    return { ok: false, message: "The connection dropped before your workspace was ready. Try again." };
+  } catch {
+    return { ok: false, message: "The connection dropped before your workspace was ready. Try again." };
+  }
+}
+
 type InterviewReply = {
   turn: {
     action: "ask" | "design";
@@ -188,6 +230,7 @@ export function SetupInterview({
   const [questions, setQuestions] = useState<SetupQuestion[]>(progress?.questions ?? []);
   const [draft, setDraft] = useState<SetupDraft | undefined>(progress?.draft);
   const [phase, setPhase] = useState<Phase>("idle");
+  const [build, setBuild] = useState<DesignBuild | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [input, setInput] = useState("");
   const files = useAttachments();
@@ -218,15 +261,22 @@ export function SetupInterview({
   const design = useCallback(async (history: ChatTurn[], brief: string, workspaceName: string) => {
     setPhase("designing");
     setFailure(null);
-    const result = await post<{ draft: SetupDraft }>("/api/ai/design", {
-      brief,
-      workspaceName,
-      attachments: attachmentsIn(history).slice(-12),
-    });
+    setBuild({ stage: "design", since: Date.now() });
+    const result = await streamDesign(
+      { brief, workspaceName, attachments: attachmentsIn(history).slice(-12) },
+      (event) => {
+        if (event.type === "stage")
+          setBuild(
+            (b) => b && { ...b, stage: event.stage, ...(event.issues ? { issues: event.issues } : {}) },
+          );
+        else if (event.type === "sketch") setBuild((b) => b && { ...b, sketch: event.sketch });
+      },
+    );
     setPhase("idle");
+    setBuild(null);
     if (!result.ok)
       return setFailure({ message: result.message, retry: () => void design(history, brief, workspaceName) });
-    const next = result.data.draft;
+    const next = result.draft;
     setDraft(next);
     setMessages([
       ...history,
@@ -416,15 +466,8 @@ export function SetupInterview({
 
             {phase === "thinking" ? (
               <Thinking key="thinking" label="Thinking" avatar="round" />
-            ) : phase === "designing" ? (
-              <Thinking
-                key="designing"
-                label="Designing your workspace"
-                slowLabel="Designing your workspace"
-                slowAfter={3}
-                hint="usually about 20 seconds"
-                avatar="round"
-              />
+            ) : phase === "designing" && build ? (
+              <DesignProgress key="designing" build={build} />
             ) : null}
 
             {failure ? (
