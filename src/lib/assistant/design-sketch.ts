@@ -32,7 +32,13 @@ export type DesignSketch = {
 
 /** One line of the /api/ai/design stream. */
 export type DesignStreamEvent =
-  | { type: "stage"; stage: DesignStage; issues?: number }
+  | {
+      type: "stage";
+      stage: DesignStage;
+      issues?: number;
+      /** On the design stage: the community system the design starts from, when there is one. */
+      from?: { id: string; name: string };
+    }
   | { type: "sketch"; sketch: DesignSketch }
   | { type: "ping" }
   | { type: "done"; draft: unknown }

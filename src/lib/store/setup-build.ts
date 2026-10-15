@@ -9,6 +9,8 @@ export type DesignBuild = {
   issues?: number;
   sketch?: DesignSketch;
   since: number;
+  /** The community system the design started from: its pages were on screen at once, and Gemini adapts it. */
+  from?: { id: string; name: string };
   /** The design is finished: the screen holds for a moment on the finished workspace before the review. */
   ready?: boolean;
 };

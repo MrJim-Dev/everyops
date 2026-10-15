@@ -63,6 +63,8 @@ export function designWorkspace(
   brief: string,
   workspaceName: string,
   attachments: unknown[],
+  /** The community system the interview chose to start from, if any. */
+  base?: string,
 ): Promise<DesignOutcome> {
   const running = runs.get(workspaceId);
   if (running) return running;
@@ -71,12 +73,18 @@ export function designWorkspace(
   const run = (async (): Promise<DesignOutcome> => {
     const streamed = await streamLines<DesignStreamEvent>(
       "/api/ai/design",
-      { brief, workspaceName, attachments },
+      { brief, workspaceName, attachments, ...(base ? { base } : {}) },
       (event) => {
         if (event.type === "stage")
           builds.setBuild(
             workspaceId,
-            (b) => b && { ...b, stage: event.stage, ...(event.issues ? { issues: event.issues } : {}) },
+            (b) =>
+              b && {
+                ...b,
+                stage: event.stage,
+                ...(event.issues ? { issues: event.issues } : {}),
+                ...(event.from ? { from: event.from } : {}),
+              },
           );
         else if (event.type === "sketch")
           builds.setBuild(workspaceId, (b) => b && { ...b, sketch: event.sketch });
