@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { HtmlPageView as HtmlPageConfig } from "@/lib/blueprint/types";
+import { liveSiteHtml } from "@/lib/public/custom-site";
 import { formSnippet, MAX_HTML_BYTES, pageHtml } from "@/lib/public/html-page";
 import { htmlPage, type PublicForm } from "@/lib/public/resolve";
 import { canManage } from "@/lib/store/workspaces";
@@ -62,10 +63,12 @@ export function HtmlPageView({ view }: { view: HtmlPageConfig }) {
   const ws = useWorkspace();
   const manager = canManage(ws.role);
   const saved = pageHtml(view, ws.docs);
-  const forms = useMemo(
-    () => htmlPage(ws.blueprint, ws.records, ws.docs, view).forms ?? [],
+  // What visitors see: the page with its live parts drawn from the workspace's current data.
+  const page = useMemo(
+    () => htmlPage(ws.blueprint, ws.records, ws.docs, view),
     [ws.blueprint, ws.records, ws.docs, view],
   );
+  const forms = page.forms ?? [];
   const [editing, setEditing] = useState(false);
 
   return (
@@ -89,7 +92,7 @@ export function HtmlPageView({ view }: { view: HtmlPageConfig }) {
         <HtmlEditor key={view.id} view={view} saved={saved} forms={forms} />
       ) : (
         <HtmlPageFrame
-          html={saved}
+          html={page.html ?? saved}
           slug={ws.id}
           forms={forms}
           preview
@@ -111,6 +114,11 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
   const htmlFile = useRef<HTMLInputElement>(null);
   const picture = useRef<HTMLInputElement>(null);
   const bytes = useMemo(() => new TextEncoder().encode(draft).length, [draft]);
+  // The preview fills the live parts from the workspace too, as visitors will see them.
+  const liveShown = useMemo(
+    () => liveSiteHtml(ws.blueprint, ws.records, ws.docs, view, shown),
+    [ws.blueprint, ws.records, ws.docs, view, shown],
+  );
   const tooBig = bytes > MAX_HTML_BYTES;
   const latest = useRef({ draft, saved, tooBig, save: ws.saveDoc });
   latest.current = { draft, saved, tooBig, save: ws.saveDoc };
@@ -298,7 +306,7 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
               style={{ width }}
             >
               <HtmlPageFrame
-                html={shown}
+                html={liveShown}
                 slug={ws.id}
                 forms={forms}
                 preview

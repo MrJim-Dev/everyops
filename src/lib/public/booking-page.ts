@@ -10,7 +10,16 @@
  * presses scale to 0.97, hover only where there is a pointer, and reduced motion keeps fades without movement.
  */
 
-type Palette = { bg: string; ink: string; soft: string; accent: string; tint: string };
+type Palette = {
+  bg: string;
+  ink: string;
+  soft: string;
+  accent: string;
+  tint: string;
+  /** The landing page's heading font (Google Fonts), so both pages look like one site. */
+  font?: string;
+  weight?: string;
+};
 
 const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ESC[c]);
@@ -39,7 +48,9 @@ export function customBookingHtml(o: BookingPageOptions): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(o.heading)} · ${esc(o.name)}</title>
+${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${p.font.replace(/ /g, "+")}:wght@${p.weight ?? "700"}&display=swap">` : ""}
 <style>
+  ${p.font ? `h1, h2, nav strong { font-family: "${p.font}", ui-serif, Georgia, serif; font-weight: ${p.weight ?? "700"}; }` : ""}
   :root {
     --bg: ${p.bg}; --ink: ${p.ink}; --soft: ${p.soft}; --accent: ${p.accent}; --tint: ${p.tint};
     --line: color-mix(in oklab, var(--ink) 12%, transparent);
