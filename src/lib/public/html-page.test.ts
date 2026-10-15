@@ -73,9 +73,9 @@ describe("frameDocument", () => {
     expect(doc.indexOf("window.EveryOps")).toBeLessThan(doc.indexOf("EveryOps.form('x')"));
   });
 
-  it("adds the bridge before </body> on a page without a <head>", () => {
+  it("adds the bridge before user scripts on a page without a <head>", () => {
     const doc = frameDocument("<html><body><h1>Hi</h1></body></html>");
-    expect(doc.indexOf("window.EveryOps")).toBeGreaterThan(doc.indexOf("<h1>"));
+    expect(doc.indexOf("window.EveryOps")).toBeLessThan(doc.indexOf("<h1>"));
     expect(doc.indexOf("window.EveryOps")).toBeLessThan(doc.indexOf("</body>"));
   });
 

@@ -69,11 +69,21 @@ export function htmlDocKeys(bp: Blueprint): string[] {
 
 /** Runs inside the sandboxed page. Kept tiny and dependency-free; it only talks to the page that embeds it. */
 const BRIDGE = `(function(){
-var waiting={},next=0;
-function call(method,form,args){return new Promise(function(done){var id=++next;waiting[id]=done;parent.postMessage({everyops:"call",id:id,method:method,form:String(form),args:args||{}},"*");});}
-function submit(form,values,extras){return new Promise(function(done){var id=++next;waiting[id]=done;parent.postMessage({everyops:"submit",id:id,form:String(form),values:values||{},extras:extras||{}},"*");});}
-window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.everyops!=="result")return;var done=waiting[d.id];if(done){delete waiting[d.id];done(d.result);}});
+var waiting={},next=0,ready=false,queued=[],probe;
+function ping(){parent.postMessage({everyops:"connect"},"*");}
+function request(message){return new Promise(function(done){
+var id=++next;message.id=id;
+var timer=setTimeout(function(){delete waiting[id];queued=queued.filter(function(m){return m.id!==id;});if(!Object.keys(waiting).length){clearInterval(probe);probe=undefined;}done({ok:false,message:"The request timed out. Please try again."});},30000);
+waiting[id]=function(result){clearTimeout(timer);done(result);};
+if(ready)parent.postMessage(message,"*");else{queued.push(message);ping();if(!probe)probe=setInterval(ping,100);}
+});}
+function call(method,form,args){return request({everyops:"call",method:method,form:String(form),args:args||{}});}
+function submit(form,values,extras){return request({everyops:"submit",form:String(form),values:values||{},extras:extras||{}});}
+window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d)return;
+if(d.everyops==="ready"){ready=true;clearInterval(probe);probe=undefined;var pending=queued;queued=[];pending.forEach(function(m){if(waiting[m.id])parent.postMessage(m,"*");});return;}
+if(d.everyops!=="result")return;var done=waiting[d.id];if(done){delete waiting[d.id];done(d.result);}});
 window.EveryOps={submit:submit,
+data:function(viewId){return call("data",viewId);},
 form:function(f){return call("form",f);},
 slots:function(f,resource,day){return call("slots",f,{resource:resource,date:day});},
 days:function(f,resource,from,count){return call("days",f,{resource:resource,from:from,count:count||42});},
@@ -101,8 +111,11 @@ export function frameDocument(html: string): string {
   const head = /<head(\s[^>]*)?>/i.exec(html);
   if (head)
     return html.slice(0, head.index + head[0].length) + script + html.slice(head.index + head[0].length);
-  const end = html.search(/<\/body>/i);
-  if (end >= 0) return html.slice(0, end) + script + html.slice(end);
+  const opening = /<html\b[^>]*>/i.exec(html);
+  if (opening) {
+    const end = opening.index + opening[0].length;
+    return `${html.slice(0, end)}<head>${script}</head>${html.slice(end)}`;
+  }
   return html + script;
 }
 

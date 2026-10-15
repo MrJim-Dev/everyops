@@ -1,3 +1,4 @@
+import { htmlConnectionProblems } from "@/lib/public/html-connections";
 import "server-only";
 import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
@@ -412,7 +413,13 @@ export function toDesignOps(
         else if (o.view && systemId) {
           // A custom HTML page's draft arrives as starter (free pages share one shape in the answer schema).
           const raw = o.view as typeof o.view & { starter?: string };
-          const free = raw as unknown as { id: string; name: string; type: string; starter?: string };
+          const free = raw as unknown as {
+            id: string;
+            name: string;
+            type: string;
+            starter?: string;
+            public?: boolean;
+          };
           if (free.type === "layout") {
             // A layout page's sections arrive as JSON in starter, checked against the component library.
             const layout = parseLayout(free.starter ?? "");
@@ -427,6 +434,7 @@ export function toDesignOps(
                   entityId: "",
                   type: "layout",
                   sections: layout.sections,
+                  ...(free.public !== undefined ? { public: free.public } : {}),
                 },
               });
             break;
@@ -1692,14 +1700,14 @@ export function unanswerable(next: Blueprint, ops: ChangeOp[]): string[] {
  */
 export function embedForms(next: Blueprint, records: DataRecord[], ops: ChangeOp[], errors: string[]) {
   for (const op of ops) {
-    if (op.op !== "add_view" || op.view.type !== "html" || !op.view.html?.includes("data-everyops-embed"))
-      continue;
+    if (op.op !== "add_view" || op.view.type !== "html" || !op.view.html) continue;
     op.view.html = fillEmbeds(op.view.html, next, records, op.view.id, errors);
   }
 }
 
 /** Replaces each data-everyops-embed placeholder in a page's HTML with its public form's markup. */
 function fillEmbeds(html: string, next: Blueprint, records: DataRecord[], pageId: string, errors: string[]) {
+  errors.push(...htmlConnectionProblems(next, pageId, html));
   const tag = /<(\w+)\b[^>]*\bdata-everyops-embed\s*=\s*["']([^"']+)["'][^>]*>(?:\s*<\/\1>)?/g;
   const forms = next.views.filter((v) => v.type === "form" && v.public);
   return html.replace(tag, (whole, _tag: string, id: string) => {
