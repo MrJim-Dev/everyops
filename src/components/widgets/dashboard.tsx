@@ -108,9 +108,10 @@ export function Dashboard({ system }: { system: System }) {
         <DashboardSuggestions system={system} />
         {stats.length ? <StatStrip widgets={stats} /> : null}
         {placed.length ? (
-          <div className="grid grid-flow-row-dense grid-cols-1 gap-px border-b bg-border lg:grid-cols-6">
+          // Hairlines come from each card's ring, so a last row that ends short shows the page, not a grey block.
+          <div className="grid grid-flow-row-dense grid-cols-1 gap-px border-b lg:grid-cols-6">
             {placed.map(({ w, width }) => (
-              <div key={w.id} className={cn("min-w-0 bg-background", SPAN[width])}>
+              <div key={w.id} className={cn("min-w-0 bg-background ring-1 ring-border", SPAN[width])}>
                 {render(w)}
               </div>
             ))}

@@ -16,6 +16,18 @@ const body = z.object({
     .min(1)
     .max(40)
     .refine((m) => m.reduce((n, t) => n + (t.attachments?.length ?? 0), 0) <= 12, "Too many files"),
+  /** The setup checklist so far, so required questions keep being asked until answered. */
+  questions: z
+    .array(
+      z.object({
+        id: z.string().max(80),
+        question: z.string().max(400),
+        required: z.boolean(),
+        answer: z.string().max(1000),
+      }),
+    )
+    .max(24)
+    .optional(),
 });
 
 export async function POST(request: Request) {
@@ -30,6 +42,6 @@ export async function POST(request: Request) {
       { ok: false, message: "That's a lot of messages. Wait a few minutes and try again." },
       { status: 429 },
     );
-  const result = await interviewTurn(parsed.data.messages, user.id);
+  const result = await interviewTurn(parsed.data.messages, user.id, parsed.data.questions ?? []);
   return Response.json(result, { status: result.ok ? 200 : 502 });
 }

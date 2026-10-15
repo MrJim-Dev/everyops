@@ -1,6 +1,13 @@
 "use client";
 
-import { ArrowClockwiseIcon, ArrowUpIcon, CheckIcon, SparkleIcon } from "@phosphor-icons/react";
+import {
+  ArrowClockwiseIcon,
+  ArrowUpIcon,
+  CheckCircleIcon,
+  CheckIcon,
+  CircleDashedIcon,
+  SparkleIcon,
+} from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -23,17 +30,100 @@ import { useFollowBottom } from "@/hooks/use-follow-bottom";
 import { typingMs } from "@/hooks/use-typewriter";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import {
+  type AskQuestion,
   type ChatTurn,
   type ProfileLine,
   type SetupDraft,
   type SetupProgress,
+  type SetupQuestion,
   useWorkspaces,
 } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 import { AssistantMessage, UserMessage } from "./messages";
+import { QuestionCard } from "./question-card";
 
 type Phase = "idle" | "thinking" | "designing";
 type Failure = { message: string; retry: () => void };
+
+/**
+ * The setup checklist beside the conversation: answered questions with the answer, then the ones still open.
+ * Required ones are marked so the owner sees why EveryOps keeps asking them.
+ */
+function QuestionList({
+  questions,
+  onPick,
+}: {
+  questions: SetupQuestion[];
+  /** Opens the question card on this question; absent while Ask EveryOps is working. */
+  onPick?: (id: string) => void;
+}) {
+  const required = questions.filter((q) => q.required);
+  const answered = required.filter((q) => q.answer.trim()).length;
+  const open = questions.filter((q) => !q.answer.trim());
+  const done = questions.filter((q) => q.answer.trim());
+  return (
+    <section aria-labelledby="setup-questions">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 id="setup-questions" className="text-[13px] font-semibold">
+          Questions
+        </h2>
+        {required.length ? (
+          <span
+            className={cn(
+              "text-[12px] tabular-nums",
+              answered === required.length ? "text-primary" : "text-muted-foreground",
+            )}
+          >
+            {answered} of {required.length} required answered
+          </span>
+        ) : null}
+      </div>
+      <ul className="flex flex-col gap-0.5 text-[13px]">
+        {[...open, ...done].map((q) => {
+          const answer = q.answer.trim();
+          return (
+            <li key={q.id}>
+              <button
+                type="button"
+                disabled={!onPick}
+                onClick={() => onPick?.(q.id)}
+                aria-label={`${answer ? "Change" : "Answer"}: ${q.question}`}
+                className="-mx-2 flex w-[calc(100%+1rem)] gap-2 rounded-lg px-2 py-1.5 text-left outline-none transition-[background-color,transform] duration-150 ease-out enabled:cursor-pointer enabled:active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-ring/50 [@media(hover:hover)_and_(pointer:fine)]:enabled:hover:bg-muted"
+              >
+                {answer ? (
+                  <CheckCircleIcon weight="fill" className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                ) : (
+                  <CircleDashedIcon
+                    className={cn(
+                      "mt-0.5 size-3.5 shrink-0",
+                      q.required ? "text-warning" : "text-muted-foreground",
+                    )}
+                  />
+                )}
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <span className={cn(answer && "text-muted-foreground")}>
+                    {q.question}
+                    {!answer ? (
+                      <span
+                        className={cn(
+                          "ml-1.5 inline-flex rounded-full px-1.5 py-px align-[1px] text-[10.5px] font-medium",
+                          q.required ? "bg-warning/12 text-warning" : "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        {q.required ? "Required" : "Optional"}
+                      </span>
+                    ) : null}
+                  </span>
+                  {answer ? <span className="text-foreground">{answer}</span> : null}
+                </div>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 async function post<T>(
   url: string,
@@ -58,6 +148,8 @@ type InterviewReply = {
     action: "ask" | "design";
     message: string;
     suggestions: string[];
+    questions?: SetupQuestion[];
+    ask?: AskQuestion[];
     profile: ProfileLine[];
     plan?: string[];
     workspaceName: string;
@@ -93,6 +185,7 @@ export function SetupInterview({
   );
   const [profile, setProfile] = useState<ProfileLine[]>(progress?.profile ?? []);
   const [plan, setPlan] = useState<string[]>(progress?.plan ?? []);
+  const [questions, setQuestions] = useState<SetupQuestion[]>(progress?.questions ?? []);
   const [draft, setDraft] = useState<SetupDraft | undefined>(progress?.draft);
   const [phase, setPhase] = useState<Phase>("idle");
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -112,8 +205,8 @@ export function SetupInterview({
   const busy = phase !== "idle";
 
   useEffect(() => {
-    saveSetup(ws.id, { messages, profile, plan, draft });
-  }, [saveSetup, ws.id, messages, profile, plan, draft]);
+    saveSetup(ws.id, { messages, profile, plan, questions, draft });
+  }, [saveSetup, ws.id, messages, profile, plan, questions, draft]);
 
   // Keep the latest message in view as the conversation grows.
   const turns = messages.length;
@@ -145,23 +238,26 @@ export function SetupInterview({
   }, []);
 
   const ask = useCallback(
-    async (history: ChatTurn[]) => {
+    async (history: ChatTurn[], checklist: SetupQuestion[]) => {
       setPhase("thinking");
       setFailure(null);
       const result = await post<InterviewReply>("/api/ai/interview", {
         messages: history.map(({ role, text, attachments }) => ({ role, text, attachments })),
+        questions: checklist,
       });
       if (!result.ok) {
         setPhase("idle");
-        return setFailure({ message: result.message, retry: () => void ask(history) });
+        return setFailure({ message: result.message, retry: () => void ask(history, checklist) });
       }
       const { turn } = result.data;
       if (turn.profile.length) setProfile(turn.profile);
       if (turn.plan?.length) setPlan(turn.plan);
+      if (turn.questions?.length) setQuestions(turn.questions);
       const reply: ChatTurn = {
         role: "assistant",
         text: turn.message,
-        suggestions: turn.action === "ask" ? turn.suggestions : undefined,
+        suggestions: turn.action === "ask" && turn.suggestions.length ? turn.suggestions : undefined,
+        ...(turn.action === "ask" && turn.ask?.length ? { ask: turn.ask } : {}),
         ...(turn.action === "design" ? { brief: turn.brief, workspaceName: turn.workspaceName } : {}),
       };
       const next = [...history, reply];
@@ -178,9 +274,9 @@ export function SetupInterview({
     if (started.current) return;
     started.current = true;
     const last = messages.at(-1);
-    if (last?.role === "user") void ask(messages);
+    if (last?.role === "user") void ask(messages, questions);
     else if (last?.brief && !draft) void design(messages, last.brief, last.workspaceName ?? "");
-  }, [ask, design, messages, draft]);
+  }, [ask, design, messages, draft, questions]);
 
   const send = (text: string, withFiles = true) => {
     const clean = text.trim();
@@ -193,7 +289,7 @@ export function SetupInterview({
     setMessages(next);
     setInput("");
     if (withFiles) files.clear();
-    void ask(next);
+    void ask(next, questions);
   };
 
   const create = () => {
@@ -210,7 +306,34 @@ export function SetupInterview({
   };
 
   const last = messages.at(-1);
-  const suggestions = !busy && !failure && last?.role === "assistant" ? (last.suggestions ?? []) : [];
+  const waiting = !busy && !failure && last?.role === "assistant";
+  const suggestions = waiting && !last.ask?.length ? (last.suggestions ?? []) : [];
+  const turnAsk = waiting && !draft ? (last.ask ?? []) : [];
+  // A question picked in the side panel opens the card on it: within this turn's questions when it's one of them,
+  // otherwise on its own (an answered one can be changed this way).
+  const [picked, setPicked] = useState<{ id: string; turn: number; nonce: number } | null>(null);
+  const fromPanel = picked && picked.turn === messages.length ? picked : null;
+  const pickedQuestion = fromPanel ? questions.find((q) => q.id === fromPanel.id) : undefined;
+  const inTurn = fromPanel ? turnAsk.findIndex((q) => q.id === fromPanel.id) : -1;
+  const asking: AskQuestion[] =
+    pickedQuestion && inTurn < 0
+      ? [
+          {
+            id: pickedQuestion.id,
+            question: pickedQuestion.question,
+            required: pickedQuestion.required,
+            options: pickedQuestion.options ?? [],
+            ...(pickedQuestion.answer.trim() ? { current: pickedQuestion.answer.trim() } : {}),
+          },
+        ]
+      : turnAsk;
+  const openQuestion = (id: string) => setPicked({ id, turn: messages.length, nonce: Date.now() });
+  // Closing a card opened from the side panel brings back this turn's questions as the collapsed chip.
+  const [collapsedTurn, setCollapsedTurn] = useState(-1);
+  const closePanelCard = () => {
+    setPicked(null);
+    setCollapsedTurn(messages.length);
+  };
 
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_360px]">
@@ -333,7 +456,9 @@ export function SetupInterview({
           </div>
         </div>
 
-        <div className="border-t px-5 py-3">
+        {/* No rule above the composer: the conversation fades under it instead, so the question card and the
+            composer read as one floating surface. */}
+        <div className="relative px-5 pt-1 pb-3 before:pointer-events-none before:absolute before:inset-x-0 before:-top-10 before:h-10 before:bg-linear-to-t before:from-background before:to-transparent">
           <form
             // The composer arrives from below with the first message, a beat after it.
             className={cn(
@@ -346,6 +471,18 @@ export function SetupInterview({
             }}
             {...files.dropProps}
           >
+            {asking.length ? (
+              <QuestionCard
+                key={`${messages.length}-${fromPanel?.nonce ?? 0}`}
+                questions={asking}
+                initialAt={Math.max(0, inTurn)}
+                defaultOpen={!!fromPanel || (turnAsk.length > 0 && collapsedTurn !== messages.length)}
+                autoFocus={!!fromPanel}
+                onClose={fromPanel ? closePanelCard : undefined}
+                disabled={busy}
+                onSend={(text) => send(text, false)}
+              />
+            ) : null}
             <InputGroup className="relative h-auto">
               <DropOverlay attachments={files} />
               {files.items.length ? (
@@ -411,6 +548,9 @@ export function SetupInterview({
             <p className="text-[13px] text-muted-foreground">Details appear here as you chat.</p>
           )}
         </section>
+        {questions.length ? (
+          <QuestionList questions={questions} onPick={!busy && !draft ? openQuestion : undefined} />
+        ) : null}
         {plan.length ? (
           <section>
             <h2 className="mb-3 text-[13px] font-semibold">What EveryOps will set up</h2>

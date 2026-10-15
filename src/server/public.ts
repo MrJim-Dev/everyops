@@ -7,6 +7,7 @@ import { autoReferenceFields, nextReference } from "@/lib/engine/references";
 import { isTimeRange } from "@/lib/format";
 import {
   formatCell,
+  formPageOf,
   type PageDocs,
   type PublicPageData,
   type PublicSite,
@@ -38,14 +39,24 @@ async function readDoc(slug: string) {
   return readCurrent(db, slug);
 }
 
-/** The public site of a workspace and one of its pages (the first when none is named). Null if nothing is public. */
+/**
+ * The public site of a workspace and one of its pages (the first when none is named). Null if nothing is public.
+ * A form served through its own custom page answers with that page's id to redirect to.
+ */
 export async function publicPage(
   slug: string,
   viewId?: string,
-): Promise<{ site: PublicSite; page: PublicPageData } | null> {
+): Promise<{ site: PublicSite; page: PublicPageData } | { redirect: string } | null> {
   const doc = await readDoc(slug);
   if (!doc || doc.meta.setup) return null;
   const bp = doc.blueprint;
+  const custom = viewId
+    ? formPageOf(
+        bp,
+        bp.views.find((v) => v.id === viewId),
+      )
+    : undefined;
+  if (custom) return { redirect: custom };
   const site = siteOf(slug, doc.meta.name, bp);
   if (!site) return null;
   const page = resolvePage(
