@@ -1,5 +1,6 @@
 import "server-only";
 import { sql } from "kysely";
+import { notesFromSetup } from "@/lib/assistant/memory";
 import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { freshSample } from "@/lib/catalog/shift";
 import { renumberTaken } from "@/lib/engine/sequence";
@@ -30,6 +31,7 @@ import {
   writeContent,
   writePages,
 } from "./workspace-data";
+import { applyEditsIn } from "./workspace-memory";
 
 const ID = /^[a-z0-9][a-z0-9-]{1,79}$/;
 /** Largest save accepted. Saves are patches now; only creating a big workspace comes close. */
@@ -332,6 +334,10 @@ export async function patchWorkspace(
         await sql`update workspace set doc = ${JSON.stringify(metaFrom(patch.meta))}::jsonb where id = ${slug}`.execute(
           trx,
         );
+        // Setup is cleared when the workspace is created from it. What the interview learned about the business
+        // goes into the assistant's memory first, so the assistant knows the business from the first message.
+        if (stored.setup && !patch.meta.setup)
+          await applyEditsIn(trx, slug, notesFromSetup(stored.setup, patch.meta.summary), "setup");
       }
 
       if (patch.records) {

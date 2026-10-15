@@ -3,8 +3,9 @@ import type { Blueprint, FormView } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { applyOps } from "@/lib/engine/changes";
+import { paletteFor } from "./custom-site";
 import { autoHomeId, resolvePage, siteOf } from "./resolve";
-import { standardBlocks, standardLanding } from "./site-template";
+import { bookLabel, fitsBusiness, offeringOf, standardBlocks, standardLanding } from "./site-template";
 
 const NOW = new Date("2026-10-13T09:30:00+08:00");
 
@@ -93,5 +94,84 @@ describe("standard site", () => {
     });
     expect(home?.type === "landing" && home.blocks.some((b) => b.id === "steps")).toBe(false);
     expect(JSON.stringify(home)).not.toContain("ignored");
+  });
+});
+
+describe("what the website offers and its button", () => {
+  const field = (id: string, type: string, extra: object = {}) => ({
+    id,
+    name: id.replace(/_/g, " "),
+    type,
+    ...extra,
+  });
+  const entity = (id: string, name: string, plural: string, fields: object[], extra: object = {}) =>
+    ({
+      id,
+      name,
+      pluralName: plural,
+      primaryFieldId: "name",
+      fields: [field("name", "text"), ...fields],
+      ...extra,
+    }) as never;
+  const salon = {
+    workspaceName: "Glow Studio",
+    systems: [],
+    widgets: [],
+    rules: [],
+    entities: [
+      entity("stylist", "Stylist", "Stylists", [field("active", "checkbox")], {
+        resource: { opensAt: "10:00", closesAt: "20:00", slotMinutes: 60 },
+      }),
+      entity("service_category", "Service category", "Service categories", []),
+      entity("service", "Service", "Services", [field("price", "money"), field("duration_mins", "number")]),
+      entity(
+        "appointment",
+        "Appointment",
+        "Appointments",
+        [
+          field("stylist", "relation", { relation: { entityId: "stylist" } }),
+          field("service", "relation", { relation: { entityId: "service" } }),
+        ],
+        { booking: { resourceFieldId: "stylist", timeFieldId: "when" } },
+      ),
+    ],
+    views: [{ id: "book", name: "Book", entityId: "appointment", type: "form", public: true, fieldIds: [] }],
+  } as unknown as Blueprint;
+
+  it("offers a salon's services, not the stylists it books, and books an appointment", () => {
+    expect(offeringOf(salon)?.id).toBe("service");
+    expect(bookLabel(salon, "book")).toBe("Book an appointment");
+  });
+
+  it("offers a rental's units, not the list that sorts them into types", () => {
+    const stays = {
+      ...salon,
+      entities: [
+        entity("unit_type", "Unit type", "Unit types", [field("active", "checkbox")]),
+        entity("unit", "Unit", "Units", [
+          field("nightly_rate", "money"),
+          field("unit_type", "relation", { relation: { entityId: "unit_type" } }),
+        ]),
+        entity("guest", "Guest", "Guests", [field("phone", "text")]),
+      ],
+    } as unknown as Blueprint;
+    expect(offeringOf(stays)?.id).toBe("unit");
+  });
+
+  it("keeps AI button words only when they name this business's things", () => {
+    expect(fitsBusiness(salon, "Book a court")).toBe(false);
+    expect(fitsBusiness(salon, "Book your service")).toBe(true);
+    expect(fitsBusiness(salon, "Reserve a stylist now")).toBe(true);
+    expect(fitsBusiness(salon, undefined)).toBe(false);
+  });
+});
+
+describe("website looks", () => {
+  it("match the kind of business, and fall back to the name", () => {
+    expect(paletteFor("Glow Studio", "Stylists Services").name).toBe("plum");
+    expect(paletteFor("Azure & Shore Staycations").name).toBe("tide");
+    expect(paletteFor("The Paddle Co", "Courts Bookings").name).toBe("court");
+    expect(paletteFor("Kapé Ilaya", "Menu items Orders").name).toBe("clay");
+    expect(paletteFor("Zeta Holdings")).toBe(paletteFor("Zeta Holdings"));
   });
 });
