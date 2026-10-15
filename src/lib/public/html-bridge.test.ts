@@ -7,8 +7,9 @@ function sandbox() {
   const parent = { postMessage: vi.fn() };
   let message: (event: { source: unknown; data: unknown }) => void = () => {};
   const window = {
-    addEventListener: (_: string, fn: typeof message) => {
-      message = fn;
+    // Only the message listener matters here; the bridge also listens for pointer events (Pick from page).
+    addEventListener: (type: string, fn: typeof message) => {
+      if (type === "message") message = fn;
     },
   };
   const context = {

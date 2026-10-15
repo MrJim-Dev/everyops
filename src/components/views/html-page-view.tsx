@@ -95,6 +95,7 @@ export function HtmlPageView({ view }: { view: HtmlPageConfig }) {
         <HtmlEditor key={view.id} view={view} saved={saved} forms={forms} />
       ) : (
         <HtmlPageFrame
+          pickable
           html={page.html ?? saved}
           slug={ws.id}
           forms={forms}
@@ -327,6 +328,7 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
               style={{ width }}
             >
               <HtmlPageFrame
+                pickable
                 html={liveShown}
                 slug={ws.id}
                 forms={forms}
