@@ -19,13 +19,19 @@ function createPool() {
   // DATABASE_CA_PATH only when connecting straight to a TLS server (it is then verified against that CA).
   const caPath = process.env.DATABASE_CA_PATH;
   const ssl = caPath ? { rejectUnauthorized: true, ca: readFileSync(path.resolve(caPath), "utf8") } : false;
-  return new Pool({
+  const pool = new Pool({
     connectionString,
     ssl,
     max: Number(process.env.DATABASE_POOL_MAX ?? 5),
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
   });
+  // Cloud SQL now and then closes an idle connection. Without a listener, pg raises that as an uncaught exception
+  // and takes the whole server (and every request in flight) down; the pool drops the client and opens a new one.
+  pool.on("error", (error) =>
+    console.warn(JSON.stringify({ event: "db_idle_client_error", message: error.message })),
+  );
+  return pool;
 }
 
 const globalForDb = globalThis as { everyopsDb?: Kysely<Database> };
