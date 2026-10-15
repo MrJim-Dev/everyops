@@ -260,6 +260,19 @@ export function tidy(bp: Blueprint): Blueprint {
       const other = bp.entities.find((x) => x.id === field?.relation?.entityId);
       if (!other || other.fields.some((x) => x.id === target)) return whole;
       if (/^(name|title|label|full_name)$/.test(target)) return `${rel}.${other.primaryFieldId}`;
+      // "checkin.date" when the check-in's date field is called something else: its one date, or the one named alike.
+      if (/date|day|when|time|_at$|_on$/.test(target)) {
+        const dates = other.fields.filter(
+          (x) =>
+            x.type === "date" ||
+            x.type === "datetime" ||
+            (x.type === "formula" && x.formula?.resultType === "date"),
+        );
+        const pick =
+          dates.find((x) => x.id.includes(target) || target.includes(x.id)) ??
+          (dates.length === 1 ? dates[0] : undefined);
+        if (pick) return `${rel}.${pick.id}`;
+      }
       // "court.peak_rate" when the court's money fields are called something else: pick the matching one.
       if (/price|rate|cost|fee|amount/.test(target)) {
         const money = other.fields.filter(
@@ -282,6 +295,20 @@ export function tidy(bp: Blueprint): Blueprint {
         f.formula.expr = fixRefs(e, f.formula.expr);
         if (f.formula.freezeWhen) f.formula.freezeWhen = fixRefs(e, f.formula.freezeWhen);
       }
+  // Filters on views and dashboard cards read fields the same way.
+  const entityOf = (id: string) => bp.entities.find((e) => e.id === id);
+  for (const v of bp.views) {
+    const e = entityOf(v.entityId);
+    if (e && "filter" in v && typeof v.filter === "string") v.filter = fixRefs(e, v.filter);
+  }
+  for (const w of bp.widgets) {
+    const e = entityOf(w.entityId);
+    if (e && w.filter) w.filter = fixRefs(e, w.filter);
+    for (const t of w.calc?.terms ?? []) {
+      const te = entityOf(t.entityId);
+      if (te && t.filter) t.filter = fixRefs(te, t.filter);
+    }
+  }
   const entityIds = new Set(bp.entities.map((e) => e.id));
   for (const e of bp.entities) {
     for (const f of e.fields) {
@@ -1661,19 +1688,32 @@ export function repairStructure(bp: Blueprint): Blueprint {
   const children = new Set(bp.entities.filter((e) => e.parent).map((e) => e.id));
   // Two slips that used to cost a whole repair round (and a repair rewrites the whole design, sometimes losing
   // fields): a table grouped by a date or number, which can't be grouped, and a board on a select instead of the
-  // record type's status.
-  for (const v of bp.views) {
+  // record type's status. A record type with no status at all (habits by category, workouts by type) turns the
+  // board's select into its status; with nothing to make columns from, the board becomes a table.
+  bp.views = bp.views.map((v) => {
     const entity = bp.entities.find((e) => e.id === v.entityId);
-    if (!entity) continue;
+    if (!entity) return v;
     if (v.type === "table" && v.groupByFieldId) {
       const field = entity.fields.find((f) => f.id === v.groupByFieldId);
       if (!field || !GROUP_KINDS.has(displayKind(bp, field))) delete v.groupByFieldId;
     }
     if (v.type === "kanban" && entity.fields.find((f) => f.id === v.statusFieldId)?.type !== "status") {
       const status = entity.fields.find((f) => f.type === "status");
+      const picked = entity.fields.find((f) => f.id === v.statusFieldId);
+      const select = picked?.type === "select" ? picked : entity.fields.find((f) => f.type === "select");
       if (status) v.statusFieldId = status.id;
+      else if (select?.options?.length) {
+        select.type = "status";
+        v.statusFieldId = select.id;
+      } else {
+        const has = new Set(entity.fields.map((f) => f.id));
+        const fieldIds = [...new Set([entity.primaryFieldId, ...v.cardFieldIds])].filter((id) => has.has(id));
+        const { statusFieldId: _status, cardFieldIds: _cards, ...base } = v;
+        return { ...base, type: "table", fieldIds } satisfies View;
+      }
     }
-  }
+    return v;
+  });
   bp.systems = bp.systems.filter(
     (s) =>
       s.widgetIds.length > 0 ||

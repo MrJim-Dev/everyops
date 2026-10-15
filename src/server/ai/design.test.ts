@@ -81,6 +81,77 @@ describe("repairStructure", () => {
     });
     expect(validateBlueprint(fixed).filter((e) => /group|Board columns/.test(e.message))).toEqual([]);
   });
+  it("gives a board on a record type without a status its select as columns, or makes it a table", () => {
+    // A habit tracker's board by category on a record type with no status field was rejected on every setup.
+    const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
+    const bp = structuredClone(blueprint);
+    bp.entities.push(
+      {
+        id: "habit",
+        name: "Habit",
+        pluralName: "Habits",
+        primaryFieldId: "name",
+        fields: [
+          { id: "name", name: "Name", type: "text" },
+          {
+            id: "category",
+            name: "Category",
+            type: "select",
+            options: [
+              { id: "health", label: "Health", tone: "success" },
+              { id: "mind", label: "Mind", tone: "accent" },
+            ],
+          },
+        ],
+      },
+      {
+        id: "exercise",
+        name: "Exercise",
+        pluralName: "Exercises",
+        primaryFieldId: "name",
+        fields: [
+          { id: "name", name: "Name", type: "text" },
+          { id: "sets", name: "Sets", type: "number" },
+        ],
+      },
+    );
+    bp.views.push(
+      {
+        id: "habit_board",
+        type: "kanban",
+        entityId: "habit",
+        name: "By category",
+        statusFieldId: "category",
+        cardFieldIds: ["name"],
+      },
+      {
+        id: "exercise_board",
+        type: "kanban",
+        entityId: "exercise",
+        name: "Exercises",
+        statusFieldId: "sets",
+        cardFieldIds: ["sets"],
+      },
+    );
+    const fixed = repairStructure(bp);
+    expect(fixed.views.find((v) => v.id === "habit_board")).toMatchObject({
+      type: "kanban",
+      statusFieldId: "category",
+    });
+    expect(fixed.entities.find((e) => e.id === "habit")?.fields[1]).toMatchObject({
+      type: "status",
+      options: [{ id: "health" }, { id: "mind" }],
+    });
+    const table = fixed.views.find((v) => v.id === "exercise_board");
+    expect(table).toEqual({
+      id: "exercise_board",
+      type: "table",
+      entityId: "exercise",
+      name: "Exercises",
+      fieldIds: ["name", "sets"],
+    });
+    expect(validateBlueprint(fixed).filter((e) => /Board columns/.test(e.message))).toEqual([]);
+  });
   it("restores booking settings, attaches add-on lines to their booking and renames a Settings page", () => {
     const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
     const bp = structuredClone(blueprint);
@@ -250,6 +321,54 @@ describe("cleanCopy", () => {
 });
 
 describe("tidy add-ons on forms", () => {
+  it("points a linked date reference at the linked record's date field in formulas and card filters", () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
+    const bp = structuredClone(blueprint);
+    bp.entities.push(
+      {
+        id: "checkin",
+        name: "Daily Check-in",
+        pluralName: "Daily Check-ins",
+        primaryFieldId: "title",
+        fields: [
+          { id: "title", name: "Title", type: "text" },
+          { id: "check_in_date", name: "Date", type: "date" },
+        ],
+      },
+      {
+        id: "workout",
+        name: "Workout",
+        pluralName: "Workouts",
+        primaryFieldId: "title",
+        fields: [
+          { id: "title", name: "Title", type: "text" },
+          { id: "checkin", name: "Check-in", type: "relation", relation: { entityId: "checkin" } },
+          {
+            id: "day",
+            name: "Day",
+            type: "formula",
+            formula: { expr: "checkin.date", resultType: "date" },
+          },
+        ],
+      },
+    );
+    bp.widgets.push({
+      id: "today_workouts",
+      title: "Workouts today",
+      entityId: "workout",
+      filter: "is_today(checkin.date)",
+      type: "stat",
+      metric: { op: "count" },
+    });
+    const out = tidy(bp);
+    const workout = out.entities.find((e) => e.id === "workout");
+    expect(workout?.fields.find((f) => f.id === "day")?.formula?.expr).toBe("checkin.check_in_date");
+    expect(out.widgets.find((w) => w.id === "today_workouts")?.filter).toBe(
+      "is_today(checkin.check_in_date)",
+    );
+    expect(validateBlueprint(out).filter((e) => /does not resolve/.test(e.message))).toEqual([]);
+  });
+
   const withAddOns = (form: Record<string, unknown>) => {
     const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
     const bp = structuredClone(blueprint);
