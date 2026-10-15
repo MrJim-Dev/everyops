@@ -8,6 +8,8 @@ import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { leaveBlueprint } from "@/lib/catalog/employee-leave";
 import { computeAll } from "@/lib/engine/compute";
 import {
+  applyDesignPatch,
+  asksFor,
   cleanCopy,
   ensurePages,
   flaggedBy,
@@ -603,5 +605,103 @@ describe("formulas two links away", () => {
       rec("c1", "commission", { label: "Santos", deal: "d1" }),
     ]);
     expect(records.find((r) => r.id === "c1")?.data.amount).toBe(60_000);
+  });
+});
+
+describe("applyDesignPatch", () => {
+  type D = Parameters<typeof applyDesignPatch>[0];
+  const base = {
+    workspaceName: "Kapé Ilaya",
+    summary: "Coffee shop",
+    systems: [
+      {
+        id: "sales",
+        name: "Sales",
+        icon: "receipt",
+        viewIds: ["orders", "by_product"],
+        widgetIds: ["today"],
+      },
+    ],
+    entities: [
+      {
+        id: "order",
+        name: "Order",
+        pluralName: "Orders",
+        primaryFieldId: "code",
+        fields: [
+          { id: "code", name: "Code", type: "text" },
+          { id: "total", name: "Total", type: "money" },
+          { id: "discount", name: "Discount", type: "money" },
+        ],
+      },
+      { id: "product", name: "Product", pluralName: "Products", primaryFieldId: "name", fields: [] },
+    ],
+    views: [
+      { id: "orders", name: "Orders", type: "table", entityId: "order" },
+      { id: "by_product", name: "By product", type: "table", entityId: "product", groupBy: "name" },
+    ],
+    widgets: [
+      { id: "today", title: "Sales today", entityId: "order", type: "stat", metric: { op: "count" } },
+    ],
+    rules: [],
+    samples: [
+      { ref: "o1", entityId: "order", values: [{ fieldId: "code", value: "A1" }] },
+      { ref: "p1", entityId: "product", values: [] },
+    ],
+  } as unknown as D;
+
+  it("replaces what the patch returns, keeps everything it leaves out, and adds what's new", () => {
+    const { design } = applyDesignPatch(base, {
+      views: [{ id: "by_product", name: "By product", type: "table", entityId: "product" }],
+      entities: [
+        {
+          id: "order",
+          name: "Order",
+          pluralName: "Orders",
+          primaryFieldId: "code",
+          fields: [
+            { id: "total", name: "Total due", type: "money" },
+            { id: "paid", name: "Paid", type: "checkbox" },
+          ],
+        },
+      ],
+    } as never);
+    expect(design.views.map((v) => v.id)).toEqual(["orders", "by_product"]);
+    expect(design.views[1]).not.toHaveProperty("groupBy");
+    expect(design.entities[0].fields.map((f) => [f.id, f.name])).toEqual([
+      ["code", "Code"],
+      ["total", "Total due"],
+      ["discount", "Discount"],
+      ["paid", "Paid"],
+    ]);
+    expect(design.entities[1].id).toBe("product");
+    expect(design.widgets).toEqual(base.widgets);
+    expect(design.samples).toEqual(base.samples);
+    expect(base.entities[0].fields).toHaveLength(3);
+  });
+
+  it("removes record types, fields, views and widgets named in remove, with what pointed at them", () => {
+    const { design, removed } = applyDesignPatch(base, {
+      remove: ["product", "order.discount", "by_product", "today"],
+    });
+    expect(design.entities.map((e) => e.id)).toEqual(["order"]);
+    expect(design.entities[0].fields.map((f) => f.id)).toEqual(["code", "total"]);
+    expect(design.views.map((v) => v.id)).toEqual(["orders"]);
+    expect(design.systems[0]).toMatchObject({ viewIds: ["orders"], widgetIds: [] });
+    expect(design.samples.map((s) => s.ref)).toEqual(["o1"]);
+    expect([...removed]).toContain("order.discount");
+  });
+});
+
+describe("asksFor", () => {
+  const pos = /\bpos\b|point[- ]of[- ]sale/gi;
+  it("counts a request and ignores a field label or a mention that says it isn't wanted", () => {
+    expect(asksFor("Milk tea shop with 2 branches, need a POS with senior discount.", pos)).toBe(true);
+    expect(asksFor("Daily Sales Log: Cashier / Manager: text. Gross Sales: money.", pos)).toBe(false);
+    expect(asksFor("Record daily sales summaries; no POS needed.", pos)).toBe(false);
+    expect(asksFor("- POS / Public Website: None (internal bookkeeping only)", pos)).toBe(false);
+    expect(asksFor("A point of sale is not needed.", pos)).toBe(false);
+    expect(asksFor("Account Type (select: Cash Register, E-Wallet, Bank Account)", pos)).toBe(false);
+    expect(asksFor("We don't want a website. The POS rings up orders.", pos)).toBe(true);
   });
 });
