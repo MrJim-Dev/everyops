@@ -1,3 +1,4 @@
+import { htmlConnectionProblems } from "@/lib/public/html-connections";
 import "server-only";
 import type { Part } from "@google/genai";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
@@ -1099,6 +1100,9 @@ export async function designWorkspace(
       const partial = shrunk(previous, bp);
       const errors = [
         ...validateBlueprint(bp).map((e) => `${e.path}: ${e.message}`),
+        ...bp.views.flatMap((v) =>
+          v.type === "html" && v.html ? htmlConnectionProblems(bp, v.id, v.html) : [],
+        ),
         ...extraChecks(bp, brief),
         ...partial,
       ];
@@ -1369,6 +1373,8 @@ export function withStandardSite(
   /** The brief, to keep only contact details the owner actually gave. Skipped when files may hold them. */
   brief?: string,
 ): Blueprint {
+  // An explicitly coded public page owns its design and any landing views used as data sources.
+  if (bp.views.some((v) => v.type === "html" && v.public && v.html?.trim())) return bp;
   const landing = bp.views.find((v) => v.type === "landing");
   const hasForm = bp.views.some((v) => v.type === "form" && v.public);
   if (!landing && !hasForm) return bp;

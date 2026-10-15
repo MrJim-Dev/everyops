@@ -4,6 +4,7 @@ import {
   CaretDownIcon,
   CheckIcon,
   CodeIcon,
+  DatabaseIcon,
   DesktopIcon,
   DeviceMobileIcon,
   DeviceTabletIcon,
@@ -12,7 +13,7 @@ import {
   ImageIcon,
   PlugsConnectedIcon,
 } from "@phosphor-icons/react";
-import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { SegmentedControl } from "@/components/motion/segmented-control";
 import { HtmlPageFrame } from "@/components/public/html-page-frame";
@@ -29,10 +30,12 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { HtmlPageView as HtmlPageConfig } from "@/lib/blueprint/types";
 import { liveSiteHtml } from "@/lib/public/custom-site";
 import { formSnippet, MAX_HTML_BYTES, pageHtml } from "@/lib/public/html-page";
-import { htmlPage, type PublicForm } from "@/lib/public/resolve";
+import { workspaceTableData } from "@/lib/public/page-data";
+import { htmlPage, isPublic, type PublicForm } from "@/lib/public/resolve";
 import { canManage } from "@/lib/store/workspaces";
 import { uploadImage } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
+import { HtmlCodeEditor, type HtmlCodeEditorHandle } from "./html-code-editor";
 import { PublicBar } from "./public-bar";
 
 const SAVE_DELAY = 800;
@@ -95,7 +98,8 @@ export function HtmlPageView({ view }: { view: HtmlPageConfig }) {
           html={page.html ?? saved}
           slug={ws.id}
           forms={forms}
-          preview
+          readData={view.public ? undefined : (id) => workspaceTableData(ws.blueprint, ws.records, id)}
+          preview={ws.mode === "preview"}
           title={view.name}
           className="min-h-0 w-full flex-1"
         />
@@ -110,7 +114,7 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
   const [shown, setShown] = useState(saved);
   const [device, setDevice] = useState<(typeof DEVICES)[number]["value"]>("desktop");
   const [pane, setPane] = useState<"code" | "preview">("code");
-  const area = useRef<HTMLTextAreaElement>(null);
+  const area = useRef<HtmlCodeEditorHandle>(null);
   const htmlFile = useRef<HTMLInputElement>(null);
   const picture = useRef<HTMLInputElement>(null);
   const bytes = useMemo(() => new TextEncoder().encode(draft).length, [draft]);
@@ -142,23 +146,7 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
     [view.id],
   );
 
-  const insert = (text: string) => {
-    const el = area.current;
-    const start = el?.selectionStart ?? draft.length;
-    const end = el?.selectionEnd ?? draft.length;
-    const next = draft.slice(0, start) + text + draft.slice(end);
-    setDraft(next);
-    requestAnimationFrame(() => {
-      el?.focus();
-      el?.setSelectionRange(start + text.length, start + text.length);
-    });
-  };
-
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key !== "Tab" || e.shiftKey || e.metaKey || e.ctrlKey) return;
-    e.preventDefault();
-    insert("  ");
-  };
+  const insert = (text: string) => area.current?.insert(text);
 
   const loadFile = async (file: File | undefined) => {
     if (!file) return;
@@ -182,6 +170,23 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
     }
   };
 
+  const sources = ws.blueprint.views.filter(
+    (v) =>
+      ((v.type === "layout" || v.type === "landing") && isPublic(v)) || (!view.public && v.type === "table"),
+  );
+  const insertData = (id: string) => {
+    // IDs are JSON encoded and '<' escaped before writing executable HTML.
+    const source = JSON.stringify(id).replaceAll("<", "\\u003c");
+    insert(`<section data-workspace-data role="status">Loading…</section>
+<script>
+(async () => {
+  const output = document.currentScript.previousElementSibling;
+  const result = await EveryOps.data(${source});
+  output.textContent = result.ok ? JSON.stringify(result, null, 2) : result.message;
+  output.style.whiteSpace = "pre-wrap";
+})();
+</script>`);
+  };
   const width = DEVICES.find((d) => d.value === device)?.width ?? "100%";
 
   return (
@@ -258,6 +263,31 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
+                <DatabaseIcon data-icon="inline-start" />
+                Connect data
+                <CaretDownIcon className="size-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-72">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>
+                    {view.public ? "Published data sources" : "Workspace data sources"}
+                  </DropdownMenuLabel>
+                  {sources.length ? (
+                    sources.map((source) => (
+                      <DropdownMenuItem key={source.id} onClick={() => insertData(source.id)}>
+                        {source.name}
+                      </DropdownMenuItem>
+                    ))
+                  ) : (
+                    <DropdownMenuItem disabled>
+                      Publish a layout with the fields visitors may see to connect data here.
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <span
               className={cn("ml-auto px-1 text-[12px]", tooBig ? "text-warning" : "text-muted-foreground")}
               aria-live="polite"
@@ -269,21 +299,12 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
                   : "Saving…"}
             </span>
           </div>
-          <textarea
-            ref={area}
-            aria-label={`${view.name} HTML`}
-            value={draft}
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKeyDown}
-            className="min-h-0 flex-1 resize-none bg-background p-4 font-mono text-[12.5px] leading-relaxed text-foreground outline-none"
-          />
+          <HtmlCodeEditor ref={area} label={`${view.name} HTML`} value={draft} onChange={setDraft} />
           <p className="border-t px-3 py-2 text-[11.5px] text-muted-foreground">
             Your page runs in a sandbox, apart from EveryOps. Forms save when they have
             <code className="mx-1 rounded bg-muted px-1">data-everyops-form</code>
-            and inputs named after the form's fields. {kb(bytes)} of {kb(MAX_HTML_BYTES)}.
+            and inputs named after the form's fields. Read connected views with EveryOps.data(viewId).{" "}
+            {kb(bytes)} of {kb(MAX_HTML_BYTES)}.
           </p>
         </section>
         <section
@@ -309,6 +330,7 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
                 html={liveShown}
                 slug={ws.id}
                 forms={forms}
+                readData={view.public ? undefined : (id) => workspaceTableData(ws.blueprint, ws.records, id)}
                 preview
                 title={`${view.name} preview`}
                 className="h-full w-full"
