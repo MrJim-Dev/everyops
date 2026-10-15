@@ -1004,8 +1004,8 @@ export async function designWorkspace(
     if (!previous) {
       onEvent?.({ type: "stage", stage: "design" });
       // Designs take 8–40 s on 3.5 Flash and 60–150 s on 3.7 Flash, longer when Vertex is busy. A call is judged by
-      // whether its answer keeps streaming, not by the clock: one that has said nothing for 45 s gets a parallel twin,
-      // one silent for 30 s mid-answer (60 s before its first part, while it thinks) is stopped and retried. A call
+      // whether its answer keeps streaming, not by the clock: one that has said nothing for 20 s gets a parallel twin,
+      // one silent for 15 s mid-answer (60 s before its first part, while it thinks) is stopped and retried. A call
       // that runs away (see runawayWatcher) is stopped within seconds and replaced. Real designs are 2–16k tokens;
       // the cap leaves room, because an answer cut off at the cap is thrown away whole.
       stats.calls++;
@@ -1016,7 +1016,7 @@ export async function designWorkspace(
           prompt,
           task: "design",
           timeoutMs: 170_000,
-          idleMs: 30_000,
+          idleMs: 15_000,
           firstPartMs: 60_000,
           thinking: "LOW",
           maxOutputTokens: 24_000,
@@ -1024,7 +1024,7 @@ export async function designWorkspace(
           signal,
           onText,
         },
-        { hedgeMs: 45_000, attempts: 4, afterSilence: true },
+        { hedgeMs: 20_000, attempts: 4, afterSilence: true },
       );
       if (!result.ok) return failed(result.error);
       stats.output += result.tokens.output;

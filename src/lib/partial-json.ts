@@ -38,3 +38,31 @@ export function parsePartialJson(text: string): unknown {
     return undefined;
   }
 }
+
+/**
+ * The text of a string property while Gemini is still writing it, e.g. a reply's "message", so it can be shown as it
+ * arrives. Returns undefined until the property starts, and `done` once its closing quote has arrived. Only for a key
+ * that appears once in the answer.
+ */
+export function partialString(text: string, key: string): { value: string; done: boolean } | undefined {
+  const start = new RegExp(`"${key}"\\s*:\\s*"`).exec(text);
+  if (!start) return undefined;
+  const from = start.index + start[0].length;
+  let i = from;
+  let done = false;
+  for (; i < text.length; i++) {
+    const c = text[i];
+    if (c === "\\") i++;
+    else if (c === '"') {
+      done = true;
+      break;
+    }
+  }
+  // An escape cut off at the end (a lone backslash, half a \uXXXX) waits for the next part.
+  const raw = text.slice(from, Math.min(i, text.length)).replace(/\\(u[0-9a-fA-F]{0,3})?$/, "");
+  try {
+    return { value: JSON.parse(`"${raw}"`) as string, done };
+  } catch {
+    return undefined;
+  }
+}

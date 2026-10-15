@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePartialJson } from "./partial-json";
+import { parsePartialJson, partialString } from "./partial-json";
 
 describe("parsePartialJson", () => {
   it("keeps finished values and closes what is still open", () => {
@@ -23,5 +23,24 @@ describe("parsePartialJson", () => {
   it("returns undefined before anything has opened", () => {
     expect(parsePartialJson("")).toBeUndefined();
     expect(parsePartialJson("  ")).toBeUndefined();
+  });
+});
+
+describe("partialString", () => {
+  it("returns a string property as it is being written", () => {
+    expect(partialString('{"action":"ask","message":"Hi! Tell me ab', "message")).toEqual({
+      value: "Hi! Tell me ab",
+      done: false,
+    });
+    expect(partialString('{"message":"Line one\\nLine \\"two\\"","questions":[', "message")).toEqual({
+      value: 'Line one\nLine "two"',
+      done: true,
+    });
+  });
+
+  it("waits out an escape cut off at the end, and a property that hasn't started", () => {
+    expect(partialString('{"message":"Caf\\u00', "message")).toEqual({ value: "Caf", done: false });
+    expect(partialString('{"message":"a\\', "message")).toEqual({ value: "a", done: false });
+    expect(partialString('{"action":"ask"', "message")).toBeUndefined();
   });
 });
