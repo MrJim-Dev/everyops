@@ -63,15 +63,28 @@ function computeFormulas(
   return next;
 }
 
-function computeRollups(entity: Entity, data: RecordData, id: string, records: DataRecord[]): RecordData {
+function computeRollups(
+  bp: Blueprint,
+  entity: Entity,
+  data: RecordData,
+  id: string,
+  records: DataRecord[],
+  now: Date,
+): RecordData {
   const rollups = entity.fields.filter((f) => f.type === "rollup" && f.rollup);
   if (rollups.length === 0) return data;
   const next = { ...data };
   for (const field of rollups) {
     const spec = field.rollup;
     if (!spec) continue;
+    const childEntity = spec.filter ? findEntity(bp, spec.childEntityId) : undefined;
+    // A filtered rollup counts only the children its formula is true for (paid lines, open tasks).
     const children = records.filter(
-      (r) => r.entityId === spec.childEntityId && r.data[spec.viaFieldId] === id,
+      (r) =>
+        r.entityId === spec.childEntityId &&
+        r.data[spec.viaFieldId] === id &&
+        (!spec.filter ||
+          (!!childEntity && truthy(run(spec.filter, recordContext(bp, childEntity, r.data, records, now))))),
     );
     const values = children.map((c) => Number(spec.fieldId ? c.data[spec.fieldId] : 0) || 0);
     switch (spec.op) {
@@ -113,7 +126,7 @@ export function computeAll(bp: Blueprint, records: DataRecord[], now: Date = new
     });
 
   let rows = pass(records, (entity, row, all) => computeFormulas(bp, entity, row.data, all, now));
-  rows = pass(rows, (entity, row, all) => computeRollups(entity, row.data, row.id, all));
+  rows = pass(rows, (entity, row, all) => computeRollups(bp, entity, row.data, row.id, all, now));
   rows = pass(rows, (entity, row, all) => computeFormulas(bp, entity, row.data, all, now));
   return rows;
 }

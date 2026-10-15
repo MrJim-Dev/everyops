@@ -3,6 +3,7 @@ import "server-only";
 import type { Part } from "@google/genai";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
 import { type DesignSketch, type DesignStage, sketchOf } from "@/lib/assistant/design-sketch";
+import { isEmail, isFilePath, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
 import { displayKind } from "@/lib/blueprint/field-kind";
 import type {
   Block,
@@ -152,13 +153,48 @@ export function toView(v: Design["views"][number]): View {
   }
 }
 
+/**
+ * A text field named exactly like contact details becomes that type ("Email" → email, "Phone" → phone, "Website"
+ * → url), for designs that still used text for them. Only plain names: "Email template" stays text.
+ */
+function contactType(f: { id: string; name: string; type: Field["type"] }): Field["type"] {
+  if (f.type !== "text") return f.type;
+  const name = `${f.name}`.trim().toLowerCase();
+  const id = f.id.toLowerCase();
+  if (/^(e-?mail|e-?mail address)$/.test(name) || /^e_?mail(_address)?$/.test(id)) return "email";
+  if (/^(phone|mobile|phone number|mobile number|contact number|cell(phone)?( number)?)$/.test(name))
+    return "phone";
+  if (/^(phone|mobile|phone_number|mobile_number|contact_number)$/.test(id)) return "phone";
+  if (/^(website|web address|url|site)$/.test(name) || /^(website|url|web_address)$/.test(id)) return "url";
+  return "text";
+}
+
 export function toEntity(e: Design["entities"][number]): Entity {
   const fields = e.fields.map((f) => {
     const out: Field = {
       id: f.id,
       name: f.name,
-      type: f.type,
-      ...pick(f, ["required", "description", "options", "range", "relation", "formula", "rollup"]),
+      type: contactType(f),
+      ...(pick(f, ["required", "description", "options", "range", "relation"]) as Partial<Field>),
+      // resultType and op come as plain text (the schema is near Gemini's limit); validation names a wrong one.
+      ...(f.formula
+        ? {
+            formula: {
+              ...f.formula,
+              resultType: f.formula.resultType.trim().toLowerCase() as NonNullable<
+                Field["formula"]
+              >["resultType"],
+            },
+          }
+        : {}),
+      ...(f.rollup
+        ? {
+            rollup: {
+              ...f.rollup,
+              op: f.rollup.op.trim().toLowerCase() as NonNullable<Field["rollup"]>["op"],
+            },
+          }
+        : {}),
     };
     return out;
   });
@@ -175,7 +211,7 @@ export function toEntity(e: Design["entities"][number]): Entity {
     pluralName: e.pluralName,
     primaryFieldId: e.primaryFieldId,
     fields,
-    ...pick({ ...e, resource }, ["parent", "booking", "resource"]),
+    ...(pick({ ...e, resource }, ["parent", "booking", "resource"]) as Partial<Entity>),
   };
 }
 
@@ -789,6 +825,15 @@ export function toFieldValue(
     case "image":
       // Pictures are uploaded by people; the AI can't make one, so sample values are left empty.
       return isImagePath(v) ? v : null;
+    case "file":
+      // Documents are uploaded by people too.
+      return isFilePath(v) ? v : null;
+    case "email":
+      return v === "" ? null : isEmail(v) ? v : undefined;
+    case "phone":
+      return v === "" ? null : isPhone(v) ? v : undefined;
+    case "url":
+      return v === "" ? null : normalizeUrl(v);
     case "relation":
       return v === "" ? null : ref(v);
     case "select":

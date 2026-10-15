@@ -324,7 +324,14 @@ export function formSnippet(form: PublicForm): string {
       case "relation":
         return `  <label>${label}<select name="${f.id}"${req}>\n      <option value="">Choose…</option>\n${options((form.choices[f.id] ?? []).map((c) => ({ id: c.id, label: c.title })))}\n    </select></label>`;
       default: {
-        const type = /email/i.test(f.name) ? "email" : /phone|mobile/i.test(f.name) ? "tel" : "text";
+        const type =
+          f.type === "email" || /email/i.test(f.name)
+            ? "email"
+            : f.type === "phone" || /phone|mobile/i.test(f.name)
+              ? "tel"
+              : f.type === "url"
+                ? "url"
+                : "text";
         return `  <label>${label}<input type="${type}" name="${f.id}"${req}></label>`;
       }
     }

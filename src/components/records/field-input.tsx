@@ -12,9 +12,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { normalizeUrl } from "@/lib/blueprint/contact";
 import type { Field, FieldValue, TimeRange } from "@/lib/blueprint/types";
 import { isTimeRange } from "@/lib/format";
 import { at, dateKey, manilaParts } from "@/lib/time";
+import { FileInput } from "./file-input";
 import { ImageInput } from "./image-input";
 import { RelationInput } from "./relation-input";
 
@@ -150,6 +152,44 @@ export function FieldInput({ id, field, value, onChange, invalid }: Props) {
           field={field}
           value={typeof value === "string" ? value : null}
           onChange={onChange}
+        />
+      );
+    case "file":
+      return (
+        <FileInput
+          id={id}
+          field={field}
+          value={typeof value === "string" ? value : null}
+          onChange={onChange}
+        />
+      );
+    case "email":
+    case "phone":
+    case "url":
+      return (
+        <Input
+          {...common}
+          type={field.type === "phone" ? "tel" : field.type}
+          inputMode={field.type === "phone" ? "tel" : field.type === "email" ? "email" : "url"}
+          autoComplete={field.type === "phone" ? "tel" : field.type === "email" ? "email" : "url"}
+          placeholder={
+            field.type === "email"
+              ? "name@example.com"
+              : field.type === "phone"
+                ? "0917 555 0123"
+                : "example.com"
+          }
+          value={String(value ?? "")}
+          // A bare domain gets https:// when the field is left, so the link opens.
+          onBlur={
+            field.type === "url"
+              ? (e) => {
+                  const fixed = normalizeUrl(e.target.value);
+                  if (fixed && fixed !== e.target.value) onChange(fixed);
+                }
+              : undefined
+          }
+          onChange={(e) => onChange(e.target.value)}
         />
       );
     default:

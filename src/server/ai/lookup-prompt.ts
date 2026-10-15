@@ -49,7 +49,7 @@ const NAVIGATE =
   /^(please\s+)?(open|go to|take me to|bring me to|show me)\s+(the\s+|my\s+)?[\w\s'&-]{1,40}?\s+(page|tab|settings|history)[\s.!]*$|^(please\s+)?(open|go to|take me to)\s+(settings|history|team|publish)[\s.!]*$/i;
 /** A change to the design: fields, pages, tabs, cards, forms, the website. */
 const DESIGN =
-  /\b(add|create|make|rename|remove|delete|hide|show|move|reorder|put|change|turn)\b[^.?!]*\b(fields?|columns?|pages?|tabs?|cards?|charts?|forms?|automations?|sections?|website|landing page|headline|button|steps?|layout|dashboard|record types?|sidebar|a way to (track|manage))\b/i;
+  /\b(add|create|make|rename|remove|delete|hide|show|move|reorder|put|change|turn)\b[^.?!]*\b(fields?|columns?|pages?|tabs?|cards?|charts?|forms?|automations?|sections?|website|landing page|headline|button|steps?|layout|dashboard|record types?|sidebar|a way to (track|manage)|phone|e-?mail|file|contract|rollup|count)\b/i;
 /** Telling the assistant something about the business ("heads up: we now close at 11"). */
 const STATEMENT = /^(heads up|fyi|just so you know|for your info|note)\b[^?]*$/i;
 /** Advice about the workspace ("what should I set up next?", "how do I share the booking page?"). */
@@ -73,8 +73,13 @@ export function needsLookup(message: string): boolean {
   return true;
 }
 
-/** Scoped facts need fresh query evidence, even when the digest appears to imply zero. */
+/**
+ * Scoped facts need fresh query evidence, even when the digest appears to imply zero. A change to the design ("add a
+ * count of paid bookings to players") still gets a lookup but doesn't need one: its statuses and numbers are
+ * settings, and Gemini rightly calls nothing for it.
+ */
 export function requiresLookupEvidence(message: string): boolean {
+  if (DESIGN.test(message) && !/how (many|much)|\?\s*$/i.test(message)) return false;
   return (
     needsLookup(message) &&
     (DATA.test(message) || /how (many|much)|total|revenue|collected|magkano|ilan|gcash|maya/i.test(message))

@@ -59,6 +59,23 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
           if (field.formula.freezeWhen) checkExpr(bp, entity, field.formula.freezeWhen, path, errors);
         }
       }
+      if (field.type === "rollup" && field.rollup) {
+        const spec = field.rollup;
+        const child = bp.entities.find((e) => e.id === spec.childEntityId);
+        if (!["sum", "count", "min", "max", "avg"].includes(spec.op))
+          errors.push({
+            path,
+            message: `${field.name}: op is sum, count, min, max or avg, not "${spec.op}"`,
+          });
+        // The filter reads the child records it counts (status == "paid" on a booking's payments).
+        if (spec.filter && child) checkExpr(bp, child, spec.filter, path, errors);
+      }
+      if (
+        field.type === "formula" &&
+        field.formula &&
+        !["number", "money", "text", "checkbox", "date"].includes(field.formula.resultType)
+      )
+        errors.push({ path, message: `${field.name}: resultType is number, money, text, checkbox or date` });
     });
     if (!fieldIds.has(entity.primaryFieldId))
       errors.push({ path: `entities.${ei}`, message: `${entity.name} has no primary field` });

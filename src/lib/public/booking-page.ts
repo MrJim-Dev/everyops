@@ -460,7 +460,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
         });
       } }));
       default: {
-        var t = /email/i.test(f.name) ? "email" : /phone|mobile/i.test(f.name) ? "tel" : "text";
+        var t = f.type === "email" || /email/i.test(f.name) ? "email" : f.type === "phone" || /phone|mobile/i.test(f.name) ? "tel" : f.type === "url" ? "url" : "text";
         return el("input", Object.assign({ type: t, value: v || "", autocomplete: t === "tel" ? "tel" : t === "email" ? "email" : /name/i.test(f.name) ? "name" : null, oninput: on }, common));
       }
     }

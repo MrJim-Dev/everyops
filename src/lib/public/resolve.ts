@@ -424,6 +424,8 @@ export function publicFieldsOf(bp: Blueprint, view: FormView): Field[] {
       f.type !== "status" &&
       f.type !== "money" &&
       f.type !== "person" &&
+      // Documents are the team's: a visitor can't read them back, so public forms don't ask for files.
+      f.type !== "file" &&
       (f.type !== "relation" || published.has(f.relation?.entityId ?? "")),
   );
   const chosen = view.fieldIds.length

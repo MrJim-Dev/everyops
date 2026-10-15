@@ -544,7 +544,15 @@ function PublicInput({
       return (
         <Input
           {...common}
-          type={/email/i.test(field.name) ? "email" : /phone|mobile/i.test(field.name) ? "tel" : "text"}
+          type={
+            field.type === "email" || /email/i.test(field.name)
+              ? "email"
+              : field.type === "phone" || /phone|mobile/i.test(field.name)
+                ? "tel"
+                : field.type === "url"
+                  ? "url"
+                  : "text"
+          }
           value={String(value ?? "")}
           onChange={(e) => onChange(e.target.value)}
         />
