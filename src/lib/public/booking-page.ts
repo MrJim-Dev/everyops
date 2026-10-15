@@ -34,6 +34,26 @@ export type BookingPageOptions = {
   heading: string;
   intro?: string;
   palette: Palette;
+  /**
+   * How the page is laid out (site-sections.ts, booking): split (summary right), summary-left, centered (one column),
+   * topbar (summary above the steps), intro-side (heading and summary in a column beside the steps) or card.
+   */
+  layout?: string;
+};
+
+/** Grid areas per layout: the header, the step pills, the step panel and the summary. Phones always stack them. */
+const LAYOUTS: Record<string, string> = {
+  split:
+    "main.book { grid-template-columns: minmax(0, 1fr) 320px; grid-template-areas: 'head head' 'prog prog' 'panel sum'; }",
+  "summary-left":
+    "main.book { grid-template-columns: 320px minmax(0, 1fr); grid-template-areas: 'head head' 'prog prog' 'sum panel'; }",
+  centered:
+    "main.book { max-width: 720px; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'prog' 'panel' 'sum'; } main.book header.top { text-align: center; } main.book .lead { margin: 0 auto; } main.book .progress { justify-content: center; } main.book aside.summary { position: static; }",
+  topbar:
+    "main.book { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'prog' 'sum' 'panel'; } main.book aside.summary { top: 68px; z-index: 2; margin-bottom: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 14px 20px; box-shadow: 0 12px 30px -24px rgb(0 0 0 / .4); } main.book aside.summary h3 { margin: 0; } main.book aside.summary dl { display: flex; flex-wrap: wrap; gap: 6px 20px; } main.book aside.summary dl div { gap: 6px; } main.book aside.summary .total { border: 0; padding: 0; margin: 0; }",
+  "intro-side":
+    "main.book { grid-template-columns: 340px minmax(0, 1fr); grid-template-rows: auto 1fr; grid-template-areas: 'head prog' 'sum panel'; column-gap: 40px; } main.book .progress { align-self: end; margin-bottom: 16px; } main.book aside.summary { top: 76px; align-self: start; margin-top: 20px; }",
+  card: "body { background: var(--tint); } main.book { margin-top: 32px; margin-bottom: 48px; background: #fff; border-radius: 28px; padding: 8px 32px 32px; box-shadow: 0 40px 80px -60px rgb(0 0 0 / .45); grid-template-columns: minmax(0, 1fr) 300px; grid-template-areas: 'head head' 'prog prog' 'panel sum'; } main.book .panel { border: 0; padding: 0; } main.book aside.summary { background: var(--tint); border: 0; }",
 };
 
 /** Marks a booking page setup wrote, with the form it books through. */
@@ -79,7 +99,9 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
   .progress li span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; background: var(--tint); color: var(--accent); font-weight: 700; font-size: 12px; }
   .progress li[aria-current="step"] { color: var(--ink); border-color: var(--accent); }
   .progress li[aria-current="step"] span, .progress li.done span { background: var(--accent); color: #fff; }
-  .layout { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; padding-bottom: 64px; }
+  main.book { display: grid; column-gap: 20px; row-gap: 0; align-items: start; padding-bottom: 64px; }
+  main.book header.top { grid-area: head; } main.book .progress { grid-area: prog; } main.book .panel { grid-area: panel; } main.book aside.summary { grid-area: sum; }
+  ${LAYOUTS[o.layout ?? "split"] ?? LAYOUTS.split}
   .panel { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; scroll-margin-top: 80px; }
   .panel h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: -0.015em; }
   .panel .hint { margin: 0 0 18px; color: var(--soft); font-size: 14.5px; }
@@ -164,22 +186,20 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     .choice:active, .day:active, .time:active, .button:active, .qty button:active, .month button:active { transform: none; }
   }
   @keyframes fadeonly { from { opacity: 0; } to { opacity: 1; } }
-  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } aside.summary { position: static; } }
+  @media (max-width: 860px) { main.book { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'prog' 'panel' 'sum'; row-gap: 20px; padding-left: 20px; padding-right: 20px; } main.book header.top { position: static; text-align: left; } main.book .progress { align-self: start; margin-bottom: 0; } main.book aside.summary { position: static; display: block; } }
 </style>
 </head>
 <body ${BOOKING_PAGE_MARK}="${esc(o.formId)}">
 <nav><div class="wrap"><strong>${esc(o.name)}</strong><a class="back" href="${esc(o.homeHref)}" target="_top">← Back to home</a></div></nav>
-<main class="wrap">
+<main class="wrap book layout-${esc(o.layout ?? "split")}">
   <header class="top">
     <span class="eyebrow rise">${esc(o.name)}</span>
     <h1 class="rise">${esc(o.heading)}</h1>
     ${intro}
   </header>
   <ol class="progress" id="progress" aria-label="Booking steps"></ol>
-  <div class="layout">
-    <section class="panel" id="panel" aria-live="polite"><div class="skeleton"></div></section>
-    <aside class="summary" id="summary" aria-label="Your booking"><h3>Your booking</h3><p class="empty">Pick what you want to book to see it here.</p></aside>
-  </div>
+  <section class="panel" id="panel" aria-live="polite"><div class="skeleton"></div></section>
+  <aside class="summary" id="summary" aria-label="Your booking"><h3>Your booking</h3><p class="empty">Pick what you want to book to see it here.</p></aside>
 </main>
 <script>
 (function () {

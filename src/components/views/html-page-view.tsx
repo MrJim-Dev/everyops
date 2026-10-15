@@ -34,6 +34,7 @@ import { canManage } from "@/lib/store/workspaces";
 import { uploadImage } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 import { PublicBar } from "./public-bar";
+import { SiteDesignButton, SiteDesignPanel } from "./site-design-panel";
 
 const SAVE_DELAY = 800;
 const PREVIEW_DELAY = 350;
@@ -70,10 +71,16 @@ export function HtmlPageView({ view }: { view: HtmlPageConfig }) {
   );
   const forms = page.forms ?? [];
   const [editing, setEditing] = useState(false);
+  // The page in a draft design while the design panel is open.
+  const [preview, setPreview] = useState<string | null>(null);
+  const [designing, setDesigning] = useState(false);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PublicBar view={view}>
+        {manager && view.live && !editing && !designing ? (
+          <SiteDesignButton onOpen={() => setDesigning(true)} />
+        ) : null}
         {manager ? (
           <Button size="sm" variant={editing ? "default" : "outline"} onClick={() => setEditing((e) => !e)}>
             {editing ? (
@@ -91,14 +98,19 @@ export function HtmlPageView({ view }: { view: HtmlPageConfig }) {
       {editing ? (
         <HtmlEditor key={view.id} view={view} saved={saved} forms={forms} />
       ) : (
-        <HtmlPageFrame
-          html={page.html ?? saved}
-          slug={ws.id}
-          forms={forms}
-          preview
-          title={view.name}
-          className="min-h-0 w-full flex-1"
-        />
+        <div className="flex min-h-0 flex-1">
+          <HtmlPageFrame
+            html={preview ?? page.html ?? saved}
+            slug={ws.id}
+            forms={forms}
+            preview
+            title={view.name}
+            className="min-h-0 w-full flex-1"
+          />
+          {designing ? (
+            <SiteDesignPanel view={view} onPreview={setPreview} onClose={() => setDesigning(false)} />
+          ) : null}
+        </div>
       )}
     </div>
   );

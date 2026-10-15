@@ -245,7 +245,14 @@ export type HtmlPageView = ViewBase & {
    * A website setup made: the sections its live parts (<!--everyops:live id--> … ) are drawn from, again every time
    * the page is shown, so its prices, services and payment methods are always the workspace's current ones.
    */
-  live?: { blocks: Block[] };
+  live?: {
+    blocks: Block[];
+    /**
+     * The style of each section and the theme (src/lib/public/site-sections.ts), e.g. { hero: "menu", offer: "table",
+     * theme: "plum" }. Missing or unknown ones fall back to the default style.
+     */
+    design?: Record<string, string>;
+  };
 };
 
 /**

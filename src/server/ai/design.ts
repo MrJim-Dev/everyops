@@ -46,6 +46,7 @@ import { generateJsonHedged } from "./gemini";
 import { withOverviewLayout } from "./overview-layout";
 import { referencesText, setupReferences } from "./references";
 import { fillEmptySamples } from "./samples";
+import { chooseSiteDesign } from "./site-design";
 
 const SLOT_MINUTES = [15, 30, 60, 90, 120] as const;
 const pick = <T extends object>(source: T, keys: (keyof T)[]) =>
@@ -1094,16 +1095,18 @@ export async function designWorkspace(
       onEvent?.({ type: "stage", stage: "finish" });
       // Record types the design left without samples (line items, most often) get theirs from one small call, while
       // the Overview becomes a layout of library components (when that step fails the template layout stays).
-      const [filled, laidOut] = await Promise.all([
+      // The website's design (a style per section, from the library) is chosen at the same time.
+      const [filled, laidOut, site] = await Promise.all([
         fillEmptySamples(bp, samples, now),
         withOverviewLayout(bp, name, brief, now),
+        chooseSiteDesign(bp, toRecords(bp, samples, now), name, brief),
       ]);
       // Samples in the wrong year (the right month and day, but 2023) move to this year.
       const dated = samplesThisYear(laidOut, toRecords(laidOut, filled, now), now);
       if (dated.fields) console.info(JSON.stringify({ event: "design_samples_moved", fields: dated.fields }));
       const records = computeAll(laidOut, dated.records, now);
       // Businesses whose customers book on their own get a custom HTML website and a calendar that suits them.
-      const blueprint = withCustomSite(laidOut, records, name, now);
+      const blueprint = withCustomSite(laidOut, records, name, now, site);
       const sketch = sketchOf(blueprint, true);
       show(sketch && { ...sketch, samples: records.length });
       return done({ ok: true, name, summary: data.summary, data: { blueprint, records } });
