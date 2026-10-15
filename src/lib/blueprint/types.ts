@@ -241,6 +241,11 @@ export type HtmlPageView = ViewBase & {
   /** Shown at /s/[workspace]/[view] once published (private until then). */
   public?: boolean;
   html?: string;
+  /**
+   * A website setup made: the sections its live parts (<!--everyops:live id--> … ) are drawn from, again every time
+   * the page is shown, so its prices, services and payment methods are always the workspace's current ones.
+   */
+  live?: { blocks: Block[] };
 };
 
 /**

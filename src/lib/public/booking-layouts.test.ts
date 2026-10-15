@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FormView } from "@/lib/blueprint/types";
+import type { DataRecord, FormView } from "@/lib/blueprint/types";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { rentalSample } from "@/lib/catalog/rental-operations";
 import { customBookingHtml } from "./booking-page";
@@ -11,7 +11,7 @@ import {
   withCustomSite,
   withSiteLinks,
 } from "./custom-site";
-import { formPageOf, publicForm, resolvePage, siteOf } from "./resolve";
+import { formPageOf, htmlPage, publicForm, resolvePage, siteOf } from "./resolve";
 import { standardLanding } from "./site-template";
 import { dateRangeProblem, daysFor, nextRange, nextStay, type Slot } from "./slots";
 
@@ -207,5 +207,56 @@ describe("stay date fields", () => {
     const out = publicForm({ ...blueprint, views: [...blueprint.views, form] }, records, form);
     expect(out?.booking).toMatchObject({ dayFieldIds: ["check_in"], endDayFieldIds: ["check_out"] });
     expect(out?.steps?.[0].fieldIds).toEqual(["unit", "dates"]);
+  });
+});
+
+describe("setup's website shows live data", () => {
+  function site() {
+    const { blueprint, records } = courtBookingsSample(NOW);
+    const form = blueprint.views.find((v) => v.type === "form");
+    if (form?.type !== "form") throw new Error("no form");
+    form.public = true;
+    blueprint.views.push(standardLanding(blueprint, "Court House", {}, "home"));
+    blueprint.systems[0].viewIds.push("home");
+    withCustomSite(blueprint, records, "Court House", NOW);
+    const view = blueprint.views.find((v) => v.id === "home");
+    if (view?.type !== "html") throw new Error("no site");
+    return { blueprint, records, view };
+  }
+  const court = (records: DataRecord[]) =>
+    records.find((r) => r.entityId === "court" && r.data.name === "Court 1");
+
+  it("draws its courts from the records each time it's shown, not from when setup ran", () => {
+    const { blueprint, records, view } = site();
+    expect(view.html).toContain("<!--everyops:live offer-->");
+    const renamed = records.map((r) =>
+      r === court(records) ? { ...r, data: { ...r.data, name: "Center Court" } } : r,
+    );
+    const html = htmlPage(blueprint, renamed, {}, view).html ?? "";
+    expect(html).toContain("Center Court");
+    expect(html).not.toMatch(/>Court 1</);
+  });
+
+  it("keeps the owner's own words around the live parts", () => {
+    const { blueprint, records, view } = site();
+    const edited = (view.html ?? "").replace(/<h1([^>]*)>[^<]*<\/h1>/, "<h1$1>Our own headline</h1>");
+    const renamed = records.map((r) =>
+      r === court(records) ? { ...r, data: { ...r.data, name: "Center Court" } } : r,
+    );
+    const html = htmlPage(blueprint, renamed, { home: { body: edited } }, view).html ?? "";
+    expect(html).toContain("Our own headline");
+    expect(html).toContain("Center Court");
+  });
+
+  it("brings live courts to a website made before live parts, and leaves an owner's own page alone", () => {
+    const { blueprint, records, view } = site();
+    const old =
+      '<header class="hero"></header><section id="offer" class="section"><h2>Our courts</h2><p>Old Court</p></section><script>// Reveal each part once as it scrolls into view.</script>';
+    const older = { ...view, html: old, live: undefined };
+    const html = htmlPage(blueprint, records, {}, older).html ?? "";
+    expect(html).not.toContain("Old Court");
+    expect(html).toContain("Court 1");
+    const own = { ...view, html: "<h1>My page</h1><p>Old Court</p>", live: undefined };
+    expect(htmlPage(blueprint, records, {}, own).html).toBe("<h1>My page</h1><p>Old Court</p>");
   });
 });

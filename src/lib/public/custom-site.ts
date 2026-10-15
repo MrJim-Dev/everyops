@@ -9,11 +9,18 @@
  * at opacity 0 and 8 px down (never from scale 0) with a short stagger, hover effects only on devices that hover, and
  * reduced motion keeps the fades without the movement.
  */
-import type { Blueprint, BookingLayout, DataRecord, FormView, HtmlPageView } from "@/lib/blueprint/types";
+import type {
+  Blueprint,
+  BookingLayout,
+  DataRecord,
+  FormView,
+  HtmlPageView,
+  LandingView,
+} from "@/lib/blueprint/types";
 import { customBookingHtml } from "./booking-page";
 import type { HeroFact } from "./hero-facts";
-import { type ResolvedBlock, resolveBlocks } from "./resolve";
-import { bookLabel, defaultCopy, mainForm, offeringOf } from "./site-template";
+import { type PageDocs, type ResolvedBlock, resolveBlocks } from "./resolve";
+import { bookLabel, defaultCopy, mainForm, offeringOf, standardBlocks } from "./site-template";
 
 /** Stands in for the workspace slug in links the page is created with; filled in wherever the page is shown. */
 export const SITE_TOKEN = "__everyops_site__";
@@ -245,6 +252,67 @@ function section(id: string, title: string | undefined, body: string, className 
   return `<section id="${id}" class="section ${className}">${heading}${body}</section>`;
 }
 
+/** The page's main button, to the site's booking or order page. */
+function ctaOf(hero: Hero | undefined, cls = ""): string {
+  return hero?.ctaHref
+    ? `<a class="button primary ${cls}" href="${esc(hero.ctaHref)}" target="_top">${esc(hero.ctaLabel ?? "Book now")}</a>`
+    : "";
+}
+
+/**
+ * A part of the page drawn from the workspace's data. Every time the page is shown (on the public site and in the app)
+ * EveryOps draws it again from the current records, so prices, courts, services and payment methods are always the
+ * ones in the workspace. The words around it are the owner's to edit.
+ */
+const LIVE = /<!--everyops:live ([a-z_]+)-->[\s\S]*?<!--\/everyops:live \1-->/g;
+const live = (id: string, html: string) => `<!--everyops:live ${id}-->${html}<!--/everyops:live ${id}-->`;
+export const hasLiveParts = (html: string) => /<!--everyops:live [a-z_]+-->/.test(html);
+
+/** The parts of the page that come from data, by id: the hero card ("glance") and each data section. */
+export function liveParts(blocks: ResolvedBlock[]): Record<string, string> {
+  const hero = blocks.find((b): b is Hero => b.type === "hero");
+  const offer = blocks.find(
+    (b): b is Records => b.type === "records" && b.id === "offer" && b.items.length > 0,
+  );
+  const out: Record<string, string> = { glance: heroCard(hero, offer, ctaOf(hero)) };
+  for (const b of blocks) {
+    if (b.type === "records" && b.layout === "cards")
+      out[b.id] = !b.items.length
+        ? ""
+        : b.id === "payments"
+          ? section(b.id, b.title, `<div class="grid cards">${payCards(b)}</div>`, "pay")
+          : section(b.id, b.title, `<div class="grid cards">${offerCards(b)}</div>`);
+    if (b.type === "records" && b.layout === "faq") {
+      const items = b.items
+        .map((i) => {
+          const [q, a] = i.cells;
+          if (!q?.text) return "";
+          return `<details class="reveal"><summary>${esc(q.text)}<span aria-hidden="true" class="plus"></span></summary><div class="answer">${paragraphs(a?.text ?? "")}</div></details>`;
+        })
+        .join("");
+      out[b.id] = items ? section("faq", b.title ?? "Questions", `<div class="faq">${items}</div>`) : "";
+    }
+    if (b.type === "contact") {
+      const rows = [
+        ["Phone", b.phone],
+        ["Email", b.email],
+        ["Address", b.address],
+        ["Hours", b.hours],
+      ].filter((r): r is [string, string] => !!r[1]);
+      const list = rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join("");
+      out.contact = rows.length
+        ? section("contact", b.title ?? "Visit us", `<dl class="contact reveal">${list}</dl>`)
+        : "";
+    }
+  }
+  return out;
+}
+
+/** The page with each live part drawn again from parts; parts it doesn't know stay as they are. */
+export function refreshLive(html: string, parts: Record<string, string>): string {
+  return html.replace(LIVE, (whole, id: string) => (id in parts ? live(id, parts[id]) : whole));
+}
+
 /** The whole page, from the standard site's resolved sections (links use SITE_TOKEN for the workspace). */
 export function customSiteHtml(name: string, blocks: ResolvedBlock[], about = ""): string {
   const p = paletteFor(name, about);
@@ -252,11 +320,9 @@ export function customSiteHtml(name: string, blocks: ResolvedBlock[], about = ""
   const offer = blocks.find(
     (b): b is Records => b.type === "records" && b.id === "offer" && b.items.length > 0,
   );
-  const button = (cls: string) =>
-    hero?.ctaHref
-      ? `<a class="button primary ${cls}" href="${esc(hero.ctaHref)}" target="_top">${esc(hero.ctaLabel ?? "Book now")}</a>`
-      : "";
+  const button = (cls: string) => ctaOf(hero, cls);
   const cta = button("");
+  const fresh = liveParts(blocks);
   const parts: string[] = [];
   for (const b of blocks) {
     if (b.type === "highlights" && b.items.length) {
@@ -268,12 +334,10 @@ export function customSiteHtml(name: string, blocks: ResolvedBlock[], about = ""
         .join("");
       parts.push(section("why", b.title, `<div class="grid three">${items}</div>`, "plain"));
     }
-    if (b.type === "records" && b.layout === "cards" && b.items.length)
-      parts.push(
-        b.id === "payments"
-          ? section(b.id, b.title, `<div class="grid cards">${payCards(b)}</div>`, "pay")
-          : section(b.id, b.title, `<div class="grid cards">${offerCards(b)}</div>`),
-      );
+    // Data sections are live parts, kept even while empty so records added later show up.
+    if (b.type === "records" && (b.layout === "cards" || b.layout === "faq"))
+      parts.push(live(b.id, fresh[b.id] ?? ""));
+    if (b.type === "contact") parts.push(live("contact", fresh.contact ?? ""));
     if (b.type === "steps" && b.items.length) {
       const items = b.items
         .map(
@@ -289,27 +353,6 @@ export function customSiteHtml(name: string, blocks: ResolvedBlock[], about = ""
         ),
       );
     }
-    if (b.type === "records" && b.layout === "faq" && b.items.length) {
-      const items = b.items
-        .map((i) => {
-          const [q, a] = i.cells;
-          if (!q?.text) return "";
-          return `<details class="reveal"><summary>${esc(q.text)}<span aria-hidden="true" class="plus"></span></summary><div class="answer">${paragraphs(a?.text ?? "")}</div></details>`;
-        })
-        .join("");
-      parts.push(section("faq", b.title ?? "Questions", `<div class="faq">${items}</div>`));
-    }
-    if (b.type === "contact") {
-      const rows = [
-        ["Phone", b.phone],
-        ["Email", b.email],
-        ["Address", b.address],
-        ["Hours", b.hours],
-      ].filter((r): r is [string, string] => !!r[1]);
-      const list = rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join("");
-      if (rows.length)
-        parts.push(section("contact", b.title ?? "Visit us", `<dl class="contact reveal">${list}</dl>`));
-    }
   }
   const has = (id: string) => parts.some((x) => x.includes(`id="${id}"`));
   const navLinks = [
@@ -324,7 +367,7 @@ export function customSiteHtml(name: string, blocks: ResolvedBlock[], about = ""
   // The line above the headline says something the headline doesn't: opening hours, or how much there is to book.
   const note = hero?.facts?.find((f) => f.kind === "hours") ?? hero?.facts?.find((f) => f.kind === "offer");
   const eyebrow = note ? `<span class="eyebrow rise">${esc(note.text)}</span>` : "";
-  const glance = heroCard(hero, offer, cta);
+  const glance = fresh.glance;
   const initial = esc(name.trim().charAt(0).toUpperCase() || "•");
 
   return `<!doctype html>
@@ -463,7 +506,7 @@ ${fontLink(p)}
     ${lead}
     <div class="actions rise">${cta}${secondary}</div>
   </div>
-  ${glance}
+  ${live("glance", glance)}
 </div></header>
 <div class="wrap">
 ${parts.join("\n")}
@@ -490,6 +533,42 @@ ${cta ? `<div class="closing reveal"><h2>Ready to ${esc((hero?.ctaLabel ?? "Book
 </body>
 </html>
 `;
+}
+
+/**
+ * A custom website with its live parts drawn from the workspace's current data. Pages setup made carry their sections
+ * (view.live); older ones made before live parts get their offer and payment sections, found by the ids setup always
+ * gave them, drawn from the standard site's sections. Any other HTML page comes back as it is.
+ */
+export function liveSiteHtml(
+  bp: Blueprint,
+  records: DataRecord[],
+  docs: PageDocs,
+  view: HtmlPageView,
+  html: string,
+  now = new Date(),
+): string {
+  const marked = hasLiveParts(html);
+  const legacy =
+    !marked &&
+    /<section id="(offer|payments)" class="section/.test(html) &&
+    html.includes("Reveal each part once");
+  if (!marked && !legacy) return html;
+  const blocks = view.live?.blocks ?? standardBlocks(bp, bp.workspaceName || view.name);
+  const landing = {
+    id: view.id,
+    entityId: "",
+    name: view.name,
+    type: "landing",
+    layout: "standard",
+    blocks,
+  } as LandingView;
+  const parts = liveParts(resolveBlocks(bp, records, docs, SITE_TOKEN, landing, now));
+  if (marked) return refreshLive(html, parts);
+  return html.replace(
+    /<section id="(offer|payments)" class="section[^"]*">[\s\S]*?<\/section>/g,
+    (whole, id: string) => (parts[id] ? parts[id] : whole),
+  );
 }
 
 /** What the business is, for picking its look: its name, what it offers and its record types. */
@@ -533,6 +612,8 @@ export function withCustomSite(
     type: "html",
     public: true,
     html: customSiteHtml(name, blocks, aboutOf(bp)),
+    // The sections behind the page's live parts: every time it's shown they're drawn again from the current data.
+    live: { blocks: landing.blocks ?? [] },
   };
   bp.views[at] = page;
   return bp;

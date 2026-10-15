@@ -35,6 +35,7 @@ import {
   formatRange,
   isTimeRange,
 } from "@/lib/format";
+import { liveSiteHtml } from "./custom-site";
 import { type HeroFact, heroFacts } from "./hero-facts";
 import { pageHtml } from "./html-page";
 import { type PublicLayout, resolveLayout } from "./layout";
@@ -815,7 +816,9 @@ export function htmlPage(
       const payments = pay ? resolveBlocks(bp, records, docs, "", { ...v, blocks: [pay] })[0] : undefined;
       return [payments?.type === "records" && payments.items.length ? { ...form, payments } : form];
     });
-  return { id: view.id, name: view.name, type: "html", blocks: [], html: pageHtml(view, docs), forms };
+  // A website setup made shows the workspace's current data in its live parts (offers, prices, ways to pay).
+  const html = liveSiteHtml(bp, records, docs, view, pageHtml(view, docs));
+  return { id: view.id, name: view.name, type: "html", blocks: [], html, forms };
 }
 
 /** Hero text has to fit a hero. */
