@@ -175,3 +175,50 @@ describe("website looks", () => {
     expect(paletteFor("Zeta Holdings")).toBe(paletteFor("Zeta Holdings"));
   });
 });
+
+describe("what the website offers never holds customers' records", () => {
+  it("offers a rental business's gear, never the rental requests visitors send", () => {
+    const f = (id: string, type: string, extra: object = {}) => ({ id, name: id, type, ...extra });
+    const e = (id: string, fields: object[], extra: object = {}) =>
+      ({
+        id,
+        name: id,
+        pluralName: `${id}s`,
+        primaryFieldId: "name",
+        fields: [f("name", "text"), ...fields],
+        ...extra,
+      }) as never;
+    const bp = {
+      workspaceName: "Party Gear PH",
+      systems: [],
+      widgets: [],
+      rules: [],
+      entities: [
+        e("gear_category", [f("active", "checkbox")]),
+        e("gear_item", [
+          f("category", "relation", { relation: { entityId: "gear_category" } }),
+          f("daily_rate", "money"),
+          f("security_deposit", "money"),
+        ]),
+        e("client", [f("phone", "text")]),
+        e("rental", [
+          f("client", "relation", { relation: { entityId: "client" } }),
+          f("delivery_address", "long_text"),
+          f("delivery_fee", "money"),
+        ]),
+        e(
+          "rental_line",
+          [
+            f("rental", "relation", { relation: { entityId: "rental" } }),
+            f("gear_item", "relation", { relation: { entityId: "gear_item" } }),
+          ],
+          { parent: { entityId: "rental", fieldId: "rental" } },
+        ),
+      ],
+      views: [
+        { id: "request", name: "Request", entityId: "rental", type: "form", public: true, fieldIds: [] },
+      ],
+    } as unknown as Blueprint;
+    expect(offeringOf(bp)?.id).toBe("gear_item");
+  });
+});

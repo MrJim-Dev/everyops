@@ -10,6 +10,7 @@
  * reduced motion keeps the fades without the movement.
  */
 import type {
+  Block,
   Blueprint,
   BookingLayout,
   DataRecord,
@@ -24,6 +25,7 @@ import {
   designCss,
   esc,
   heroGlance,
+  heroNote,
   REFERENCES,
   renderClosing,
   renderContact,
@@ -222,7 +224,11 @@ export function liveParts(
 ): Record<string, string> {
   const d = cleanDesign(design);
   const p = partsOf(name, blocks);
-  const out: Record<string, string> = { glance: heroGlance(d.hero, p) };
+  const out: Record<string, string> = {
+    glance: heroGlance(d.hero, p),
+    note: heroNote(p),
+    closing: renderClosing(d.closing, p),
+  };
   for (const b of blocks) {
     if (b.type === "records" && b.layout === "cards")
       out[b.id] = b.id === "payments" ? renderPayments(d.payments, b) : renderOffer(d.offer, b, p);
@@ -391,10 +397,10 @@ ${fontLink(p)}
 <body>
 ${renderNav(d.nav, parts)}
 <main id="top">
-${renderHero(d.hero, parts, live("glance", fresh.glance ?? ""))}
+${renderHero(d.hero, parts, live("glance", fresh.glance ?? ""), live("note", fresh.note ?? ""))}
 <div class="wrap">
 ${body.join("\n")}
-${renderClosing(d.closing, parts)}
+${live("closing", fresh.closing ?? "")}
 </div>
 </main>
 ${renderFooter(d.footer, parts)}
@@ -420,6 +426,19 @@ ${renderFooter(d.footer, parts)}
 }
 
 /**
+ * The sections a live site is drawn from, with its offer pointing at what the business offers today. A stored offer
+ * section can point at something else (picked by an older rule, or a list since renamed); it never shows that.
+ */
+function currentBlocks(bp: Blueprint, blocks: Block[], name: string): Block[] {
+  const offer = offeringOf(bp);
+  return blocks.flatMap((b) => {
+    if (b.type !== "records" || b.id !== "offer" || b.entityId === offer?.id) return [b];
+    const fresh = standardBlocks(bp, name).find((x) => x.id === "offer");
+    return fresh ? [fresh] : [];
+  });
+}
+
+/**
  * A custom website with its live parts drawn from the workspace's current data, in its design's styles. Pages setup
  * made carry their sections and design (view.live); older ones made before live parts get their offer and payment
  * sections, found by the ids setup always gave them, drawn from the standard site's sections. Any other HTML page
@@ -439,7 +458,8 @@ export function liveSiteHtml(
     /<section id="(offer|payments)" class="section/.test(html) &&
     html.includes("Reveal each part once");
   if (!marked && !legacy) return html;
-  const blocks = view.live?.blocks ?? standardBlocks(bp, bp.workspaceName || view.name);
+  const siteName = bp.workspaceName || view.name;
+  const blocks = currentBlocks(bp, view.live?.blocks ?? standardBlocks(bp, siteName), siteName);
   const landing = {
     id: view.id,
     entityId: "",
@@ -487,7 +507,7 @@ export function redesignSite(
 ): { html: string; booking?: { viewId: string; html: string } } {
   const d = cleanDesign(design);
   const name = bp.workspaceName || view.name;
-  const blocks = view.live?.blocks ?? standardBlocks(bp, name);
+  const blocks = currentBlocks(bp, view.live?.blocks ?? standardBlocks(bp, name), name);
   const landing = {
     id: view.id,
     entityId: "",

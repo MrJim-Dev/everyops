@@ -542,12 +542,17 @@ export function heroGlance(style: string, p: SiteParts): string {
   }
 }
 
-/** The hero; \`glance\` is its live data part, already wrapped for refreshing. */
-export function renderHero(style: string, p: SiteParts, glance: string): string {
+/** The hero; glance and eyebrow are its live data parts, already wrapped for refreshing. */
+/** The line above a hero's headline: opening hours, or how much there is to book. Live like the glance. */
+export function heroNote(p: SiteParts): string {
+  const note =
+    p.hero?.facts?.find((f) => f.kind === "hours") ?? p.hero?.facts?.find((f) => f.kind === "offer");
+  return note ? `<span class="eyebrow rise">${esc(note.text)}</span>` : "";
+}
+
+export function renderHero(style: string, p: SiteParts, glance: string, eyebrow = heroNote(p)): string {
   const h = p.hero;
   const lead = h?.subheading ? `<p class="lead rise">${esc(h.subheading)}</p>` : "";
-  const note = h?.facts?.find((f) => f.kind === "hours") ?? h?.facts?.find((f) => f.kind === "offer");
-  const eyebrow = note ? `<span class="eyebrow rise">${esc(note.text)}</span>` : "";
   const secondary = p.offer
     ? `<a class="button" href="#offer">${esc(h?.secondaryLabel ?? "See what we offer")}</a>`
     : "";
@@ -652,7 +657,7 @@ export function renderClosing(style: string, p: SiteParts): string {
     case "minimal":
       return `<div class="close-minimal reveal"><p>${q} <a href="${esc(p.ctaHref ?? "#")}" target="_top">${esc(p.hero?.ctaLabel ?? "Book now")} →</a></p></div>`;
     case "centered":
-      return `<div class="close-centered reveal"><h2>${q}</h2><p>${esc(p.name)} confirms your booking and sends you the details.</p>${p.cta}</div>`;
+      return `<div class="close-centered reveal"><h2>${q}</h2><p>${esc(p.name)} confirms it and sends you the details.</p>${p.cta}</div>`;
     case "split": {
       const facts = (p.hero?.facts ?? []).slice(0, 3);
       return `<div class="close-split reveal"><div><h2>${q}</h2>${facts.length ? `<ul>${facts.map((f) => `<li>${icon(f.kind)}${esc(f.text)}</li>`).join("")}</ul>` : ""}</div>${p.cta}</div>`;
