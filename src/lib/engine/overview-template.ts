@@ -158,7 +158,7 @@ export function templateOverview(bp: Blueprint): void {
 }
 
 /** The record type the business runs on: its bookings, else its dated, priced records (orders, sales, jobs). */
-function mainRecords(bp: Blueprint): { entity: Entity; date: Field } | undefined {
+export function mainRecords(bp: Blueprint): { entity: Entity; date: Field } | undefined {
   const dateOf = (e: Entity) =>
     e.fields.find((f) => f.id === e.booking?.timeFieldId) ??
     e.fields.find((f) => f.type === "time_range") ??
@@ -180,7 +180,7 @@ function mainRecords(bp: Blueprint): { entity: Entity; date: Field } | undefined
 }
 
 /** The amount a record is worth: its total when it has one, else its first money field that isn't a rate. */
-function moneyField(e: Entity): Field | undefined {
+export function moneyField(e: Entity): Field | undefined {
   const money = e.fields.filter(
     (f) => f.type === "money" || (f.type === "formula" && f.formula?.resultType === "money"),
   );

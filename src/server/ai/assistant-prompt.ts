@@ -469,7 +469,8 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
     the layout, use the view or widget component with its id. To change an existing layout page, use pageTexts with
     its view id and its complete new layout JSON (keep what the person didn't ask to change); its current layout is
     listed with the page. When a page already shows a layout, add new numbers, charts or lists by rewriting that
-    layout, not with add_widget (cards a layout doesn't place go to a separate Dashboard tab).
+    layout, not with add_widget (cards a layout doesn't place go to a Dashboard tab after it). People can also
+    rearrange a layout themselves with Edit layout; when they describe one part to add, add just that part.
     A layout page can be public ("make this page public", "a public stats page", "a booking page in our layout"):
     add it, then update_view with its id and public true. Visitors only get what each part works out (numbers,
     chart points, the fields a list names), and a public layout can't have avatars, view or widget parts, list a
