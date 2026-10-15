@@ -4,13 +4,12 @@ import {
   ArrowClockwiseIcon,
   ArrowUpIcon,
   CheckCircleIcon,
-  CheckIcon,
   CircleDashedIcon,
   SparkleIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AttachmentTray, ComposerTools, DropOverlay, MessageFiles } from "@/components/ai/composer-tools";
 import { useAttachments } from "@/components/ai/use-attachments";
 import { useVoiceInput } from "@/components/ai/use-voice-input";
@@ -25,6 +24,7 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useFollowBottom } from "@/hooks/use-follow-bottom";
 import { typingMs } from "@/hooks/use-typewriter";
@@ -59,14 +59,15 @@ function QuestionList({
   /** Opens the question card on this question; absent while Ask EveryOps is working. */
   onPick?: (id: string) => void;
 }) {
+  const headingId = useId();
   const required = questions.filter((q) => q.required);
   const answered = required.filter((q) => q.answer.trim()).length;
   const open = questions.filter((q) => !q.answer.trim());
   const done = questions.filter((q) => q.answer.trim());
   return (
-    <section aria-labelledby="setup-questions">
+    <section aria-labelledby={headingId}>
       <div className="mb-3 flex items-baseline justify-between gap-3">
-        <h2 id="setup-questions" className="text-[13px] font-semibold">
+        <h2 id={headingId} className="text-[13px] font-semibold">
           Questions
         </h2>
         {required.length ? (
@@ -233,6 +234,7 @@ export function SetupInterview({
   const [questions, setQuestions] = useState<SetupQuestion[]>(progress?.questions ?? []);
   const [draft, setDraft] = useState<SetupDraft | undefined>(progress?.draft);
   const [phase, setPhase] = useState<Phase>("idle");
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [build, setBuild] = useState<DesignBuild | null>(null);
   const [live, setLive] = useState<LiveReply | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -407,7 +409,10 @@ export function SetupInterview({
           },
         ]
       : turnAsk;
-  const openQuestion = (id: string) => setPicked({ id, turn: messages.length, nonce: Date.now() });
+  const openQuestion = (id: string) => {
+    setPicked({ id, turn: messages.length, nonce: Date.now() });
+    setDetailsOpen(false);
+  };
   // Closing a card opened from the side panel brings back this turn's questions as the collapsed chip.
   const [collapsedTurn, setCollapsedTurn] = useState(-1);
   const closePanelCard = () => {
@@ -415,9 +420,87 @@ export function SetupInterview({
     setCollapsedTurn(messages.length);
   };
 
+  const reviewed = !!draft?.coverage?.length && !busy && !failure;
+  const setupItems = draft?.coverage?.length ? draft.coverage.map((item) => item.request) : plan;
+  const setupDetails = (
+    <>
+      <section>
+        <h2 className="mb-3 text-[13px] font-semibold">What EveryOps knows</h2>
+        {profile.length ? (
+          <dl className="flex flex-col gap-2.5 text-[13px]">
+            {profile.map((line) => (
+              <div key={line.label} className="flex flex-col gap-0.5">
+                <dt className="text-[12px] text-muted-foreground">{line.label}</dt>
+                <dd>{line.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="text-[13px] text-muted-foreground">Details appear here as you chat.</p>
+        )}
+      </section>
+      {questions.length ? (
+        <QuestionList questions={questions} onPick={!busy && !draft ? openQuestion : undefined} />
+      ) : null}
+      {setupItems.length ? (
+        <section aria-label="Setup checklist">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <h2 className="text-[13px] font-semibold">Setup checklist</h2>
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {reviewed ? setupItems.length : 0}/{setupItems.length}
+            </span>
+          </div>
+          <ul className="space-y-3 text-[12.5px] leading-relaxed text-muted-foreground">
+            {setupItems.map((item) => (
+              <li key={item} className="flex items-start gap-2.5">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "mt-1.5 size-1.5 shrink-0 rounded-full border",
+                    reviewed
+                      ? "border-primary/60 bg-primary/60"
+                      : "border-muted-foreground/40 bg-transparent",
+                  )}
+                />
+                <span>
+                  <span className="sr-only">{reviewed ? "Checked: " : "Pending review: "}</span>
+                  {item}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      <section className="text-[12.5px] text-muted-foreground">
+        <p>Saved to your account as you go.</p>
+        <p className="mt-2">
+          Prefer a ready-made system?{" "}
+          <Link href="/community" className="text-foreground underline-offset-4 hover:underline">
+            Browse Community
+          </Link>
+        </p>
+      </section>
+    </>
+  );
+
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_360px]">
       <div className="flex min-h-0 flex-col">
+        <div className="flex justify-end border-b px-3 py-1 lg:hidden">
+          <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
+            <SheetTrigger render={<Button size="sm" variant="ghost" className="text-muted-foreground" />}>
+              Setup details
+            </SheetTrigger>
+            <SheetContent side="right" className="w-[min(360px,calc(100vw-24px))]!">
+              <SheetHeader>
+                <SheetTitle className="text-[14px]">Your business</SheetTitle>
+              </SheetHeader>
+              <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-5 pb-5">
+                {setupDetails}
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
         <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
           <div className="mx-auto flex max-w-[680px] flex-col gap-5">
             {!messages.length && !busy ? (
@@ -474,24 +557,6 @@ export function SetupInterview({
                     <p className="text-[12.5px] text-muted-foreground">{draft.summary}</p>
                   </div>
                   <ul className="divide-y">
-                    {draft.coverage?.length ? (
-                      <li className="rounded-md border border-primary/20 bg-primary/5 p-3">
-                        <p className="mb-2 font-medium">
-                          Brief checked · {draft.coverage.length} requirements
-                        </p>
-                        <ul className="space-y-1.5">
-                          {draft.coverage.map((item) => (
-                            <li key={item.request} className="flex gap-2">
-                              <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-primary" />
-                              <span>
-                                {item.request}
-                                <span className="block text-muted-foreground">{item.detail}</span>
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </li>
-                    ) : null}
                     {draft.preview.map((item) => (
                       <li key={item.label} className="flex gap-4 px-4 py-3 text-[13px]">
                         <span className="w-28 shrink-0 font-medium">{item.label}</span>
@@ -644,46 +709,7 @@ export function SetupInterview({
         aria-label="Your business"
         className="hidden flex-col gap-6 overflow-y-auto border-l px-5 py-5 lg:flex"
       >
-        <section>
-          <h2 className="mb-3 text-[13px] font-semibold">What EveryOps knows</h2>
-          {profile.length ? (
-            <dl className="flex flex-col gap-2.5 text-[13px]">
-              {profile.map((line) => (
-                <div key={line.label} className="flex flex-col gap-0.5">
-                  <dt className="text-[12px] text-muted-foreground">{line.label}</dt>
-                  <dd>{line.value}</dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <p className="text-[13px] text-muted-foreground">Details appear here as you chat.</p>
-          )}
-        </section>
-        {questions.length ? (
-          <QuestionList questions={questions} onPick={!busy && !draft ? openQuestion : undefined} />
-        ) : null}
-        {plan.length ? (
-          <section>
-            <h2 className="mb-3 text-[13px] font-semibold">What EveryOps will set up</h2>
-            <ul className="flex flex-col gap-2 text-[13px]">
-              {plan.map((item) => (
-                <li key={item} className="flex gap-2">
-                  <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-primary" />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-        <section className="text-[12.5px] text-muted-foreground">
-          <p>Saved to your account as you go.</p>
-          <p className="mt-2">
-            Prefer a ready-made system?{" "}
-            <Link href="/community" className="text-foreground underline-offset-4 hover:underline">
-              Browse Community
-            </Link>
-          </p>
-        </section>
+        {setupDetails}
       </aside>
     </div>
   );
