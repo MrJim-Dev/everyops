@@ -2,14 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { FormView } from "@/lib/blueprint/types";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { rentalSample } from "@/lib/catalog/rental-operations";
+import { customBookingHtml } from "./booking-page";
 import {
   customSiteHtml,
   defaultBookingLayout,
+  paletteFor,
   SITE_TOKEN,
   withCustomSite,
   withSiteLinks,
 } from "./custom-site";
-import { publicForm } from "./resolve";
+import { formPageOf, publicForm, resolvePage, siteOf } from "./resolve";
 import { standardLanding } from "./site-template";
 import { dateRangeProblem, daysFor, nextRange, nextStay, type Slot } from "./slots";
 
@@ -105,7 +107,7 @@ describe("whole-day availability", () => {
 });
 
 describe("setup's website", () => {
-  it("turns the standard site into a custom HTML page that opens the booking form", () => {
+  it("builds a custom HTML landing page that opens a custom HTML booking page", () => {
     const { blueprint, records } = courtBookingsSample(NOW);
     const form = blueprint.views.find((v) => v.type === "form");
     if (form?.type !== "form") throw new Error("no form");
@@ -117,12 +119,50 @@ describe("setup's website", () => {
     const page = blueprint.views.find((v) => v.id === "home");
     expect(page?.type).toBe("html");
     const html = page?.type === "html" ? (page.html ?? "") : "";
-    expect(html).toContain(`href="/s/${SITE_TOKEN}/${form.id}"`);
+    // The booking form is no longer what visitors see: the custom booking page stands in for it.
+    const book = formPageOf(blueprint, form);
+    expect(book).toBeTruthy();
+    expect(html).toContain(`href="/s/${SITE_TOKEN}/${book}"`);
+    expect(html).not.toContain(`href="/s/${SITE_TOKEN}/${form.id}"`);
     expect(html).toContain("Court House &lt;PH&gt;");
-    expect(withSiteLinks(html, "court-house")).toContain(`href="/s/court-house/${form.id}"`);
+    expect(withSiteLinks(html, "court-house")).toContain(`href="/s/court-house/${book}"`);
     // The courts in the data, with the booking calendar that suits four of them.
     expect(html).toContain("Court 1");
     expect(form.bookingLayout).toBe("grid");
+
+    // The booking page sits beside the landing page, sends to the form, and the site's Book button opens it.
+    const bookPage = blueprint.views.find((v) => v.id === book);
+    expect(bookPage?.type === "html" && bookPage.public).toBe(true);
+    expect(blueprint.systems[0].viewIds.indexOf(book ?? "")).toBe(
+      blueprint.systems[0].viewIds.indexOf("home") + 1,
+    );
+    const bookHtml = bookPage?.type === "html" ? (bookPage.html ?? "") : "";
+    expect(bookHtml).toContain(`var FORM = "${form.id}"`);
+    expect(bookHtml).not.toContain("data-everyops-form");
+    const site = siteOf("court-house", "Court House", blueprint);
+    expect(site?.book?.id).toBe(book);
+    expect(site?.pages.map((p) => p.id)).not.toContain(form.id);
+    // The page gets the form with its courts and payment methods to draw its own steps.
+    const served = resolvePage(blueprint, records, {}, "court-house", book ?? "", NOW);
+    const sent = served?.forms?.find((f) => f.viewId === form.id);
+    expect(sent?.booking?.resources.length).toBeGreaterThan(1);
+  });
+
+  it("writes the booking page with the same motion rules and escapes the business name", () => {
+    const html = customBookingHtml({
+      name: "Kapé <Ilaya>",
+      formId: "booking_form",
+      homeHref: `/s/${SITE_TOKEN}`,
+      heading: "Book a court",
+      palette: paletteFor("Kapé"),
+    });
+    const css = html.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(css).not.toMatch(/transition:\s*all/);
+    expect(css).not.toMatch(/\bease-in\b(?!-out)/);
+    expect(html).toContain("prefers-reduced-motion");
+    expect(html).toContain("(hover: hover) and (pointer: fine)");
+    expect(html).toContain("Kapé &lt;Ilaya&gt;");
+    expect(html).not.toContain("<Ilaya>");
   });
 
   it("follows the motion rules: exact properties, a strong ease-out, reduced motion, hover only with a pointer", () => {

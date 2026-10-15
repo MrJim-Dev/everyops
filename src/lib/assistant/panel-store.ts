@@ -47,6 +47,9 @@ type State = {
   /** Open the panel once the person has left the full Ask EveryOps page (its "Side panel" button). */
   openAfterAsk: boolean;
   setOpenAfterAsk: (open: boolean) => void;
+  /** A request to put in the composer when the panel shows it (e.g. "add a part to this layout"), for the person to finish. */
+  draft: string | null;
+  setDraft: (text: string | null) => void;
   /** Requests in flight per workspace, shared by the panel and the Ask EveryOps page. */
   pending: Record<string, Pending | undefined>;
   setPending: (workspaceId: string, pending: Pending | undefined) => void;
@@ -135,6 +138,8 @@ export const useAssistant = create<State>()((set, get) => {
     setReturnTo: (returnTo) => set({ returnTo }),
     openAfterAsk: false,
     setOpenAfterAsk: (openAfterAsk) => set({ openAfterAsk }),
+    draft: null,
+    setDraft: (draft) => set({ draft }),
     pending: {},
     setPending: (workspaceId, pending) => set((s) => ({ pending: { ...s.pending, [workspaceId]: pending } })),
     truncate: (workspaceId, length) => {

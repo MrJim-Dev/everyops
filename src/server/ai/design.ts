@@ -17,12 +17,14 @@ import type {
   Widget,
   WorkspaceData,
 } from "@/lib/blueprint/types";
+import { FREE_PAGE_TYPES } from "@/lib/blueprint/types";
 import { GROUP_KINDS, validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { samplesThisYear } from "@/lib/catalog/shift";
 import { computeAll } from "@/lib/engine/compute";
 import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
 import { impliedRules } from "@/lib/engine/implied-rules";
+import { templateOverview } from "@/lib/engine/overview-template";
 import { isImagePath } from "@/lib/engine/records";
 import { repairRules } from "@/lib/engine/rule-repair";
 import { withCustomSite } from "@/lib/public/custom-site";
@@ -32,6 +34,7 @@ import { hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
 import { DESIGN_SYSTEM, type Design, designRequest } from "./design-prompt";
 import { generateJsonHedged } from "./gemini";
+import { withOverviewLayout } from "./overview-layout";
 import { referencesText, setupReferences } from "./references";
 import { fillEmptySamples } from "./samples";
 
@@ -298,14 +301,10 @@ export function tidy(bp: Blueprint): Blueprint {
   }
   const fieldsOf = (entityId: string) =>
     new Set(bp.entities.find((e) => e.id === entityId)?.fields.map((x) => x.id) ?? []);
-  bp.views = bp.views.filter((v) =>
-    v.type === "document" || v.type === "canvas" || v.type === "html" || v.type === "landing"
-      ? true
-      : entityIds.has(v.entityId),
-  );
+  bp.views = bp.views.filter((v) => FREE_PAGE_TYPES.has(v.type) || entityIds.has(v.entityId));
   const formIds = new Set(bp.views.filter((v) => v.type === "form").map((v) => v.id));
   for (const v of bp.views) {
-    if (v.type === "document" || v.type === "canvas" || v.type === "html" || v.type === "landing") {
+    if (FREE_PAGE_TYPES.has(v.type)) {
       v.entityId = "";
       if (v.type === "landing") v.blocks = tidyBlocks(v.blocks, resolve, fieldsOf, formIds);
       continue;
@@ -440,6 +439,9 @@ export function tidy(bp: Blueprint): Blueprint {
   // didn't write the automation.
   const empty = { ...bp, entities: [], rules: [] };
   bp.rules.push(...impliedRules(empty, bp).map((x) => x.rule));
+  // The Overview follows the court-bookings template: comparison stats, revenue by day, today's schedule, what
+  // needs payment and busy hours, built from the business's own bookings or sales.
+  templateOverview(bp);
   // A dashboard of only numbers gets the charts and lists an owner looks at first.
   const board = dashboardSystem(bp);
   if (board) {
@@ -914,11 +916,13 @@ export async function designWorkspace(
       const records = computeAll(bp, dated.records, now);
       // Businesses whose customers book on their own get a custom HTML website and a calendar that suits them.
       withCustomSite(bp, records, name, now);
+      // The Overview becomes a layout of library components; when that step fails the plain dashboard stays.
+      const blueprint = await withOverviewLayout(bp, name, brief, now);
       return {
         ok: true,
         name,
         summary: data.summary,
-        data: { blueprint: bp, records },
+        data: { blueprint, records },
       };
     }
     console.warn(JSON.stringify({ event: "design_rejected", attempt, errors: errors.slice(0, 15) }));
@@ -1237,7 +1241,8 @@ export function ensurePages(bp: Blueprint): Blueprint {
         v.type !== "form" &&
         v.type !== "document" &&
         v.type !== "canvas" &&
-        v.type !== "html")
+        v.type !== "html" &&
+        v.type !== "layout")
     )
       continue;
     bp.systems.push({

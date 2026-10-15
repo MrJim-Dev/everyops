@@ -1,8 +1,10 @@
+import { publicProblems } from "@/lib/components/public-safety";
+import { componentDef, layoutItems, type Ref } from "@/lib/components/registry";
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
-import { displayKind } from "./field-kind";
+import { displayKind, isNumericKind } from "./field-kind";
 import { walkPath } from "./paths";
-import type { Block, Blueprint, Entity, Field, FormExtras, Rule } from "./types";
+import type { Block, Blueprint, Entity, Field, FormExtras, LayoutView, Rule } from "./types";
 
 export type ValidationError = { path: string; message: string };
 
@@ -76,6 +78,10 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
     if (view.type === "document" || view.type === "canvas" || view.type === "html") return;
     if (view.type === "landing") {
       checkBlocks(bp, view.blocks, path, errors);
+      return;
+    }
+    if (view.type === "layout") {
+      checkLayout(bp, view, path, errors);
       return;
     }
     const entity = bp.entities.find((e) => e.id === view.entityId);
@@ -399,4 +405,99 @@ function checkBlocks(bp: Blueprint, blocks: Block[], path: string, errors: Valid
         break;
     }
   });
+}
+
+/** What a layout component's field must hold, and how to say so. */
+const NEEDS: Record<
+  NonNullable<Extract<Ref, { kind: "field" }>["needs"]>,
+  { ok: (kind: string) => boolean; words: string }
+> = {
+  date: {
+    ok: (k) => k === "date" || k === "datetime" || k === "time_range",
+    words: "a date, date and time, or time range",
+  },
+  number: { ok: (k) => isNumericKind(k as never), words: "a number or money field" },
+  image: { ok: (k) => k === "image", words: "a picture field" },
+  group: {
+    ok: (k) => GROUP_KINDS.has(k) || k === "text",
+    words: "a select, status, link, person, checkbox or text field",
+  },
+  status: { ok: (k) => k === "status", words: "a status field" },
+};
+
+/**
+ * A layout page: every component is in the library, its settings fit its schema, and everything it points at
+ * (record types, fields of the right kind, filters, tabs, dashboard cards) exists. A layout can't show itself.
+ */
+function checkLayout(bp: Blueprint, view: LayoutView, path: string, errors: ValidationError[]) {
+  if (!view.sections?.length) {
+    errors.push({ path, message: `${view.name} has no sections` });
+    return;
+  }
+  for (const { item, path: at } of layoutItems(view.sections)) {
+    const where = `${path}.${at}`;
+    const d = componentDef(item.component);
+    if (!d) {
+      errors.push({ path: where, message: `${view.name}: "${item.component}" isn't a component` });
+      continue;
+    }
+    const parsed = d.props.safeParse(item.props);
+    if (!parsed.success) {
+      errors.push({
+        path: where,
+        message: `${view.name}: ${d.name} settings: ${parsed.error.issues
+          .slice(0, 3)
+          .map((i) => `${i.path.join(".") || "settings"} ${i.message}`)
+          .join("; ")}`,
+      });
+      continue;
+    }
+    if (view.public)
+      for (const problem of publicProblems(bp, d, parsed.data))
+        errors.push({ path: where, message: `${view.name} is public: ${problem}` });
+    for (const ref of d.refs(parsed.data)) {
+      if (ref.kind === "view") {
+        if (ref.viewId === view.id) errors.push({ path: where, message: `${view.name} can't show itself` });
+        else if (!bp.views.some((v) => v.id === ref.viewId))
+          errors.push({
+            path: where,
+            message: `${view.name}: ${d.name} opens a missing tab "${ref.viewId}"`,
+          });
+        continue;
+      }
+      if (ref.kind === "widget") {
+        if (!bp.widgets.some((w) => w.id === ref.widgetId))
+          errors.push({
+            path: where,
+            message: `${view.name}: ${d.name} shows a missing card "${ref.widgetId}"`,
+          });
+        continue;
+      }
+      const entity = bp.entities.find((e) => e.id === ref.entityId);
+      if (!entity) {
+        if (ref.kind === "entity")
+          errors.push({
+            path: where,
+            message: `${view.name}: ${d.name} uses a missing record type "${ref.entityId}"`,
+          });
+        continue;
+      }
+      if (ref.kind === "filter") checkExpr(bp, entity, ref.expr, where, errors);
+      if (ref.kind !== "field") continue;
+      const field = entity.fields.find((f) => f.id === ref.fieldId);
+      if (!field) {
+        errors.push({
+          path: where,
+          message: `${view.name}: ${d.name} uses "${ref.fieldId}", which isn't a field of ${entity.name}`,
+        });
+        continue;
+      }
+      const need = ref.needs ? NEEDS[ref.needs] : undefined;
+      if (need && !need.ok(displayKind(bp, field)))
+        errors.push({
+          path: where,
+          message: `${view.name}: ${d.name} needs ${need.words} for ${field.name}`,
+        });
+    }
+  }
 }

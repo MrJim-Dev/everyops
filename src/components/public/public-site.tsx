@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { HtmlPageFrame } from "./html-page-frame";
 import { PublicBlocks } from "./public-blocks";
 import { PublicFormView } from "./public-form";
+import { PublicLayoutView } from "./public-layout";
 
 /** A workspace's public site in EveryOps's standard look: header with its pages, the page, and a footer. */
 export function PublicSiteView({
@@ -87,6 +88,12 @@ export function PublicSiteView({
                 <PublicBlocks blocks={blocks} slug={site.slug} preview={preview} compact />
               )}
             />
+          </section>
+        ) : null}
+        {page.type === "layout" && page.layout ? (
+          <section className="flex flex-col gap-8">
+            <h1 className="text-[32px] font-semibold tracking-[-0.03em]">{page.name}</h1>
+            <PublicLayoutView layout={page.layout} slug={site.slug} preview={preview} />
           </section>
         ) : null}
         <PublicBlocks blocks={page.blocks} slug={site.slug} preview={preview} />

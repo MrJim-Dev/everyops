@@ -63,6 +63,9 @@
 
   /* Page-level entrance for rarely seen surfaces (home, community, setup). */
   --animate-rise: rise 320ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  /* Setup question cards: the next question slides in from the direction you moved. */
+  --animate-step-next: step-next 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  --animate-step-back: step-back 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
   /* A record that was just created or changed: brief accent glow that settles. */
   --animate-flash: flash 1100ms cubic-bezier(0.23, 1, 0.32, 1);
   /* A value that just changed (totals, stats). */
@@ -88,6 +91,19 @@
     from {
       opacity: 0;
       transform: translateY(8px);
+    }
+  }
+  /* One question card giving way to the next: in from the side it travels toward, short and crisp. */
+  @keyframes step-next {
+    from {
+      opacity: 0;
+      transform: translateX(12px);
+    }
+  }
+  @keyframes step-back {
+    from {
+      opacity: 0;
+      transform: translateX(-12px);
     }
   }
   @keyframes flash {

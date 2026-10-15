@@ -20,6 +20,7 @@ import type {
   FormView,
   HtmlPageView,
   LandingView,
+  LayoutView,
   Tone,
   View,
 } from "@/lib/blueprint/types";
@@ -36,6 +37,7 @@ import {
 } from "@/lib/format";
 import { type HeroFact, heroFacts } from "./hero-facts";
 import { pageHtml } from "./html-page";
+import { type PublicLayout, resolveLayout } from "./layout";
 import { bookLabel, cleanIntro, defaultCopy, mainForm, offeringOf, standardBlocks } from "./site-template";
 
 export type PageDocs = Record<string, { body: string } | undefined>;
@@ -116,6 +118,8 @@ export type PublicForm = {
   review?: boolean;
   /** Add-ons people pick with a quantity; only their name and price are shown. */
   extras?: { title: string; items: PublicExtraItem[] };
+  /** For custom HTML pages: the active payment methods (name, QR code, account details) the form takes. */
+  payments?: Extract<ResolvedBlock, { type: "records" }>;
 };
 
 export type PublicExtraItem = { id: string; title: string; price?: number; priceText?: string };
@@ -159,8 +163,10 @@ export type ResolvedBlock =
 export type PublicPageData = {
   id: string;
   name: string;
-  type: "landing" | "form" | "html";
+  type: "landing" | "form" | "html" | "layout";
   blocks: ResolvedBlock[];
+  /** Layout pages: every part worked out on the server (src/lib/public/layout.ts). */
+  layout?: PublicLayout;
   /** Form pages: the form itself, shown before their blocks. */
   form?: PublicForm;
   /** HTML pages: the owner's page, and the public forms it may send to (by view id). */
@@ -171,7 +177,7 @@ export type PublicPageData = {
 export type PublicSite = {
   slug: string;
   name: string;
-  pages: { id: string; name: string; type: "landing" | "form" | "html" }[];
+  pages: { id: string; name: string; type: "landing" | "form" | "html" | "layout" }[];
   /** The header's button: the main public form, named for what it does ("Book a court"). */
   book?: { id: string; label: string };
 };
@@ -182,12 +188,29 @@ export const docKey = (viewId: string, blockId: string) => `${viewId}:${blockId}
 export function isPublic(view: View): boolean {
   return (
     (view.type === "landing" && view.public !== false) ||
-    ((view.type === "form" || view.type === "html") && view.public === true)
+    ((view.type === "form" || view.type === "html" || view.type === "layout") && view.public === true)
   );
 }
 
-export function publicViews(bp: Blueprint): (LandingView | FormView | HtmlPageView)[] {
-  return bp.views.filter((v): v is LandingView | FormView | HtmlPageView => isPublic(v));
+export function publicViews(bp: Blueprint): (LandingView | FormView | HtmlPageView | LayoutView)[] {
+  return bp.views.filter((v): v is LandingView | FormView | HtmlPageView | LayoutView => isPublic(v));
+}
+
+/** The public custom HTML page visitors use instead of this form (see FormView.page), if it exists and is public. */
+export function formPageOf(bp: Blueprint, form: View | undefined): string | undefined {
+  if (form?.type !== "form" || !form.page) return undefined;
+  const page = bp.views.find((v) => v.id === form.page);
+  return page?.type === "html" && page.public === true ? page.id : undefined;
+}
+
+/** Where a visitor goes for a view: a form with its own custom page goes to that page. */
+export function visitorPageOf(bp: Blueprint, viewId: string): string {
+  return (
+    formPageOf(
+      bp,
+      bp.views.find((v) => v.id === viewId),
+    ) ?? viewId
+  );
 }
 
 /** The site's pages in sidebar order: landing and custom HTML pages first (the first is the home page), then forms. */
@@ -198,13 +221,21 @@ export function siteOf(slug: string, name: string, bp: Blueprint): PublicSite | 
       Number(b.type !== "form") - Number(a.type !== "form") || order.indexOf(a.id) - order.indexOf(b.id),
   );
   if (!views.length) return null;
-  const pages = views.map((v) => ({ id: v.id, name: v.name, type: v.type }));
+  // A form served through its own custom page isn't a page of its own; the custom page stands in for it.
+  const pages = views
+    .filter((v) => !formPageOf(bp, v))
+    .map((v) => ({ id: v.id, name: v.name, type: v.type }));
   // A site with only forms still gets a home page: the standard one, built from its data.
   if (views.every((v) => v.type === "form"))
     pages.unshift({ id: autoHomeId(bp), name: "Home", type: "landing" });
   const main = mainForm(bp);
   const book = main ?? views.find((v): v is FormView => v.type === "form");
-  return { slug, name, pages, ...(book ? { book: { id: book.id, label: bookLabel(bp, book.id) } } : {}) };
+  return {
+    slug,
+    name,
+    pages,
+    ...(book ? { book: { id: formPageOf(bp, book) ?? book.id, label: bookLabel(bp, book.id) } } : {}),
+  };
 }
 
 /** The id of the standard home page a site gets when it has no landing page of its own. */
@@ -274,8 +305,9 @@ export function formatCell(
 /** Record types a visitor may pick from: bookable resources, and anything a public block already lists. */
 function publishedEntities(bp: Blueprint): Set<string> {
   const ids = new Set(bp.entities.filter((e) => e.resource).map((e) => e.id));
+  // Layout pages only show what they compute; they never widen what a form offers.
   for (const view of publicViews(bp))
-    if (view.type !== "html") {
+    if (view.type !== "html" && view.type !== "layout") {
       for (const block of view.blocks ?? []) if (block.type === "records") ids.add(block.entityId);
       // The payment methods a public form links to are shown on its page (paymentBlock), so visitors can pick one.
       if (view.type === "form") {
@@ -600,7 +632,7 @@ export function resolveBlocks(
             ? (edited.ctaLabel ??
               (block.ctaLabel && block.ctaLabel !== "Book now" ? block.ctaLabel : fallbackLabel))
             : undefined,
-          ctaHref: target ? sitePath(slug, target) : undefined,
+          ctaHref: target ? sitePath(slug, visitorPageOf(bp, target)) : undefined,
           ...(offerBlock
             ? {
                 secondaryLabel: `See ${(offerTitle ?? `our ${offer?.pluralName}`).toLowerCase()}`,
@@ -709,6 +741,14 @@ export function resolvePage(
   }
   if (!view || !isPublic(view)) return null;
   if (view.type === "html") return htmlPage(bp, records, docs, view);
+  if (view.type === "layout")
+    return {
+      id: view.id,
+      name: view.name,
+      type: "layout",
+      blocks: [],
+      layout: resolveLayout(bp, records, docs, slug, view, now),
+    };
   if (view.type !== "landing" && view.type !== "form") return null;
   const blocks = resolveBlocks(bp, records, docs, slug, view, now);
   if (view.type === "landing") return { id: view.id, name: view.name, type: "landing", blocks };
@@ -762,8 +802,19 @@ export function htmlPage(
 ): PublicPageData {
   const forms = bp.views
     .filter((v): v is FormView => v.type === "form" && v.public === true)
-    .map((v) => publicForm(bp, records, v))
-    .filter((f): f is PublicForm => !!f);
+    .flatMap((v) => {
+      const form = publicForm(bp, records, v);
+      if (!form) return [];
+      // A custom booking page shows how to pay in its own design, from the same live list the form page uses.
+      // That's the form's own payment methods block when it has one, else the cards its page would add.
+      const link = paymentLinkOf(bp, v);
+      const own = link
+        ? v.blocks?.find((b) => b.type === "records" && b.entityId === link.entity.id)
+        : undefined;
+      const pay = own ?? paymentBlock(bp, v);
+      const payments = pay ? resolveBlocks(bp, records, docs, "", { ...v, blocks: [pay] })[0] : undefined;
+      return [payments?.type === "records" && payments.items.length ? { ...form, payments } : form];
+    });
   return { id: view.id, name: view.name, type: "html", blocks: [], html: pageHtml(view, docs), forms };
 }
 

@@ -97,7 +97,8 @@ export function ChartWidget({ widget }: { widget: Widget }) {
     <WidgetFrame title={widget.title} aside={legend} className={height ? undefined : "flex-1"}>
       <ChartContainer
         config={config}
-        className={cn("aspect-auto w-full px-3 pb-3", !height && "min-h-[220px] flex-1")}
+        // A definite height: inside the dashboard grid a min-height alone left the chart 0 px tall and blank.
+        className={cn("aspect-auto w-full px-3 pb-3", !height && "h-60")}
         style={height ? { height } : undefined}
       >
         {kind === "bar" || byCategory ? (

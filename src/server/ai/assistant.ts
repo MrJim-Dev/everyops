@@ -17,12 +17,15 @@ import type {
   Field,
   FormStep,
   FormView,
+  LayoutView,
   RecordData,
   View,
   Widget,
 } from "@/lib/blueprint/types";
+import { FREE_PAGE_TYPES } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { requestGuide } from "@/lib/catalog/playbooks";
+import { parseLayout } from "@/lib/components/registry";
 import { widgetValue } from "@/lib/engine/aggregate";
 import {
   applyOps,
@@ -84,7 +87,11 @@ type RawPlan = AssistantAnswer["plan"];
 
 const DATE_TYPES = new Set(["date", "datetime", "time_range"]);
 /** Every view type; the answer schema lets free pages name theirs as text, so it's checked here. */
-const VIEW_TYPES = new Set<string>(view.options.map((o) => (o.shape.type as { value: string }).value));
+const VIEW_TYPES = new Set<string>([
+  ...view.options.map((o) => (o.shape.type as { value: string }).value),
+  // Layout pages aren't in the designer's schema: the assistant writes them as a free page with the layout in starter.
+  "layout",
+]);
 
 /** Fills the parts of a new view that Gemini often leaves out, from the record type's own fields. */
 function fillView(view: View, entity: Entity) {
@@ -388,6 +395,25 @@ export function toDesignOps(
         else if (o.view && systemId) {
           // A custom HTML page's draft arrives as starter (free pages share one shape in the answer schema).
           const raw = o.view as typeof o.view & { starter?: string };
+          const free = raw as unknown as { id: string; name: string; type: string; starter?: string };
+          if (free.type === "layout") {
+            // A layout page's sections arrive as JSON in starter, checked against the component library.
+            const layout = parseLayout(free.starter ?? "");
+            errors.push(...layout.errors.map((e) => `${at} ${free.id}: ${e}`));
+            if (!layout.errors.length)
+              ops.push({
+                op: "add_view",
+                systemId,
+                view: {
+                  id: free.id,
+                  name: free.name,
+                  entityId: "",
+                  type: "layout",
+                  sections: layout.sections,
+                },
+              });
+            break;
+          }
           const view = toView(raw.type === "html" && raw.starter ? { ...raw, html: raw.starter } : raw);
           // A multi-step form arrives as "# Step title" markers among its fields.
           if (view.type === "form") {
@@ -627,13 +653,7 @@ export function toDesignOps(
     if (calc) for (const t of calc.terms) t.entityId = resolveEntity(t.entityId);
     if (op.op === "add_widget")
       op.widget.entityId = calc?.terms[0] ? calc.terms[0].entityId : resolveEntity(op.widget.entityId);
-    if (
-      op.op === "add_view" &&
-      op.view.type !== "document" &&
-      op.view.type !== "canvas" &&
-      op.view.type !== "html" &&
-      op.view.type !== "landing"
-    )
+    if (op.op === "add_view" && !FREE_PAGE_TYPES.has(op.view.type))
       op.view.entityId = resolveEntity(op.view.entityId);
   }
   // A new landing page uses the standard site: its hero words stay, the rest comes from the data.
@@ -699,12 +719,7 @@ export function toDesignOps(
       continue;
     }
     if (op.op !== "add_view") continue;
-    if (
-      op.view.type === "document" ||
-      op.view.type === "canvas" ||
-      op.view.type === "html" ||
-      op.view.type === "landing"
-    ) {
+    if (FREE_PAGE_TYPES.has(op.view.type)) {
       op.view.entityId = "";
       continue;
     }
@@ -845,6 +860,23 @@ export function toDesignOps(
     }
   }
   return { ops, errors };
+}
+
+/** A layout page as the assistant reads and rewrites it: its sections as JSON, or just its parts when that's long. */
+function layoutJson(view: LayoutView): string {
+  const sections = view.sections.map(({ id: _id, ...s }) => ({
+    ...s,
+    items: s.items.map(({ id: _i, ...item }) => item),
+  }));
+  const full = JSON.stringify({ sections });
+  if (full.length <= 6000) return full;
+  return JSON.stringify({
+    sections: view.sections.map((s) => ({
+      title: s.title,
+      columns: s.columns,
+      components: s.items.map((i) => i.component),
+    })),
+  });
 }
 
 /** Image field values of the form "attachment:<id>": an attached photo to copy into the workspace for the record. */
@@ -1068,18 +1100,21 @@ ${bp.systems
                     // The form's fields as update_view writes them: steps and the blocks each step shows.
                     v.type === "form" ? `, fields: ${JSON.stringify(markersOf(v))}` : ""
                   }${v.type === "form" ? visitorView(bp, v) : ""}`
-                : v.type === "html"
-                  ? isPublic(v)
-                    ? ", public"
-                    : ", team only"
-                  : v.type === "checkout"
-                    ? // What the Register really shows, so "where do I pick the branch" gets a true answer.
-                      `, the register asks: products, payment method${registerFields(bp, v)
-                        .map(
-                          ({ field }) => `, ${field.name} (${field.id}${field.required ? ", required" : ""})`,
-                        )
-                        .join("")}${v.fieldIds?.length ? `, fieldIds: ${JSON.stringify(v.fieldIds)}` : ""}`
-                    : "";
+                : v.type === "layout"
+                  ? `${isPublic(v) ? ", public" : ", team only"}, its layout (rewrite it whole with pageTexts): ${layoutJson(v)}`
+                  : v.type === "html"
+                    ? isPublic(v)
+                      ? ", public"
+                      : ", team only"
+                    : v.type === "checkout"
+                      ? // What the Register really shows, so "where do I pick the branch" gets a true answer.
+                        `, the register asks: products, payment method${registerFields(bp, v)
+                          .map(
+                            ({ field }) =>
+                              `, ${field.name} (${field.id}${field.required ? ", required" : ""})`,
+                          )
+                          .join("")}${v.fieldIds?.length ? `, fieldIds: ${JSON.stringify(v.fieldIds)}` : ""}`
+                      : "";
             return `${v.name} (${v.id}, ${v.type}${v.entityId ? ` of ${v.entityId}` : ""}${extra})`;
           }),
           ...(s.widgetIds.length ? [`${s.widgetIds.length} dashboard widgets`] : []),
@@ -1178,13 +1213,27 @@ ${input.messages
     const design = toDesignOps(bp, a.plan.ops, a.plan.renames, a.plan.formulas, input.workspaceName);
     // Operations that fit no shape were set aside; Gemini gets them back to fix with the rest of the plan.
     const errors = [...setAside, ...design.errors];
+    // A layout page's new text is its whole layout: a design change (replace_view), so it's checked and undone like one.
+    const layoutIds = new Set(bp.views.filter((v) => v.type === "layout").map((v) => v.id));
+    const pageTexts = a.plan.pageTexts.filter((p) => !layoutIds.has(p.viewId));
+    for (const p of a.plan.pageTexts.filter((t) => layoutIds.has(t.viewId))) {
+      const current = bp.views.find((v) => v.id === p.viewId);
+      const layout = parseLayout(p.markdown);
+      if (layout.errors.length) errors.push(...layout.errors.map((e) => `pageTexts ${p.viewId}: ${e}`));
+      else if (current?.type === "layout")
+        design.ops.push({
+          op: "replace_view",
+          viewId: p.viewId,
+          view: { ...current, sections: layout.sections },
+        });
+    }
     if (design.ops.length && !input.canDesign)
       errors.push("This person can't change the design; plan data changes only or explain who can.");
     if (design.ops.length)
       openUpPublicForms(
         bp,
         design.ops,
-        a.plan.pageTexts.map((p) => p.markdown),
+        pageTexts.map((p) => p.markdown),
         // "A multistep booking form": a form the plan touches gets steps even when Gemini left them out.
         /multi[\s-]?step|in steps|step[\s-]by[\s-]step|wizard/i.test(input.messages.at(-1)?.text ?? ""),
       );
@@ -1232,7 +1281,7 @@ ${input.messages
     const recordPart = await toRecordOps(next, records, a.plan.recordOps, photo);
     errors.push(...recordPart.errors);
     if (recordPart.ops.length && !input.canEditRecords) errors.push("This person can't change data.");
-    const docOps = toDocOps(next, records, a.plan.pageTexts, errors);
+    const docOps = toDocOps(next, records, pageTexts, errors);
     if (docOps.length && !input.canEditRecords) errors.push("This person can't edit pages.");
     const teamOps = toTeamOps(input.team, a.plan.team, errors);
     if (teamOps.length && !input.canDesign) errors.push("Only owners and admins can change the team.");

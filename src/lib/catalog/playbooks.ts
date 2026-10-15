@@ -35,11 +35,11 @@ export const COMMON_NEEDS = `- Payment methods (GCash, Maya, bank transfer, cash
   highlights, three steps). Add FAQs if customers ask the same questions often. Public forms with more than 5
   questions, or with add-ons, are forms in steps.
 - A booking system with a public HTML website also gets a public HTML booking page: the page customers book on,
-  in the same design system as the website (same palette, type, nav and footer, linked from the website's buttons),
-  with the live booking form embedded in it so the calendar, add-ons and payment step still work. That public
-  booking form (public true) exists for the booking page to embed; customers reach it through the booking page,
-  never its bare link. Staff get their own private form (not public) inside the workspace to add walk-in, phone and
-  chat bookings.
+  custom HTML in the same design as the website (same palette, type and nav), linked from the website's buttons.
+  EveryOps writes it from the public booking form (the live calendar, add-ons, details and payment steps, in its
+  own HTML, never the standard form block). That public booking form (public true) is where the page sends
+  bookings to be checked and saved; its bare link redirects to the booking page. Staff get their own private form
+  (not public) inside the workspace to add walk-in, phone and chat bookings.
 - Choose the booking calendar on purpose, from what is booked and how many of it there are:
   - grid (resources side by side for one day): 2 to 8 things booked by the hour at the same place (courts, rooms,
     bays, lanes, studios, tables).

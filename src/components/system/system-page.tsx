@@ -14,7 +14,11 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useAssistant } from "@/lib/assistant/panel-store";
 import { findEntity, getSystem, getView } from "@/lib/blueprint/lookup";
 import type { View } from "@/lib/blueprint/types";
+import { layoutItems } from "@/lib/components/registry";
 import { canEdit } from "@/lib/store/workspaces";
+
+/** The tab of a page's dashboard cards, when the page also has tabs (see SystemPage). */
+const DASHBOARD_TAB = "_dashboard";
 
 /** The tab named in the URL after the page's own path, e.g. "all_bookings" in /w/court/bookings/all_bookings. */
 function tabInPath(pathname: string, pagePath: string): string | undefined {
@@ -41,15 +45,29 @@ export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: s
   const views = system
     ? system.viewIds.map((id) => getView(ws.blueprint, id)).filter((v): v is View => !!v)
     : [];
+  // Dashboard cards on a page that also has tabs used to be hidden behind them. Cards no layout tab of the page shows
+  // get a Dashboard tab of their own, last, so nothing on a page is ever out of reach.
+  const placed = new Set(
+    views.flatMap((v) =>
+      v.type === "layout"
+        ? layoutItems(v.sections).flatMap(({ item }) =>
+            item.component === "widget" ? [String(item.props.widgetId)] : [],
+          )
+        : [],
+    ),
+  );
+  const loose = system && views.length ? system.widgetIds.filter((id) => !placed.has(id)) : [];
+  // The page opens on its first tab (the layout, on an Overview); the leftover cards open only when asked for.
+  const onDashboard = loose.length > 0 && wanted === DASHBOARD_TAB;
   // The tab shown last, so a plan that swaps it for another layout keeps showing that place.
   const last = useRef<{ id: string; index: number } | null>(null);
   const swapped = wanted && last.current?.id === wanted ? views[last.current.index] : undefined;
-  const active = views.find((v) => v.id === wanted) ?? swapped ?? views[0];
+  const active = onDashboard ? undefined : (views.find((v) => v.id === wanted) ?? swapped ?? views[0]);
   useEffect(() => {
     if (active) last.current = { id: active.id, index: views.indexOf(active) };
   });
   // A tab that no longer exists (a plan removed or replaced it) leaves the URL on the tab shown instead.
-  const stale = !!wanted && !!active && active.id !== wanted;
+  const stale = !!wanted && !!active && active.id !== wanted && !onDashboard;
   useEffect(() => {
     if (stale && active) window.history.replaceState(null, "", `${pagePath}/${active.id}`);
   }, [stale, active, pagePath]);
@@ -86,22 +104,27 @@ export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: s
           </>
         }
       />
-      {views.length > 1 ? (
+      {views.length + (loose.length ? 1 : 0) > 1 ? (
         <ViewTabs
           groupId={`${ws.id}:${system.id}`}
           label={`${system.name} views`}
-          activeId={active?.id}
+          activeId={onDashboard ? DASHBOARD_TAB : active?.id}
           inPlace
-          items={views.map((view) => ({
-            id: view.id,
-            href: `${pagePath}/${view.id}`,
-            label: view.name,
-          }))}
+          items={[
+            ...views.map((view) => ({ id: view.id, href: `${pagePath}/${view.id}`, label: view.name })),
+            ...(loose.length
+              ? [{ id: DASHBOARD_TAB, href: `${pagePath}/${DASHBOARD_TAB}`, label: "Dashboard" }]
+              : []),
+          ]}
         />
       ) : (
         <div className="border-b" />
       )}
-      {active ? <ViewRenderer view={active} /> : <Dashboard system={system} />}
+      {active ? (
+        <ViewRenderer view={active} />
+      ) : (
+        <Dashboard system={loose.length ? { ...system, widgetIds: loose } : system} />
+      )}
     </div>
   );
 }

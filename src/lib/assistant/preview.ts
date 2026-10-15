@@ -6,6 +6,7 @@ const SCREEN: Record<string, string> = {
   approval_queue: "Approvals",
   kanban: "Board",
   calendar: "Calendar",
+  layout: "Overview layout",
 };
 
 /** What a new workspace will contain, in plain words, before it's created. */

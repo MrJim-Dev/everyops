@@ -54,10 +54,26 @@ describe("formValues", () => {
   it("drops choices the form doesn't offer", () => {
     expect(formValues(booking, { court: "Court 9", level: "Pro" })).toEqual({});
   });
+
+  it("keeps slot times that already name their zone (a custom booking page's picks)", () => {
+    const values = formValues(booking, {
+      time_start: "2026-10-20T10:00:00.000Z",
+      time_end: "2026-10-20T11:00:00.000Z",
+    });
+    expect(values.time).toEqual({ start: "2026-10-20T10:00:00.000Z", end: "2026-10-20T11:00:00.000Z" });
+  });
 });
 
 describe("frameDocument", () => {
-  it("adds the form bridge to a full page, before </body>", () => {
+  it("adds the bridge at the top of <head>, before the page's own scripts", () => {
+    const doc = frameDocument(
+      "<html><head><script>EveryOps.form('x')</script></head><body><h1>Hi</h1></body></html>",
+    );
+    expect(doc.indexOf("window.EveryOps")).toBeGreaterThan(doc.indexOf("<head>"));
+    expect(doc.indexOf("window.EveryOps")).toBeLessThan(doc.indexOf("EveryOps.form('x')"));
+  });
+
+  it("adds the bridge before </body> on a page without a <head>", () => {
     const doc = frameDocument("<html><body><h1>Hi</h1></body></html>");
     expect(doc.indexOf("window.EveryOps")).toBeGreaterThan(doc.indexOf("<h1>"));
     expect(doc.indexOf("window.EveryOps")).toBeLessThan(doc.indexOf("</body>"));

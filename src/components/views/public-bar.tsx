@@ -5,7 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/components/workspace/workspace-context";
-import type { FormView, HtmlPageView, LandingView } from "@/lib/blueprint/types";
+import type { FormView, HtmlPageView, LandingView, LayoutView } from "@/lib/blueprint/types";
 import { autoHomeId, isPublic, sitePath } from "@/lib/public/resolve";
 import { standardLanding } from "@/lib/public/site-template";
 import { canManage, useWorkspaces } from "@/lib/store/workspaces";
@@ -15,7 +15,7 @@ export function PublicBar({
   view,
   children,
 }: {
-  view: FormView | LandingView | HtmlPageView;
+  view: FormView | LandingView | HtmlPageView | LayoutView;
   children?: React.ReactNode;
 }) {
   const ws = useWorkspace();
