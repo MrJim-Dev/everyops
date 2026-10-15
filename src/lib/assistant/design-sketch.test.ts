@@ -9,9 +9,19 @@ const design = {
     { id: "overview", name: "Overview", icon: "gauge", viewIds: [], widgetIds: ["sales_today"] },
     { id: "sales", name: "Sales", icon: "receipt", viewIds: ["orders", "register"], widgetIds: [] },
   ],
-  entities: [{ id: "order", name: "Order", pluralName: "Orders", fields: [{ id: "a" }, { id: "b" }] }],
+  entities: [
+    {
+      id: "order",
+      name: "Order",
+      pluralName: "Orders",
+      fields: [
+        { id: "a", name: "Customer" },
+        { id: "b", name: "Total" },
+      ],
+    },
+  ],
   views: [
-    { id: "orders", name: "All orders", type: "table" },
+    { id: "orders", name: "All orders", type: "table", entityId: "order" },
     { id: "register", name: "Register", type: "checkout" },
   ],
   widgets: [{ id: "sales_today", title: "Sales today" }],
@@ -29,8 +39,11 @@ describe("sketchOf", () => {
 
     const midViews = sketchOf(parsePartialJson(text.slice(0, text.indexOf('{"id":"register"'))));
     expect(midViews?.writing).toBe("views");
-    expect(midViews?.recordTypes).toEqual([{ id: "order", name: "Orders", fields: 2 }]);
+    expect(midViews?.recordTypes).toEqual([
+      { id: "order", name: "Orders", fields: 2, fieldNames: ["Customer", "Total"] },
+    ]);
     expect(midViews?.pages[1].views.map((v) => v.name)).toEqual(["All orders"]);
+    expect(midViews?.pages[1].views[0].entity).toBe("order");
     expect(midViews?.active).toBe("sales");
   });
 

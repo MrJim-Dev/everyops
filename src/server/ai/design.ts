@@ -1130,12 +1130,10 @@ export async function designWorkspace(
       stats.repairs++;
       onEvent?.({ type: "stage", stage: "fix", issues: errors.length });
       stats.calls++;
-      // The large design schema can repeatedly omit optional choices. A tiny required schema repairs them directly.
+      // The large design schema can repeatedly omit optional choices. A tiny required schema repairs them directly,
+      // on any repair: a later patch that turned a formula back into a status once left it with placeholder stages.
       let choices: DesignPatch | null = null;
-      if (
-        round === 1 &&
-        errors.some((e) => e.startsWith("Brief coverage:") && /options|choices|stages/i.test(e))
-      ) {
+      if (errors.some((e) => e.startsWith("Brief coverage:") && /options|choices|stages|statuses/i.test(e))) {
         const result = await generateJsonHedged(
           choiceRepairAnswer,
           {

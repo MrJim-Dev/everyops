@@ -14,12 +14,14 @@ export type DesignStage =
   /** Sample records and the Overview layout. */
   | "finish";
 
-export type SketchView = { id: string; name: string; type: string };
+/** A view and, for record views, the record type it shows. */
+export type SketchView = { id: string; name: string; type: string; entity?: string };
 export type SketchPage = { id: string; name: string; icon?: string; views: SketchView[]; widgets: number };
 export type DesignSketch = {
   name?: string;
   pages: SketchPage[];
-  recordTypes: { id: string; name: string; fields: number }[];
+  /** Each record type with its field count and the names of its first fields. */
+  recordTypes: { id: string; name: string; fields: number; fieldNames: string[] }[];
   /** The part of the design being written now. */
   writing: "pages" | "records" | "views" | "widgets" | "rules" | "site" | "samples" | "done";
   /** The page whose views or cards are being written. */
@@ -64,7 +66,8 @@ export function sketchOf(design: unknown, done = false): DesignSketch | undefine
   for (const v of list(design.views)) {
     const id = str(v.id);
     const name = str(v.name);
-    if (id && name) views.set(id, { id, name, type: str(v.type) ?? "table" });
+    const entity = str(v.entityId);
+    if (id && name) views.set(id, { id, name, type: str(v.type) ?? "table", ...(entity ? { entity } : {}) });
   }
   const widgetIds = new Set(list(design.widgets).map((w) => str(w.id)));
   const pages: SketchPage[] = [];
@@ -83,7 +86,9 @@ export function sketchOf(design: unknown, done = false): DesignSketch | undefine
   const recordTypes = list(design.entities).flatMap((e) => {
     const id = str(e.id);
     const name = str(e.pluralName) ?? str(e.name);
-    return id && name ? [{ id, name, fields: list(e.fields).length }] : [];
+    const fields = list(e.fields);
+    const fieldNames = fields.flatMap((f) => str(f.name) ?? []).slice(0, 8);
+    return id && name ? [{ id, name, fields: fields.length, fieldNames }] : [];
   });
   const writing = done ? "done" : (WRITING[last] ?? "pages");
   // The page holding the last view (or card) written so far.
