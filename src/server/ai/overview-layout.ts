@@ -137,14 +137,16 @@ export async function withOverviewLayout(
       system: OVERVIEW_SYSTEM,
       prompt: overviewContext(bp, name, brief, todayKey(now)),
       task: "overview-layout",
+      // Answers in 5–15 s, first part within 3. The global endpoint stalls a call now and then: a twin after 10 s
+      // of silence costs seconds, where waiting 30 s for it added 40 s to setup twice in one morning.
       timeoutMs: 60_000,
-      idleMs: 20_000,
-      firstPartMs: 40_000,
+      idleMs: 12_000,
+      firstPartMs: 15_000,
       thinking: "LOW",
       maxOutputTokens: 6000,
       enumLiterals: true,
     },
-    { hedgeMs: 30_000, attempts: 2, afterSilence: true },
+    { hedgeMs: 10_000, attempts: 3, afterSilence: true },
   ).catch((e) => ({ ok: false as const, error: String(e) }));
   if (!result.ok) {
     console.warn(JSON.stringify({ event: "overview_layout_skipped", reason: result.error }));

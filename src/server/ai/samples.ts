@@ -95,13 +95,14 @@ export async function fillEmptySamples(bp: Blueprint, samples: Sample[], now: Da
       system: SAMPLES_SYSTEM,
       prompt: samplesPrompt(bp, samples, empty, now),
       task: "design-samples",
+      // Like the Overview layout: a stalled call gets a twin after 10 s of silence, not 30.
       timeoutMs: 60_000,
-      idleMs: 20_000,
-      firstPartMs: 40_000,
+      idleMs: 12_000,
+      firstPartMs: 20_000,
       thinking: "LOW",
       maxOutputTokens: 8_000,
     },
-    { hedgeMs: 30_000, attempts: 2, afterSilence: true },
+    { hedgeMs: 10_000, attempts: 3, afterSilence: true },
   );
   if (!result.ok) {
     console.warn(

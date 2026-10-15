@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { attachmentRef } from "@/lib/assistant/attachments";
-import { interviewTurn } from "@/server/ai/interview";
+import { type InterviewPartial, interviewTurn } from "@/server/ai/interview";
 import { takeAiToken } from "@/server/ai/rate-limit";
 import { apiUser, sameOrigin } from "@/server/session-api";
 
@@ -42,6 +42,49 @@ export async function POST(request: Request) {
       { ok: false, message: "That's a lot of messages. Wait a few minutes and try again." },
       { status: 429 },
     );
-  const result = await interviewTurn(parsed.data.messages, user.id, parsed.data.questions ?? []);
-  return Response.json(result, { status: result.ok ? 200 : 502 });
+  // JSON lines: the reply as Gemini writes it ({ type: "partial" }, or partial: null when a rejected answer is being
+  // written again), a ping every 10 s, then { type: "done", result }. The owner reads the reply seconds in, while
+  // the rest of the turn (questions, plan, the brief) is still being written.
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let open = true;
+      const send = (event: unknown) => {
+        if (!open) return;
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        } catch {
+          open = false;
+        }
+      };
+      const ping = setInterval(() => send({ type: "ping" }), 10_000);
+      try {
+        const result = await interviewTurn(
+          parsed.data.messages,
+          user.id,
+          parsed.data.questions ?? [],
+          (partial?: InterviewPartial) => send({ type: "partial", partial: partial ?? null }),
+        );
+        send({ type: "done", result });
+      } catch (e) {
+        console.error(
+          JSON.stringify({ event: "interview_failed", message: e instanceof Error ? e.message : String(e) }),
+        );
+        send({ type: "done", result: { ok: false, message: "Something went wrong. Try again." } });
+      } finally {
+        clearInterval(ping);
+        open = false;
+        try {
+          controller.close();
+        } catch {}
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-store, no-transform",
+      "x-accel-buffering": "no",
+    },
+  });
 }
