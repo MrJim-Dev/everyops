@@ -14,6 +14,7 @@ import {
   view,
   widgetCalc,
 } from "./design-prompt";
+import { HTML_CAPABILITIES } from "./html-capabilities";
 
 /*
  * Gemini rejects an answer schema past a structural budget (properties, optional fields, enum values and union
@@ -46,11 +47,15 @@ const freePage = z.object({
   entityId: z.string().describe('Always ""'),
   name: z.string(),
   type: z.string().describe("document, canvas, html or layout"),
+  public: z
+    .boolean()
+    .optional()
+    .describe("HTML/layout only: true when the person asks to publish; false for private"),
   starter: z
     .string()
     .optional()
     .describe(
-      'document: starting markdown; html: a short starting page only when asked to draft one; layout: the page as JSON {"sections":[...]}',
+      'document: starting markdown; html: complete working HTML/CSS/JavaScript for a requested custom design; layout: the page as JSON {"sections":[...]}',
     ),
 });
 const assistantView = z.union(
@@ -469,25 +474,14 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
     board"): shapes, text, sticky notes, arrows and pictures. Its entityId is "" and it needs no other settings.
   - document: one free page of markdown the team edits ("a markdown page", "our policies", "an SOP page"). Its
     entityId is "" (no record type); put a helpful outline in starter (markdown).
-  - html: a page the owner designs entirely in their own HTML and CSS ("a custom HTML page", "I have my own landing
-    page design", "a fully custom booking page"). Its entityId is "". The owner pastes or uploads the HTML in the
-    page's editor, which starts with a styled template. When they ask you to write, draft or design the page (a
-    landing page, a promo), put the complete HTML document with inline CSS in the view's starter; otherwise leave
-    starter empty. When they want it live now, add a second op after the add_view: update_view with that view's id
-    and public true. Only say it's drafted or live when the plan does it.
-    A form on the page that saves real records (a booking form connected to bookings, a sign-up or inquiry form):
-    never write its inputs yourself. Put <div data-everyops-embed="FORM_VIEW_ID"></div> where the form goes, with
-    the id of a public form view; EveryOps fills in the real fields (in steps when that form has steps) and makes
-    it save to that form. If no public form for that record type exists, add one in the same plan (add_view form
-    with public true, its fields with '# Step title' markers for a multi-step form) before the html page. Style it
-    with CSS on form, fieldset, legend, label, input, select, textarea and button.
-    For a booking page, a "Book now" link to the public form (href "/s/__everyops_site__/FORM_VIEW_ID",
-    target "_top") opens EveryOps's own form with its live calendar; prefer it to embedding a booking form.
+  - html: a fully custom HTML/CSS/JavaScript page, entityId "". Prefer for bespoke page customization and
+    interactive designs. Put the complete working document in starter; rewrite existing pages in pageTexts.
+    ${HTML_CAPABILITIES}
     ${HTML_DESIGN_GUIDE}
     In the reply, say they can open Edit HTML to change the design.
   - layout: a page composed from EveryOps's component library ("a custom dashboard", "a page with the revenue chart
     next to today's bookings", "an overview with tabs for this week and this month", "make the courts page look like
-    a dashboard"). Prefer it to add_widget when the person asks for a custom layout, a mix of numbers, charts, tables,
+    a dashboard"). Use it for arranging library components rather than bespoke HTML styling, or as a published data source for HTML, a mix of numbers, charts, tables,
     lists and cards, tabs, or something a dashboard can't arrange. Its entityId is "" and starter holds the whole
     page as JSON: {"sections":[{"title":"Today","description":"optional line","columns":3,"items":[{"component":
     "stat","span":1,"props":{"title":"Bookings today","entityId":"booking","op":"count","filter":"..."}}]}]}.
@@ -591,6 +585,10 @@ Public pages and their requests:
   entry with kind section, the section's blockId, and newName holding only the lines that change. A section the person
   clicked is named under "What the person is looking at"; edit that one. To show something new on the page, add_block;
   to take a section off, remove (what block, parentId the view).
+- "(Picked on the page: …)" after a message lists parts of the screen the person clicked (a row, a card, a chart, a
+  button, an element of a custom HTML page with its markup), usually with a screenshot of each attached. "This",
+  "here" and "that" mean those parts: answer or plan about exactly them, match them to the records, fields, views or
+  HTML they show, and ask which one only when the picks are truly ambiguous.
 - "FAQs shown on the landing page or booking form": add_entity, its page, and add_block (layout faq) on each.
 - update_view also changes a form's intro, button or questions (fieldIds). Blocks go on form and landing views only.
 - What a public form asks is what's listed with its tab, minus what "visitors don't see". Before saying a form

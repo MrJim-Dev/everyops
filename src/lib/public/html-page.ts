@@ -69,16 +69,41 @@ export function htmlDocKeys(bp: Blueprint): string[] {
 
 /** Runs inside the sandboxed page. Kept tiny and dependency-free; it only talks to the page that embeds it. */
 const BRIDGE = `(function(){
-var waiting={},next=0;
-function call(method,form,args){return new Promise(function(done){var id=++next;waiting[id]=done;parent.postMessage({everyops:"call",id:id,method:method,form:String(form),args:args||{}},"*");});}
-function submit(form,values,extras){return new Promise(function(done){var id=++next;waiting[id]=done;parent.postMessage({everyops:"submit",id:id,form:String(form),values:values||{},extras:extras||{}},"*");});}
-window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.everyops!=="result")return;var done=waiting[d.id];if(done){delete waiting[d.id];done(d.result);}});
+var waiting={},next=0,ready=false,queued=[],probe;
+function ping(){parent.postMessage({everyops:"connect"},"*");}
+function request(message){return new Promise(function(done){
+var id=++next;message.id=id;
+var timer=setTimeout(function(){delete waiting[id];queued=queued.filter(function(m){return m.id!==id;});if(!Object.keys(waiting).length){clearInterval(probe);probe=undefined;}done({ok:false,message:"The request timed out. Please try again."});},30000);
+waiting[id]=function(result){clearTimeout(timer);done(result);};
+if(ready)parent.postMessage(message,"*");else{queued.push(message);ping();if(!probe)probe=setInterval(ping,100);}
+});}
+function call(method,form,args){return request({everyops:"call",method:method,form:String(form),args:args||{}});}
+function submit(form,values,extras){return request({everyops:"submit",form:String(form),values:values||{},extras:extras||{}});}
+window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d)return;
+if(d.everyops==="pick"){pick(!!d.on);return;}
+if(d.everyops==="ready"){ready=true;clearInterval(probe);probe=undefined;var pending=queued;queued=[];pending.forEach(function(m){if(waiting[m.id])parent.postMessage(m,"*");});return;}
+if(d.everyops!=="result")return;var done=waiting[d.id];if(done){delete waiting[d.id];done(d.result);}});
 window.EveryOps={submit:submit,
+data:function(viewId){return call("data",viewId);},
 form:function(f){return call("form",f);},
 slots:function(f,resource,day){return call("slots",f,{resource:resource,date:day});},
 days:function(f,resource,from,count){return call("days",f,{resource:resource,from:from,count:count||42});},
 quote:function(f,values,extras){return call("quote",f,{values:values||{},extras:extras||{}});},
 upload:function(f,file){return call("upload",f,{file:file});}};
+var picking=false,hovered=null,mark=null;
+function marker(){if(!mark){mark=document.createElement("div");mark.setAttribute("aria-hidden","true");mark.style.cssText="position:fixed;pointer-events:none;z-index:2147483647;border:2px solid #34c3a6;background:rgba(52,195,166,.12);border-radius:4px;display:none";}return mark;}
+function flat(t,n){return String(t||"").replace(/\\s+/g," ").trim().slice(0,n);}
+function pickable(t){for(var at=t;at&&at.nodeType===1&&at!==document.body&&at!==document.documentElement;at=at.parentElement){if(at.matches("a,button,input,select,textarea,img,h1,h2,h3,h4,li,tr,label"))return at;var r=at.getBoundingClientRect();if(r.width*r.height>=1600&&!(at instanceof SVGElement))return at;}return null;}
+function show(el){hovered=el;if(!el){if(mark)mark.style.display="none";return;}var r=el.getBoundingClientRect(),m=marker();if(!m.isConnected)document.documentElement.appendChild(m);m.style.display="block";m.style.left=r.left+"px";m.style.top=r.top+"px";m.style.width=r.width+"px";m.style.height=r.height+"px";}
+function where(el){var names=[];for(var at=el.parentElement;at&&at!==document.body&&names.length<3;at=at.parentElement){var h=at.querySelector(":scope>h1,:scope>h2,:scope>h3,:scope>header h1,:scope>header h2");var n=flat(at.getAttribute("aria-label")||(h&&h.textContent)||"",60);if(n&&names.indexOf(n)<0)names.unshift(n);}return names.join(" \u203a ");}
+function pick(on){picking=on;document.documentElement.style.cursor=on?"crosshair":"";if(!on)show(null);}
+function block(e){if(!picking)return;e.preventDefault();e.stopImmediatePropagation();}
+["pointerdown","mousedown","pointerup","mouseup","dblclick","submit"].forEach(function(t){window.addEventListener(t,block,true);});
+window.addEventListener("pointermove",function(e){if(picking)show(pickable(e.target));},true);
+window.addEventListener("scroll",function(){if(picking&&hovered)show(hovered);},true);
+window.addEventListener("click",function(e){if(!picking)return;block(e);var el=pickable(e.target);if(!el)return;
+parent.postMessage({everyops:"picked",tag:el.tagName.toLowerCase(),label:flat(el.getAttribute("aria-label")||el.getAttribute("alt")||el.textContent,120),text:flat(el.innerText,400),html:flat(el.outerHTML,1500),path:where(el)},"*");},true);
+window.addEventListener("keydown",function(e){if(picking&&e.key==="Escape")parent.postMessage({everyops:"pick-cancel"},"*");},true);
 document.addEventListener("submit",function(e){var f=e.target,id=f&&f.getAttribute&&f.getAttribute("data-everyops-form");if(!id)return;e.preventDefault();
 var values={};new FormData(f).forEach(function(v,k){if(typeof v!=="string")return;if(k in values){values[k]=[].concat(values[k],v);}else values[k]=v;});
 var buttons=f.querySelectorAll("button,[type=submit]");buttons.forEach(function(b){b.disabled=true;});f.setAttribute("data-state","sending");
@@ -101,8 +126,11 @@ export function frameDocument(html: string): string {
   const head = /<head(\s[^>]*)?>/i.exec(html);
   if (head)
     return html.slice(0, head.index + head[0].length) + script + html.slice(head.index + head[0].length);
-  const end = html.search(/<\/body>/i);
-  if (end >= 0) return html.slice(0, end) + script + html.slice(end);
+  const opening = /<html\b[^>]*>/i.exec(html);
+  if (opening) {
+    const end = opening.index + opening[0].length;
+    return `${html.slice(0, end)}<head>${script}</head>${html.slice(end)}`;
+  }
   return html + script;
 }
 

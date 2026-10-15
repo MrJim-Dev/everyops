@@ -5,6 +5,7 @@ import type { AttachmentRef } from "@/lib/assistant/attachments";
 import type { DataEvidence } from "@/lib/assistant/evidence";
 import type { Navigation } from "@/lib/assistant/screen";
 import type { ChangePlan } from "@/lib/engine/changes";
+import type { PickedElement } from "./picked";
 
 export type AssistantTurn = {
   role: "user" | "assistant";
@@ -30,6 +31,8 @@ export type AssistantTurn = {
   error?: boolean;
   /** The person stopped this request before an answer came back. */
   stopped?: boolean;
+  /** Parts of the page the person picked for this message (Pick from page). */
+  picked?: Omit<PickedElement, "id">[];
   /** The website section this message was about, e.g. "Hero". */
   ref?: string;
   /** The person reverted every change made from this message on. */

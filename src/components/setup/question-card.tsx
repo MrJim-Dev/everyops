@@ -18,11 +18,14 @@ export function answersMessage(questions: AskQuestion[], answers: Record<string,
 
 /**
  * Ask EveryOps's questions, answered one at a time like a short form: pick an option (the recommended one first,
- * or press its number) or write your own under Other, then Next. Send goes out as one message. Closing it leaves a
- * chip to reopen it, and the composer stays free for a typed reply.
+ * or press its number) and the card moves on to the next question by itself; Other opens a box for your own words,
+ * then Next. The last question only selects: Send (or Enter) sends every answer as one message. Arrow keys move
+ * between options without moving on. Closing it leaves a chip to reopen it, and the composer stays free for a typed
+ * reply.
  *
  * Motion: a new question slides 12px in from the side you moved toward (200ms, strong ease-out); keyboard picks and
- * selection changes are instant, and reduced motion keeps only the fade.
+ * selection changes are instant, the chosen option shows for a moment before the next question, and reduced motion
+ * keeps only the fade.
  */
 export function QuestionCard({
   questions,
@@ -61,12 +64,17 @@ export function QuestionCard({
   );
   const otherBox = useRef<HTMLInputElement>(null);
   const card = useRef<HTMLElement>(null);
+  /** The pending move to the next question after a pick, so the chosen option shows first. */
+  const moving = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** The last key was an arrow: browsing options, not choosing one. */
+  const arrowing = useRef(false);
   const q = questions[at];
   const choice = q ? picked[q.id] : undefined;
   const last = at === questions.length - 1;
   useEffect(() => {
     if (choice === OTHER) otherBox.current?.focus();
   }, [choice]);
+  useEffect(() => () => clearTimeout(moving.current), []);
   // Opened from the side panel: bring the card into view and let the keyboard work right away.
   useEffect(() => {
     if (open && autoFocus) card.current?.focus({ preventScroll: true });
@@ -76,8 +84,20 @@ export function QuestionCard({
   const answerOf = (id: string) => (picked[id] === OTHER ? (other[id] ?? "") : (picked[id] ?? ""));
   const answered = !!answerOf(q.id).trim();
   const go = (to: number) => {
+    clearTimeout(moving.current);
     setDir(to > at ? "next" : "back");
     setAt(to);
+  };
+  /** Choosing an option answers the question; on every question but the last, the card then moves on. */
+  const choose = (id: string) => {
+    setPicked((p) => ({ ...p, [q.id]: id }));
+    clearTimeout(moving.current);
+    if (id === OTHER || last || disabled || arrowing.current) return;
+    const from = at;
+    moving.current = setTimeout(() => {
+      setDir("next");
+      setAt((now) => (now === from ? from + 1 : now));
+    }, 220);
   };
   const advance = (skip: boolean) => {
     const next = skip ? { ...picked, [q.id]: "" } : picked;
@@ -109,6 +129,7 @@ export function QuestionCard({
       aria-label="Questions from Ask EveryOps"
       className="enter-up mb-2 overflow-hidden rounded-2xl border bg-card shadow-[0_12px_32px_-16px_rgb(0_0_0/0.6)] outline-none"
       onKeyDown={(e) => {
+        arrowing.current = e.key.startsWith("Arrow");
         if (e.target instanceof HTMLInputElement && e.target.type === "text") {
           if (e.key === "Enter" && answered && !disabled) {
             e.preventDefault();
@@ -119,11 +140,14 @@ export function QuestionCard({
         const n = Number(e.key);
         if (n >= 1 && n <= options.length) {
           e.preventDefault();
-          setPicked((p) => ({ ...p, [q.id]: options[n - 1].id }));
+          choose(options[n - 1].id);
         } else if (e.key === "Enter" && answered && !disabled) {
           e.preventDefault();
           advance(false);
         } else if (e.key === "Escape") (onClose ?? (() => setOpen(false)))();
+      }}
+      onPointerDown={() => {
+        arrowing.current = false;
       }}
     >
       <div className="flex items-center gap-3 px-4 pt-3.5">
@@ -186,7 +210,7 @@ export function QuestionCard({
                   type="radio"
                   name={`ask-${q.id}`}
                   checked={on}
-                  onChange={() => setPicked((p) => ({ ...p, [q.id]: o.id }))}
+                  onChange={() => choose(o.id)}
                   className="sr-only"
                 />
                 <span

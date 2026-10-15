@@ -1,9 +1,11 @@
+import { htmlConnectionProblems } from "@/lib/public/html-connections";
 import "server-only";
 import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import type { DataEvidence } from "@/lib/assistant/evidence";
 import { memoryContext, type WorkspaceMemory } from "@/lib/assistant/memory";
 import { permissionsText } from "@/lib/assistant/permissions";
+import { withoutPickedNote } from "@/lib/assistant/picked";
 import { fieldUsage, renameInDesign, renameInPages } from "@/lib/assistant/related";
 import {
   describeScreen,
@@ -412,7 +414,13 @@ export function toDesignOps(
         else if (o.view && systemId) {
           // A custom HTML page's draft arrives as starter (free pages share one shape in the answer schema).
           const raw = o.view as typeof o.view & { starter?: string };
-          const free = raw as unknown as { id: string; name: string; type: string; starter?: string };
+          const free = raw as unknown as {
+            id: string;
+            name: string;
+            type: string;
+            starter?: string;
+            public?: boolean;
+          };
           if (free.type === "layout") {
             // A layout page's sections arrive as JSON in starter, checked against the component library.
             const layout = parseLayout(free.starter ?? "");
@@ -427,6 +435,7 @@ export function toDesignOps(
                   entityId: "",
                   type: "layout",
                   sections: layout.sections,
+                  ...(free.public !== undefined ? { public: free.public } : {}),
                 },
               });
             break;
@@ -1438,7 +1447,9 @@ ${input.messages
         ...withNav,
         plan: {
           // History shows the person's own words, without the note about which section they clicked.
-          request: (input.messages.at(-1)?.text ?? "").replace(/^\(About the .+? section I clicked\)\n?/, ""),
+          request: withoutPickedNote(
+            (input.messages.at(-1)?.text ?? "").replace(/^\(About the .+? section I clicked\)\n?/, ""),
+          ),
           baseVersion: bp.version,
           coverage,
           title: a.plan.title || "Workspace change",
@@ -1692,14 +1703,14 @@ export function unanswerable(next: Blueprint, ops: ChangeOp[]): string[] {
  */
 export function embedForms(next: Blueprint, records: DataRecord[], ops: ChangeOp[], errors: string[]) {
   for (const op of ops) {
-    if (op.op !== "add_view" || op.view.type !== "html" || !op.view.html?.includes("data-everyops-embed"))
-      continue;
+    if (op.op !== "add_view" || op.view.type !== "html" || !op.view.html) continue;
     op.view.html = fillEmbeds(op.view.html, next, records, op.view.id, errors);
   }
 }
 
 /** Replaces each data-everyops-embed placeholder in a page's HTML with its public form's markup. */
 function fillEmbeds(html: string, next: Blueprint, records: DataRecord[], pageId: string, errors: string[]) {
+  errors.push(...htmlConnectionProblems(next, pageId, html));
   const tag = /<(\w+)\b[^>]*\bdata-everyops-embed\s*=\s*["']([^"']+)["'][^>]*>(?:\s*<\/\1>)?/g;
   const forms = next.views.filter((v) => v.type === "form" && v.public);
   return html.replace(tag, (whole, _tag: string, id: string) => {

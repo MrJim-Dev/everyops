@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { create } from "zustand";
+import { MAX_PICKED, type PickedElement, samePick } from "./picked";
 
 /** What a view shows right now, beyond its URL: its search, the dates on screen, the item it has selected. */
 export type ViewScreen = {
@@ -29,6 +30,14 @@ type State = {
   view: ViewScreen | null;
   /** The website section the person picked to edit with the assistant. */
   block: BlockRef | null;
+  /** Clicking the page picks parts of it for the assistant instead of using them. */
+  picking: boolean;
+  setPicking: (on: boolean) => void;
+  /** Parts of the page picked for the next message, oldest first. */
+  picked: PickedElement[];
+  addPicked: (element: Omit<PickedElement, "id">) => void;
+  removePicked: (id: string) => void;
+  clearPicked: () => void;
   openRecord: (id: string | null) => void;
   selectBlock: (block: BlockRef | null) => void;
   report: (view: ViewScreen) => void;
@@ -40,6 +49,17 @@ export const useScreen = create<State>()((set) => ({
   recordId: null,
   view: null,
   block: null,
+  picking: false,
+  setPicking: (picking) => set({ picking }),
+  picked: [],
+  addPicked: (element) =>
+    set((s) => {
+      const id = `pick_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const rest = s.picked.filter((p) => !samePick(p, { ...element, id }));
+      return { picked: [...rest, { ...element, id }].slice(-MAX_PICKED) };
+    }),
+  removePicked: (id) => set((s) => ({ picked: s.picked.filter((p) => p.id !== id) })),
+  clearPicked: () => set({ picked: [] }),
   openRecord: (recordId) => set({ recordId }),
   selectBlock: (block) => set({ block }),
   report: (view) => set({ view }),
