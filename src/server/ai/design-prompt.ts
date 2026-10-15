@@ -405,7 +405,9 @@ export const design = z.object({
       intro: z
         .string()
         .describe("One or two plain sentences under the headline, under 180 characters, no emoji"),
-      cta: z.string().describe("The main button, 2 to 4 words, e.g. Book a court"),
+      cta: z
+        .string()
+        .describe("The main button, 2 to 4 words naming what this business's customers book or order"),
       offerTitle: z.string().describe("Heading over what's offered, e.g. Our courts or Rental items"),
       highlights: z
         .array(z.object({ title: z.string(), body: z.string() }))

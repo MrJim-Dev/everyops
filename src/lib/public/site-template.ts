@@ -32,7 +32,9 @@ export type SiteCopy = {
 };
 
 const PEOPLE =
-  /player|client|customer|member|guest|staff|employee|people|person|team|contact|supplier|student|patient/i;
+  /player|client|customer|member|guest|staff|employee|people|person|team|contact|supplier|student|patient|stylist|barber|therapist|doctor|dentist|trainer|coach|instructor|tutor|technician|driver|agent|teacher|artist|groomer/i;
+/** Lists that sort what is offered (unit types, service categories) rather than being it. */
+const GROUPING = /categor|(^|_|\s)types?($|_|\s)|group|\btags?\b|kinds?$|class(es)?_?type/i;
 const PRIVATE_FIELD = /phone|e-?mail|contact|cost|internal|note|stock|quantity|qty|supplier|margin|password/i;
 const PAYMENT = /payment.?(method|option|channel)|pay.?method|ways? to pay/i;
 const FAQ = /faq|question/i;
@@ -45,37 +47,106 @@ export function mainForm(bp: Blueprint): FormView | undefined {
   return forms.find((f) => bp.entities.find((e) => e.id === f.entityId)?.booking) ?? forms[0];
 }
 
-/** What the business offers: the thing people book (courts, rooms) or, failing that, its products or services. */
+/** The record type a booking is for (the court, the room, the stylist), when it has one. */
+export function resourceOf(bp: Blueprint, booking: Entity | undefined): Entity | undefined {
+  const field = booking?.booking && booking.fields.find((f) => f.id === booking.booking?.resourceFieldId);
+  return field?.relation ? bp.entities.find((e) => e.id === field.relation?.entityId) : undefined;
+}
+
+const OFFER_WORDS =
+  /product|item|menu|service|package|room|unit|court|rental|class|course|tour|plan|property|villa|space|studio|equipment|vehicle|treatment/i;
+
+/**
+ * What the business offers, for the website cards and its Book button: the thing people book (courts, rooms) unless
+ * that is a person (a salon books stylists, but sells services), else the list that reads most like an offer: named
+ * like one, with prices, pictures and descriptions. Never people, payment methods, FAQs or a list that only groups
+ * the offer (unit types, service categories).
+ */
 export function offeringOf(bp: Blueprint): Entity | undefined {
-  for (const e of bp.entities) {
-    const resourceField = e.booking && e.fields.find((f) => f.id === e.booking?.resourceFieldId);
-    const target =
-      resourceField?.relation && bp.entities.find((x) => x.id === resourceField.relation?.entityId);
-    if (target) return target;
-  }
-  return (
-    bp.entities.find((e) => e.resource) ??
-    bp.entities.find(
-      (e) =>
-        !e.parent &&
-        !e.booking &&
-        !PEOPLE.test(words(e)) &&
-        !PAYMENT.test(words(e)) &&
-        !FAQ.test(words(e)) &&
-        /product|item|menu|service|package|room|unit|court|rental|class|course|tour|plan/i.test(words(e)),
-    )
+  const eligible = (e: Entity) =>
+    !e.parent &&
+    !e.booking &&
+    !PEOPLE.test(words(e)) &&
+    !PAYMENT.test(words(e)) &&
+    !FAQ.test(words(e)) &&
+    !GROUPING.test(`${e.id} ${e.name}`);
+  const booked = new Set(
+    bp.entities.flatMap((e) => (e.booking ? [resourceOf(bp, e)?.id] : [])).filter((id): id is string => !!id),
   );
+  // What bookings and their lines link to: a salon appointment's service, a stay's unit.
+  const linked = new Set(
+    bp.entities
+      .filter((e) => e.booking || bp.entities.some((p) => p.booking && e.parent?.entityId === p.id))
+      .flatMap((e) => e.fields.map((f) => f.relation?.entityId))
+      .filter((id): id is string => !!id),
+  );
+  const score = (e: Entity) => {
+    const money = e.fields.filter(
+      (f) => f.type === "money" || (f.type === "formula" && f.formula?.resultType === "money"),
+    );
+    return (
+      (booked.has(e.id) ? 4 : 0) +
+      (e.resource ? 3 : 0) +
+      (linked.has(e.id) ? 2 : 0) +
+      (OFFER_WORDS.test(words(e)) ? 2 : 0) +
+      Math.min(money.length, 2) +
+      (e.fields.some((f) => f.type === "image") ? 1 : 0) +
+      (e.fields.some((f) => f.type === "long_text") ? 1 : 0)
+    );
+  };
+  let best: Entity | undefined;
+  for (const e of bp.entities.filter(eligible))
+    if (score(e) >= 3 && (!best || score(e) > score(best))) best = e;
+  return best;
 }
 
 export const paymentsOf = (bp: Blueprint) => bp.entities.find((e) => PAYMENT.test(words(e)));
 
-/** What a button to a public form says: "Book a court" for bookings of a resource, otherwise the form's name. */
+const article = (noun: string) => (/^[aeiou]/i.test(noun) ? "an" : "a");
+
+/**
+ * What a button to a public form says: "Book a court" for bookings of a thing, "Book an appointment" when the booking
+ * is with a person (a stylist, a dentist), otherwise the form's name.
+ */
 export function bookLabel(bp: Blueprint, formId: string): string {
   const form = bp.views.find((v) => v.id === formId);
   const entity = form && bp.entities.find((e) => e.id === form.entityId);
-  const offer = offeringOf(bp);
-  if (entity?.booking && offer) return `Book a ${offer.name.toLowerCase()}`;
+  if (entity?.booking) {
+    const resource = resourceOf(bp, entity);
+    const thing =
+      resource && !PEOPLE.test(words(resource)) && !GROUPING.test(resource.id) ? resource.name : entity.name;
+    return `Book ${article(thing)} ${thing.toLowerCase()}`;
+  }
   return form && form.name.length <= 24 ? form.name : "Book now";
+}
+
+const COMMON = new Set(
+  "book booking reserve reservation order request schedule your now today online here get start make send see view our the and for with you".split(
+    " ",
+  ),
+);
+
+/**
+ * Whether AI-written copy fits this business: every word it names is somewhere in the workspace. Gemini sometimes
+ * copies an example from its prompt ("Book a court" on a salon); that falls back to words built from the data.
+ */
+export function fitsBusiness(bp: Blueprint, text: string | undefined): boolean {
+  if (!text) return false;
+  // Only the names the workspace is built from: record types, their fields and options. Words in views or other copy
+  // can carry the same copied example.
+  const known = bp.entities
+    .flatMap((e) => [
+      bp.workspaceName,
+      e.id,
+      e.name,
+      e.pluralName,
+      ...e.fields.flatMap((f) => [f.id, f.name, ...(f.options ?? []).map((o) => o.label)]),
+    ])
+    .join(" ")
+    .toLowerCase();
+  return (text.toLowerCase().match(/[a-z]{3,}/g) ?? [])
+    .filter((w) => !COMMON.has(w))
+    .every((w) => known.includes(w.replace(/(ies|es|s)$/, "")));
 }
 const faqsOf = (bp: Blueprint) => bp.entities.find((e) => FAQ.test(words(e)));
 
@@ -91,15 +162,26 @@ export function liveFilter(e: Entity): string | undefined {
   return undefined;
 }
 
-/** The fields a card shows: the name, then a picture, a category, a price and a description. */
+/** The fields a card shows: the name, then a picture, a category, up to two prices, a duration and a description. */
 function cardFields(e: Entity, extra: (f: Field) => boolean = () => false): string[] {
   const usable = (f: Field) => f.id !== e.primaryFieldId && !PRIVATE_FIELD.test(`${f.id} ${f.name}`);
   const pick = (test: (f: Field) => boolean) => e.fields.find((f) => usable(f) && test(f))?.id;
+  const prices = e.fields
+    .filter(
+      (f) => usable(f) && (f.type === "money" || (f.type === "formula" && f.formula?.resultType === "money")),
+    )
+    .slice(0, 2)
+    .map((f) => f.id);
   return [
     e.primaryFieldId,
     pick((f) => f.type === "image"),
     pick((f) => f.type === "select"),
-    pick((f) => f.type === "money" || (f.type === "formula" && f.formula?.resultType === "money")),
+    ...prices,
+    pick(
+      (f) =>
+        f.type === "number" &&
+        /duration|minutes|mins|hours|capacity|guests|pax|sleeps/i.test(`${f.id} ${f.name}`),
+    ),
     pick((f) => f.type === "long_text"),
     ...e.fields.filter((f) => usable(f) && extra(f)).map((f) => f.id),
   ].filter((id, i, all): id is string => !!id && all.indexOf(id) === i);
@@ -205,7 +287,12 @@ function buildBlocks(bp: Blueprint, name: string, copy: SiteCopy): Block[] {
       type: "hero",
       heading: clean(copy.headline, 60) ?? base.headline ?? name,
       ...(cleanIntro(copy.intro ?? base.intro) ? { subheading: cleanIntro(copy.intro ?? base.intro) } : {}),
-      ...(form ? { ctaViewId: form.id, ctaLabel: clean(copy.cta, 28) ?? bookLabel(bp, form.id) } : {}),
+      ...(form
+        ? {
+            ctaViewId: form.id,
+            ctaLabel: (fitsBusiness(bp, copy.cta) && clean(copy.cta, 28)) || bookLabel(bp, form.id),
+          }
+        : {}),
     },
   ];
   const highlights = cleanItems(copy.highlights);
