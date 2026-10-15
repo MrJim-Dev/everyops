@@ -271,3 +271,18 @@ describe("history a staff save may write", () => {
     expect(undone[0].undoneAt).toBe(NOW.toISOString());
   });
 });
+
+describe("who applied a change", () => {
+  it("keeps the person's name and marks a change the assistant applied on its own", () => {
+    const plan: ChangePlan = {
+      request: "Rename the workspace",
+      title: "Rename workspace",
+      facts: [],
+      steps: [],
+      ops: [{ op: "rename_workspace", name: "Rally House" }],
+    };
+    expect(applyPlan(court(), plan, { by: "Ana", now: NOW }).entry).toMatchObject({ appliedBy: "Ana" });
+    const auto = applyPlan(court(), plan, { by: "Ana", now: NOW, auto: true }).entry;
+    expect(auto).toMatchObject({ appliedBy: "Ana", auto: true });
+  });
+});

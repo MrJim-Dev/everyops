@@ -28,6 +28,8 @@ import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 import { groupHistory } from "./history-groups";
 
+const records = (n: number) => `${n} ${n === 1 ? "record" : "records"}`;
+
 type RowProps = {
   entry: ChangeEntry;
   current: boolean;
@@ -40,9 +42,9 @@ function ChangeRow({ entry, current, onUndo, onRedo }: RowProps) {
   const undone = !!entry.undoneAt;
   const counts = [
     entry.recordChanges.length && `${entry.recordChanges.length} values updated`,
-    entry.createdRecordIds?.length && `${entry.createdRecordIds.length} records added`,
-    entry.replacedRecords?.length && `${entry.replacedRecords.length} records edited`,
-    entry.removedRecords?.length && `${entry.removedRecords.length} records deleted`,
+    entry.createdRecordIds?.length && `${records(entry.createdRecordIds.length)} added`,
+    entry.replacedRecords?.length && `${records(entry.replacedRecords.length)} edited`,
+    entry.removedRecords?.length && `${records(entry.removedRecords.length)} deleted`,
   ].filter(Boolean);
   return (
     <li className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start">
@@ -86,7 +88,17 @@ function ChangeRow({ entry, current, onUndo, onRedo }: RowProps) {
           </ul>
         ) : null}
         <p className="mt-2 text-[12px] text-muted-foreground tabular-nums">
-          {[formatTime(entry.appliedAt), ...counts].join(", ")}
+          {[
+            formatTime(entry.appliedAt),
+            entry.auto
+              ? `applied automatically by Ask EveryOps${entry.appliedBy ? ` for ${entry.appliedBy}` : ""}`
+              : entry.appliedBy
+                ? `by ${entry.appliedBy}`
+                : null,
+            ...counts,
+          ]
+            .filter(Boolean)
+            .join(", ")}
         </p>
       </div>
       {onUndo ? (

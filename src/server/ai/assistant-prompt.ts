@@ -371,6 +371,12 @@ Know the business and think ahead:
   rewrite a page only for a rename. In the reply, say in one sentence what else you updated.
 - Suggestions are the next steps this business would most likely take after this one, specific to it ("Add a proof
   of payment upload to the booking form"), never generic ones.
+- Changes that start later ("from next Monday", "starting Nov 1", "beginning next week"): work out the date from
+  today and build it into the change so it takes effect then. A price or rate formula keeps the old value before it,
+  using the record's own date or time field: on_or_after(slot, 'YYYY-MM-DD') && hour(slot) >= 17 ? 550 : ...; take the
+  date from "Coming days" (never work out a weekday yourself), say it in the step detail and the reply ("from Mon,
+  <date>"), and page or website text you change says it too, so visitors aren't shown it early. When a change can't wait for a date that way (a new page,
+  a renamed field), ask whether to do it now (kind clarify). Never make a later change take effect today silently.
 
 What the person is looking at: the page and tab, what the view shows (the dates on a calendar or schedule, a
 search, the records listed on screen) and the record open in the side panel. "This", "here", "these", "this

@@ -39,3 +39,34 @@ export function describeTypes(bp: Blueprint): string {
     })
     .join("\n");
 }
+
+const GREETING =
+  /^(hi|hello|hey|yo|good (morning|afternoon|evening)|thanks|thank you|salamat|ok(ay)?|cool|great|nice|got it)\b[\s!.,]*$/i;
+/** "Open the courts page", "take me to settings": navigation only. */
+const NAVIGATE =
+  /^(please\s+)?(open|go to|take me to|bring me to|show me)\s+(the\s+|my\s+)?[\w\s'&-]{1,40}?\s+(page|tab|settings|history)[\s.!]*$|^(please\s+)?(open|go to|take me to)\s+(settings|history|team|publish)[\s.!]*$/i;
+/** A change to the design: fields, pages, tabs, cards, forms, the website. */
+const DESIGN =
+  /\b(add|create|make|rename|remove|delete|hide|show|move|reorder|put|change|turn)\b[^.?!]*\b(fields?|columns?|pages?|tabs?|cards?|charts?|forms?|automations?|sections?|website|landing page|headline|button|steps?|layout|dashboard|record types?|sidebar)\b/i;
+/** Telling the assistant something about the business ("heads up: we now close at 11"). */
+const STATEMENT = /^(heads up|fyi|just so you know|for your info|note)\b[^?]*$/i;
+/** Advice about the workspace ("what should I set up next?", "how do I share the booking page?"). */
+const ADVICE =
+  /^(what should|what else should|what can|how (do|can|should) (i|we)|can you (explain|help)|what('s| is) the best way|any (ideas|suggestions)|explain|help me)\b/i;
+/** Something that points at particular records, amounts or dates. */
+const DATA =
+  /₱|\d|\b(today|yesterday|tomorrow|tonight|this (week|month|year)|last (week|month)|next (week|month)|unpaid|paid|overdue|pending|records?(?! types?))\b|\b[A-Z][a-z]+'s\b/;
+
+/**
+ * Whether a message can need looked-up data. Greetings, navigation, statements about the business and changes to the
+ * design that don't point at particular records answer from the blueprint and digest alone; skipping the lookup there
+ * saves a Gemini round (2 to 9 s). Anything else, or anything unclear, still gets the lookup.
+ */
+export function needsLookup(message: string): boolean {
+  const text = message.trim();
+  if (!text) return false;
+  if (GREETING.test(text) || NAVIGATE.test(text) || STATEMENT.test(text)) return false;
+  if (ADVICE.test(text) && !DATA.test(text)) return false;
+  if (DESIGN.test(text) && !DATA.test(text)) return false;
+  return true;
+}
