@@ -9,6 +9,8 @@ export type DesignStage =
   | "design"
   /** Gemini is fixing what EveryOps's checks found. */
   | "fix"
+  /** Independent review against the setup brief. */
+  | "check"
   /** Sample records and the Overview layout. */
   | "finish";
 

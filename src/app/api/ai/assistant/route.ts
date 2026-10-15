@@ -88,6 +88,7 @@ export async function POST(request: Request) {
           summary: found.workspace.summary,
           memory,
           onStatus: (text) => send({ type: "status", text }),
+          signal: request.signal,
         });
         // Read only: whatever Gemini planned anyway is dropped, never offered.
         const result =

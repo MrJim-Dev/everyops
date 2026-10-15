@@ -55,6 +55,7 @@ function focusOf(sketch: DesignSketch | undefined): SketchPage | undefined {
 function labelOf(build: DesignBuild, focus: SketchPage | undefined): string {
   if (build.stage === "fix")
     return `Fixing ${build.issues === 1 ? "one issue" : `${build.issues ?? "a few"} issues`} the check found`;
+  if (build.stage === "check") return "Checking the design against your requirements";
   if (build.stage === "finish") return "Adding sample records and arranging your Overview";
   switch (build.sketch?.writing) {
     case "records": {

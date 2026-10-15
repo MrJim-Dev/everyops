@@ -1,6 +1,6 @@
 import "server-only";
 import type { MemoryEdit, WorkspaceMemory } from "@/lib/assistant/memory";
-import { generateJson } from "./gemini";
+import { generateJsonHedged } from "./gemini";
 import { MEMORY_SYSTEM, memoryAnswer, memoryPrompt, toEdits, worthRemembering } from "./memory-prompt";
 
 /**
@@ -16,16 +16,22 @@ export async function noteMemory(input: {
 }): Promise<MemoryEdit[]> {
   const last = input.messages.at(-1);
   if (last?.role !== "user" || !worthRemembering(last.text, last.attachments?.length ?? 0)) return [];
-  const result = await generateJson(memoryAnswer, {
-    system: MEMORY_SYSTEM,
-    prompt: memoryPrompt(input),
-    task: "assistant-memory",
-    thinking: "LOW",
-    timeoutMs: 20_000,
-    maxOutputTokens: 1200,
-    maxStringChars: 600,
-    signal: input.signal,
-  });
+  // It answers in 2–3 s from a small prompt, so a call silent for 5 s has stalled: a twin costs next to nothing and
+  // keeps the note from missing the answer it rides along with.
+  const result = await generateJsonHedged(
+    memoryAnswer,
+    {
+      system: MEMORY_SYSTEM,
+      prompt: memoryPrompt(input),
+      task: "assistant-memory",
+      thinking: "LOW",
+      timeoutMs: 20_000,
+      maxOutputTokens: 1200,
+      maxStringChars: 600,
+      signal: input.signal,
+    },
+    { hedgeMs: 5_000, afterSilence: true, attempts: 2 },
+  );
   if (!result.ok) {
     console.warn(JSON.stringify({ event: "assistant_memory_failed", message: result.error }));
     return [];

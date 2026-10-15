@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { ChatComposer } from "./chat-composer";
 import { ChatThread } from "./chat-thread";
 import { ThreadList } from "./reply-extras";
+import { ThingsToFix } from "./things-to-fix";
 import { useAssistantChat } from "./use-assistant-chat";
 
 /**
@@ -104,11 +105,18 @@ export function AssistantPanel({ onClose, className }: { onClose: () => void; cl
               <p className="text-[14px] font-medium">Ask anything about {ws.name}</p>
               <p className="text-[13px] text-muted-foreground">
                 {manager
-                  ? "Get answers from your data, or ask for any change: add, edit or delete records, pages, fields and cards, write pages, or manage the team. You approve every change, and every change can be undone."
+                  ? "Get answers from your data, or ask for any change: add, edit or delete records, pages, fields and cards, write pages, or manage the team. Every change is saved to History and can be undone."
                   : editor
-                    ? "Get answers from your data, or ask to add, update or delete records. You approve every change, and every change can be undone."
+                    ? "Get answers from your data, or ask to add, update or delete records. Every change is saved to History and can be undone."
                     : "Get answers from your data. Owners and admins can make changes."}
               </p>
+              {editor ? (
+                <ThingsToFix
+                  workspaceId={ws.id}
+                  workspaceName={ws.name}
+                  onFix={(request) => chat.send(request)}
+                />
+              ) : null}
             </div>
           }
         />

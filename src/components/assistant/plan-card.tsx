@@ -192,6 +192,26 @@ export function PlanCard({
         </span>
       </div>
 
+      {plan.coverage?.length ? (
+        <details className="border-b px-3.5 py-2.5 text-[12px]" open>
+          <summary className="cursor-pointer font-medium text-foreground/85 outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+            Request checked · {plan.coverage.length}{" "}
+            {plan.coverage.length === 1 ? "requirement" : "requirements"}
+          </summary>
+          <ul className="mt-2 space-y-2">
+            {plan.coverage.map((item) => (
+              <li key={item.request} className="flex gap-2">
+                <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden="true" />
+                <span className="min-w-0">
+                  <span className="block text-foreground/85">{item.request}</span>
+                  <span className="block text-muted-foreground">{item.detail}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
       {plan.facts.length ? (
         <dl className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] border-b">
           {plan.facts.map((f) => (

@@ -56,6 +56,7 @@ export async function POST(request: Request) {
               summary: result.summary,
               data: result.data,
               preview: blueprintPreview(result.data),
+              coverage: result.coverage,
             },
           });
         else send({ type: "error", message: result.message });
