@@ -1223,6 +1223,9 @@ ${input.messages
   // Two rounds of fixes: a big multi-part request can slip in a new place after the first one.
   let repairs = 0;
   let restarted = false;
+  // Requirements the last plan was rejected for, when the review was its only problem. Missed again after a repair,
+  // the planner can't add them (dummy pictures it has no way to make); another round would only fail the same way.
+  let missedBefore: string[] = [];
   for (let attempt = 0; attempt < 4; attempt++) {
     status(
       attempt === 0
@@ -1381,6 +1384,7 @@ ${input.messages
         errors.push(...strandedOptions(bp, next, optionUsage(bp, rehearsal?.data.records ?? staged.records)));
     }
     let coverage: ChangePlan["coverage"];
+    let missed: string[] = [];
     if (!errors.length && (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)) {
       status("Checking each part of your request");
       const checked = await reviewCoverage({
@@ -1421,6 +1425,7 @@ ${input.messages
           ...withNav,
         };
       errors.push(...checked.errors.map((e) => `Request coverage: ${e}`));
+      missed = checked.missing;
       coverage = checked.covered;
     }
     if (!errors.length && (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)) {
@@ -1478,6 +1483,20 @@ ${input.messages
         ops: JSON.stringify(a.plan.ops).slice(0, 3000),
       }),
     );
+    const reviewOnly = missed.length > 0 && errors.every((e) => e.startsWith("Request coverage: "));
+    if (reviewOnly && missedBefore.length)
+      return {
+        ok: true,
+        kind: "clarify",
+        reply: `I couldn't fit every part of this into a change I can make here:\n\n${missed
+          .map((m) => `- ${m}`)
+          .join(
+            "\n",
+          )}\n\nNothing has changed. Tell me how you'd like to handle that part (for example, attach the pictures), or ask again without it.`,
+        suggestions: [],
+        ...withNav,
+      };
+    missedBefore = reviewOnly ? missed : [];
     if (repairs === 2) break;
     repairs++;
     if (errors.some((e) => e.endsWith("needs options")))

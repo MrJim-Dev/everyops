@@ -7,6 +7,7 @@ import {
   checkedCoverage,
   coverageAnswer,
   coverageEvidence,
+  trimCoverage,
 } from "./coverage-prompt";
 import { generateJsonHedged } from "./gemini";
 
@@ -35,6 +36,7 @@ export async function reviewCoverage(input: {
       timeoutMs: 30_000,
       maxOutputTokens: 2500,
       maxStringChars: 1000,
+      repair: trimCoverage,
       signal: input.signal,
     },
     { hedgeMs: 12_000, afterSilence: true, attempts: 2 },
