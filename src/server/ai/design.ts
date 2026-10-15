@@ -24,6 +24,7 @@ import { samplesThisYear } from "@/lib/catalog/shift";
 import { computeAll } from "@/lib/engine/compute";
 import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
 import { impliedRules } from "@/lib/engine/implied-rules";
+import { templateOverview } from "@/lib/engine/overview-template";
 import { isImagePath } from "@/lib/engine/records";
 import { repairRules } from "@/lib/engine/rule-repair";
 import { withCustomSite } from "@/lib/public/custom-site";
@@ -438,6 +439,9 @@ export function tidy(bp: Blueprint): Blueprint {
   // didn't write the automation.
   const empty = { ...bp, entities: [], rules: [] };
   bp.rules.push(...impliedRules(empty, bp).map((x) => x.rule));
+  // The Overview follows the court-bookings template: comparison stats, revenue by day, today's schedule, what
+  // needs payment and busy hours, built from the business's own bookings or sales.
+  templateOverview(bp);
   // A dashboard of only numbers gets the charts and lists an owner looks at first.
   const board = dashboardSystem(bp);
   if (board) {

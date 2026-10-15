@@ -10,8 +10,9 @@
  * reduced motion keeps the fades without the movement.
  */
 import type { Blueprint, BookingLayout, DataRecord, FormView, HtmlPageView } from "@/lib/blueprint/types";
+import { customBookingHtml } from "./booking-page";
 import { type ResolvedBlock, resolveBlocks } from "./resolve";
-import { mainForm } from "./site-template";
+import { bookLabel, defaultCopy, mainForm } from "./site-template";
 
 /** Stands in for the workspace slug in links the page is created with; filled in wherever the page is shown. */
 export const SITE_TOKEN = "__everyops_site__";
@@ -270,9 +271,11 @@ ${parts.join("\n")}
 
 /**
  * Setup's website for a business whose customers book on their own: the standard site's sections become one custom
- * HTML page (same id and place) whose buttons open the booking form, and each public booking form gets the calendar
- * that suits the business, so sites don't all look alike. Owners change either later (Edit HTML, the Calendar
- * buttons on the form). Runs once the sample records exist, so the page shows real courts, rates and FAQs.
+ * HTML page (same id and place), and a booking business also gets a custom HTML booking page that its landing page's
+ * buttons open. The booking form stays the place bookings are checked and saved (and the team's in-app form), but
+ * visitors never see it: its address redirects to the custom page (FormView.page). Each public booking form also
+ * gets the calendar that suits the business. Owners change any of it later (Edit HTML, the Calendar buttons on the
+ * form). Runs once the sample records exist, so the pages show real courts, rates and FAQs.
  */
 export function withCustomSite(
   bp: Blueprint,
@@ -287,7 +290,10 @@ export function withCustomSite(
     }
   const at = bp.views.findIndex((v) => v.type === "landing" && v.layout === "standard");
   const landing = bp.views[at];
-  if (!landing || landing.type !== "landing" || !mainForm(bp)) return bp;
+  const form = mainForm(bp);
+  if (!form) return bp;
+  if (bp.entities.find((e) => e.id === form.entityId)?.booking) addBookingPage(bp, form, name, landing?.id);
+  if (!landing || landing.type !== "landing") return bp;
   const blocks = resolveBlocks(bp, records, {}, SITE_TOKEN, landing, now);
   const page: HtmlPageView = {
     id: landing.id,
@@ -299,6 +305,39 @@ export function withCustomSite(
   };
   bp.views[at] = page;
   return bp;
+}
+
+/**
+ * Adds the custom HTML booking page for a public booking form, beside the landing page in the sidebar (or the form
+ * when there's no landing), and points the form at it.
+ */
+function addBookingPage(bp: Blueprint, form: FormView, name: string, landingId?: string) {
+  if (form.page && bp.views.some((v) => v.id === form.page)) return;
+  let id = "book_online";
+  for (let n = 2; bp.views.some((v) => v.id === id); n++) id = `book_online_${n}`;
+  const heading = bookLabel(bp, form.id);
+  const page: HtmlPageView = {
+    id,
+    entityId: "",
+    name: "Booking page",
+    type: "html",
+    public: true,
+    html: customBookingHtml({
+      name,
+      formId: form.id,
+      homeHref: `/s/${SITE_TOKEN}`,
+      heading,
+      intro: form.intro ?? defaultCopy(bp, name).intro,
+      palette: paletteFor(name),
+    }),
+  };
+  bp.views.push(page);
+  const anchor = landingId ?? form.id;
+  const system =
+    bp.systems.find((s) => s.viewIds.includes(anchor)) ?? bp.systems.find((s) => s.viewIds.includes(form.id));
+  if (system) system.viewIds.splice(system.viewIds.indexOf(anchor) + 1, 0, id);
+  else bp.systems.at(-1)?.viewIds.push(id);
+  form.page = id;
 }
 
 /**

@@ -175,10 +175,46 @@ describe("setup's Overview layout", () => {
     });
     expect(view.sections.map((s) => s.title)).toEqual(["Today"]);
     expect(view.sections[0].items.map((i) => i.props.title ?? i.component)).toEqual(["Bookings", "widget"]);
+    // The court template's Overview already has its cards: they stay what the page opens on, the layout joins as a tab.
     const next = placeOverview(blueprint, view);
     const overview = next.systems.find((s) => s.id === "overview");
-    expect(overview?.viewIds[0]).toBe(OVERVIEW_VIEW_ID);
+    expect(overview?.viewIds.at(-1)).toBe(OVERVIEW_VIEW_ID);
+    expect(next.views.find((v) => v.id === OVERVIEW_VIEW_ID)?.name).toBe("Insights");
     expect(overview?.widgetIds).toEqual(blueprint.systems.find((s) => s.id === "overview")?.widgetIds);
     expect(validateBlueprint(next)).toEqual([]);
+  });
+});
+
+describe("public layouts with PR 59's booking pages", () => {
+  it("sends visitors to a form's own booking page: buttons link there and the form part becomes a button", () => {
+    const { blueprint, records } = sample();
+    const form = blueprint.views.find((v) => v.id === "new_booking");
+    if (form?.type !== "form") throw new Error("no form");
+    form.public = true;
+    form.page = "book_online";
+    blueprint.views.push({
+      id: "book_online",
+      name: "Book online",
+      entityId: "",
+      type: "html",
+      public: true,
+      html: "<p>Book</p>",
+    });
+    withLayout(blueprint, [
+      {
+        columns: 2,
+        items: [
+          { component: "button", props: { label: "Book a court", viewId: "new_booking" } },
+          { component: "form", props: { viewId: "new_booking", title: "Reserve" } },
+        ],
+      },
+    ]);
+    expect(validateBlueprint(blueprint)).toEqual([]);
+    const items =
+      resolvePage(blueprint, records, {}, "court-house", "stats", now)?.layout?.sections[0].items ?? [];
+    expect(items.map((i) => [i.component, i.data.href])).toEqual([
+      ["button", "/s/court-house/book_online"],
+      ["button", "/s/court-house/book_online"],
+    ]);
   });
 });

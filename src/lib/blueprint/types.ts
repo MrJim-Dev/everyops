@@ -180,6 +180,11 @@ export type FormView = ViewBase & {
   blocks?: Block[];
   /** Things people add with a quantity (paddle rental, balls): each becomes a line item on the new record. */
   extras?: FormExtras;
+  /**
+   * A public custom HTML page that is this form's face to visitors (a custom booking page). The form still checks
+   * and saves what that page sends; its own address redirects to the page, and the site's buttons open the page.
+   */
+  page?: string;
 };
 
 /**

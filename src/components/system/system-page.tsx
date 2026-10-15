@@ -46,7 +46,7 @@ export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: s
     ? system.viewIds.map((id) => getView(ws.blueprint, id)).filter((v): v is View => !!v)
     : [];
   // Dashboard cards on a page that also has tabs used to be hidden behind them. Cards no layout tab of the page shows
-  // get a Dashboard tab of their own after the others, so nothing on a page is ever out of reach.
+  // get a Dashboard tab of their own, first, so nothing on a page is ever out of reach.
   const placed = new Set(
     views.flatMap((v) =>
       v.type === "layout"
@@ -57,7 +57,8 @@ export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: s
     ),
   );
   const loose = system && views.length ? system.widgetIds.filter((id) => !placed.has(id)) : [];
-  const onDashboard = wanted === DASHBOARD_TAB && loose.length > 0;
+  // The page's own cards come first and open by default, so adding a layout tab never changes what the page opens on.
+  const onDashboard = loose.length > 0 && (wanted === DASHBOARD_TAB || !wanted);
   // The tab shown last, so a plan that swaps it for another layout keeps showing that place.
   const last = useRef<{ id: string; index: number } | null>(null);
   const swapped = wanted && last.current?.id === wanted ? views[last.current.index] : undefined;
@@ -110,10 +111,10 @@ export function SystemPage({ systemId, viewId }: { systemId?: string; viewId?: s
           activeId={onDashboard ? DASHBOARD_TAB : active?.id}
           inPlace
           items={[
-            ...views.map((view) => ({ id: view.id, href: `${pagePath}/${view.id}`, label: view.name })),
             ...(loose.length
               ? [{ id: DASHBOARD_TAB, href: `${pagePath}/${DASHBOARD_TAB}`, label: "Dashboard" }]
               : []),
+            ...views.map((view) => ({ id: view.id, href: `${pagePath}/${view.id}`, label: view.name })),
           ]}
         />
       ) : (

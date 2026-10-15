@@ -17,7 +17,16 @@ import { publicProblems } from "@/lib/components/public-safety";
 import { componentDef } from "@/lib/components/registry";
 import { applyFilter, sortRecords } from "@/lib/engine/query";
 import { isImagePath } from "@/lib/engine/records";
-import { type Cell, formatCell, type PageDocs, type PublicItem, resolveBlocks, sitePath } from "./resolve";
+import {
+  type Cell,
+  formatCell,
+  formPageOf,
+  type PageDocs,
+  type PublicItem,
+  resolveBlocks,
+  sitePath,
+  visitorPageOf,
+} from "./resolve";
 
 /**
  * A public layout page as a visitor receives it: every part already worked out on the server. Numbers and charts
@@ -92,7 +101,8 @@ export function resolveLayout(
       case "separator":
         return out(p);
       case "button": {
-        return out({ label: p.label, variant: p.variant, href: sitePath(slug, p.viewId) });
+        // A form served through its own custom booking page opens that page, like every other button on the site.
+        return out({ label: p.label, variant: p.variant, href: sitePath(slug, visitorPageOf(bp, p.viewId)) });
       }
       case "accordion": {
         if (!p.entityId) return out({ title: p.title, items: p.items ?? [] });
@@ -225,6 +235,21 @@ export function resolveLayout(
         });
       }
       case "form": {
+        // A form with its own custom booking page (FormView.page) is booked there, never through the standard form:
+        // the layout shows a button to that page instead.
+        const target = bp.views.find((v) => v.id === p.viewId);
+        const own = formPageOf(bp, target);
+        if (own)
+          return {
+            id: item.id,
+            component: "button",
+            ...(item.span ? { span: item.span } : {}),
+            data: {
+              label: p.title ?? target?.name ?? "Book now",
+              variant: "default",
+              href: sitePath(slug, own),
+            },
+          };
         const page: LandingView = {
           id: view.id,
           entityId: "",

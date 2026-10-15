@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 export function UserMessage({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex animate-rise justify-end">
-      <p className="max-w-[80%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[14px] leading-relaxed">
+      <p className="max-w-[80%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[14px] leading-relaxed whitespace-pre-line">
         {children}
       </p>
     </div>

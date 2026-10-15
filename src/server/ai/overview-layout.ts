@@ -23,8 +23,11 @@ export function placeOverview(bp: Blueprint, view: LayoutView): Blueprint {
   const home =
     next.systems.find((s) => !s.viewIds.length && /overview|dashboard|home/i.test(`${s.id} ${s.name}`)) ??
     next.systems.find((s) => !s.viewIds.length && s.widgetIds.length);
-  next.views.push(view);
-  if (home) home.viewIds = [view.id, ...home.viewIds];
+  // An Overview that already has its cards (the template Overview) keeps them as the page it opens on; the layout
+  // joins as an Insights tab after them. Without cards, the layout is the Overview.
+  const keepsCards = !!home?.widgetIds.length;
+  next.views.push(keepsCards ? { ...view, name: "Insights" } : view);
+  if (home) home.viewIds = keepsCards ? [...home.viewIds, view.id] : [view.id, ...home.viewIds];
   else
     next.systems.unshift({
       id: next.systems.some((s) => s.id === "overview") ? "overview_page" : "overview",
