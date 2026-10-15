@@ -1,4 +1,4 @@
-import { publicProblems } from "@/lib/components/public-safety";
+import { publicProblems, sharedTableProblems } from "@/lib/components/public-safety";
 import { componentDef, layoutItems, type Ref } from "@/lib/components/registry";
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
@@ -98,6 +98,8 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
       case "table":
         missing(view.fieldIds);
         if (view.filter) checkExpr(bp, entity, view.filter, path, errors);
+        if (view.publicData)
+          for (const message of sharedTableProblems(bp, view)) errors.push({ path, message });
         if (view.groupByFieldId) {
           const field = entity.fields.find((f) => f.id === view.groupByFieldId);
           if (!field || !GROUP_KINDS.has(displayKind(bp, field)))

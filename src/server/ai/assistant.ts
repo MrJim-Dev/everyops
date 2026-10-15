@@ -1149,7 +1149,9 @@ export async function assistantTurn(input: {
                             .join(
                               "",
                             )}${v.fieldIds?.length ? `, fieldIds: ${JSON.stringify(v.fieldIds)}` : ""}`
-                        : "";
+                        : v.type === "table" && v.publicData
+                          ? ", shared as public data for public html pages"
+                          : "";
               return `${v.name} (${v.id}, ${v.type}${v.entityId ? ` of ${v.entityId}` : ""}${extra})`;
             }),
             ...(s.widgetIds.length ? [`${s.widgetIds.length} dashboard widgets`] : []),

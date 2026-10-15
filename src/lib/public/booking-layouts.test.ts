@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DataRecord, FormView } from "@/lib/blueprint/types";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { rentalSample } from "@/lib/catalog/rental-operations";
+import { itemsOf } from "./bindings";
 import { customBookingHtml } from "./booking-page";
 import {
   customSiteHtml,
@@ -126,8 +127,10 @@ describe("setup's website", () => {
     expect(html).not.toContain(`href="/s/${SITE_TOKEN}/${form.id}"`);
     expect(html).toContain("Court House &lt;PH&gt;");
     expect(withSiteLinks(html, "court-house")).toContain(`href="/s/court-house/${book}"`);
-    // The courts in the data, with the booking calendar that suits four of them.
-    expect(html).toContain("Court 1");
+    // The courts in the data (drawn by the page's bindings from its own sections), with the calendar that suits four.
+    const shown = resolvePage(blueprint, records, {}, "court-house", "home", NOW);
+    const courts = itemsOf({ ok: true, type: "landing", blocks: shown?.live }, "offer");
+    expect(courts.ok && courts.items.map((i) => i.fields["@title"])).toContain("Court 1");
     expect(form.bookingLayout).toBe("grid");
 
     // The booking page sits beside the landing page, sends to the form, and the site's Book button opens it.
@@ -228,24 +231,49 @@ describe("setup's website shows live data", () => {
 
   it("draws its courts from the records each time it's shown, not from when setup ran", () => {
     const { blueprint, records, view } = site();
-    expect(view.html).toContain("<!--everyops:live offer-->");
+    // The cards are a template bound to the page's own sections, not copies of the records.
+    expect(view.html).toContain('data-everyops-each="page" data-everyops-block="offer"');
+    expect(view.html).not.toContain("<!--everyops:live");
+    expect(view.html).not.toMatch(/>Court 1</);
     const renamed = records.map((r) =>
       r === court(records) ? { ...r, data: { ...r.data, name: "Center Court" } } : r,
     );
-    const html = htmlPage(blueprint, renamed, {}, view).html ?? "";
-    expect(html).toContain("Center Court");
-    expect(html).not.toMatch(/>Court 1</);
+    const page = htmlPage(blueprint, renamed, {}, view);
+    const offer = itemsOf({ ok: true, type: "landing", blocks: page.live }, "offer");
+    expect(offer.ok && offer.items.map((i) => i.fields["@title"])).toContain("Center Court");
+    expect(offer.ok && offer.items.map((i) => i.fields["@title"])).not.toContain("Court 1");
   });
 
-  it("keeps the owner's own words around the live parts", () => {
+  it("keeps the owner's words and restyled cards while the data changes", () => {
     const { blueprint, records, view } = site();
-    const edited = (view.html ?? "").replace(/<h1([^>]*)>[^<]*<\/h1>/, "<h1$1>Our own headline</h1>");
+    const edited = (view.html ?? "")
+      .replace(/<h1([^>]*)>[^<]*<\/h1>/, "<h1$1>Our own headline</h1>")
+      .replace('<article class="card reveal"><img', '<article class="card reveal tilt-owner"><img');
     const renamed = records.map((r) =>
       r === court(records) ? { ...r, data: { ...r.data, name: "Center Court" } } : r,
     );
-    const html = htmlPage(blueprint, renamed, { home: { body: edited } }, view).html ?? "";
+    const page = htmlPage(blueprint, renamed, { home: { body: edited } }, view);
+    const html = page.html ?? "";
     expect(html).toContain("Our own headline");
-    expect(html).toContain("Center Court");
+    expect(html).toContain("tilt-owner");
+    const offer = itemsOf({ ok: true, type: "landing", blocks: page.live }, "offer");
+    expect(offer.ok && offer.items.map((i) => i.fields["@title"])).toContain("Center Court");
+  });
+
+  it("gives the page the business's details for site.* values", () => {
+    const { blueprint, records, view } = site();
+    const page = htmlPage(blueprint, records, {}, view, "Court House");
+    expect(page.site?.name).toBeTruthy();
+    expect(page.site?.pages[0]?.id).toBe("home");
+    expect(view.html).toContain('data-everyops-text="site.name"');
+  });
+
+  it("still draws the live parts of a website made before bindings", () => {
+    const { blueprint, records, view } = site();
+    const marked = "<main><!--everyops:live offer--><p>Old Court</p><!--/everyops:live offer--></main>";
+    const html = htmlPage(blueprint, records, {}, { ...view, html: marked }).html ?? "";
+    expect(html).not.toContain("Old Court");
+    expect(html).toContain("Court 1");
   });
 
   it("brings live courts to a website made before live parts, and leaves an owner's own page alone", () => {

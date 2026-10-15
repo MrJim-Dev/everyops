@@ -103,6 +103,11 @@ export type TableView = ViewBase & {
   groupByFieldId?: string;
   /** A totals row for number and money columns (and subtotals on each group). */
   totals?: boolean;
+  /**
+   * Shared as public data: public custom HTML pages may read this view's rows (its filter and sort, only fields that
+   * don't identify people or show the team's costs) through EveryOps.data. Never on record types about people.
+   */
+  publicData?: boolean;
 };
 export type KanbanView = ViewBase & {
   type: "kanban";

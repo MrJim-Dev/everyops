@@ -74,6 +74,7 @@
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "happy-dom": "^21.0.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5",

@@ -15,10 +15,13 @@ export function PublicSiteView({
   site,
   page,
   preview,
+  recordId,
 }: {
   site: PublicSite;
   page: PublicPageData;
   preview?: boolean;
+  /** A custom HTML page's detail address (/s/site/page/RECORD): the record its bindings show. */
+  recordId?: string;
 }) {
   // A custom HTML page is the whole page: the owner's design, without the site's header and footer.
   if (page.type === "html")
@@ -28,6 +31,10 @@ export function PublicSiteView({
         slug={site.slug}
         forms={page.forms ?? []}
         preview={preview}
+        live={page.live}
+        site={page.site}
+        pageId={page.id}
+        recordId={recordId}
         title={page.name}
         className={cn("w-full", preview ? "h-full min-h-[480px]" : "h-dvh")}
       />

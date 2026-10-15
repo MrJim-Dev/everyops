@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef } from "react";
 import { clip, kindOfTag } from "@/lib/assistant/picked";
 import { useScreen } from "@/lib/assistant/screen-store";
+import { itemsOf, type SiteDetails, sitePageItems, siteValues } from "@/lib/public/bindings";
 import { withSiteLinks } from "@/lib/public/custom-site";
 import { formValues, frameDocument, HTML_PAGE_SANDBOX, type RawFormValues } from "@/lib/public/html-page";
-import type { PublicForm } from "@/lib/public/resolve";
+import type { PublicForm, ResolvedBlock } from "@/lib/public/resolve";
 import { cn } from "@/lib/utils";
 
 /** Keeps what a page sends to plain strings (or lists of them), and not too many or too long. */
@@ -54,6 +55,10 @@ export function HtmlPageFrame({
   preview,
   pickable,
   readData,
+  live,
+  site,
+  pageId,
+  recordId,
   title,
   className,
 }: {
@@ -64,14 +69,21 @@ export function HtmlPageFrame({
   /** In the workspace: parts of the page can be picked for the assistant (Pick from page). */
   pickable?: boolean;
   readData?: (viewId: string) => unknown;
+  /** A website setup made: its own sections, answered locally as the "page" source. */
+  live?: ResolvedBlock[];
+  /** The business and its site, for site.* values and the site.pages menu. */
+  site?: SiteDetails;
+  /** This page's id (the menu marks it current) and the record id in its address (/s/site/page/RECORD). */
+  pageId?: string;
+  recordId?: string;
   title: string;
   className?: string;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   // Links the page was created with ("/s/<site>/book") point at this workspace's real pages.
   const doc = useMemo(() => frameDocument(withSiteLinks(html, slug)), [html, slug]);
-  const latest = useRef({ forms, preview, slug, readData, title, pickable });
-  latest.current = { forms, preview, slug, readData, title, pickable };
+  const latest = useRef({ forms, preview, slug, readData, title, pickable, live, site, pageId, recordId });
+  latest.current = { forms, preview, slug, readData, title, pickable, live, site, pageId, recordId };
   const picking = useScreen((s) => !!pickable && s.picking);
   const tellPicking = () => frame.current?.contentWindow?.postMessage({ everyops: "pick", on: picking }, "*");
   useEffect(tellPicking, [picking]);
@@ -103,15 +115,50 @@ export function HtmlPageFrame({
       }
       if ((data?.everyops !== "submit" && data?.everyops !== "call") || typeof data.id !== "number") return;
       const reply = (result: unknown) => target.postMessage({ everyops: "result", id: data.id, result }, "*");
-      const { forms, preview, slug, readData } = latest.current;
-      if (data.everyops === "call" && e.data.method === "data") {
-        const viewId = str(data.form);
-        if (!viewId) return reply({ ok: false, message: "Choose a data source." });
+      const { forms, preview, slug, readData, live, site, pageId, recordId } = latest.current;
+      // A data source's current results: the page's own sections, what the workspace has in hand, else the server.
+      const read = async (viewId: string): Promise<unknown> => {
+        if (!viewId) return { ok: false, message: "Choose a data source." };
+        if (viewId === "page")
+          return live
+            ? { ok: true, viewId: "page", name: latest.current.title, type: "landing", blocks: live }
+            : { ok: false, message: "This page has no sections of its own; name a data source." };
         const local = readData?.(viewId) as { ok?: boolean } | undefined;
-        if (local?.ok) return reply(local);
-        return reply(
-          await getJson(`/api/public/${encodeURIComponent(slug)}/${encodeURIComponent(viewId)}/data`),
-        );
+        if (local?.ok) return local;
+        return getJson(`/api/public/${encodeURIComponent(slug)}/${encodeURIComponent(viewId)}/data`);
+      };
+      if (data.everyops === "call") {
+        const { method, args } = e.data as { method?: unknown; args?: Record<string, unknown> };
+        const a = args && typeof args === "object" ? args : {};
+        const source = str(data.form);
+        switch (method) {
+          case "data":
+            return reply(await read(source));
+          case "site":
+            return reply(
+              site
+                ? { ok: true, site: siteValues(site, slug) }
+                : { ok: false, message: "This page isn't part of a site." },
+            );
+          case "route": {
+            const query: Record<string, string> = {};
+            for (const [k, v] of new URLSearchParams(window.location.search).entries())
+              if (Object.keys(query).length < 30) query[k.slice(0, 60)] = v.slice(0, 300);
+            return reply({ ok: true, page: pageId ?? "", id: recordId ?? "", query });
+          }
+          case "items":
+            if (source === "site.pages")
+              return reply(
+                site ? sitePageItems(site, slug, pageId) : { ok: false, message: "No site pages." },
+              );
+            return reply(itemsOf(await read(source), str(a.block)));
+          case "record": {
+            const list = itemsOf(await read(source));
+            if (!list.ok) return reply(list);
+            const item = list.items.find((x) => x.id === str(a.id));
+            return reply(item ? { ok: true, item } : { ok: false, missing: true, message: "Not found." });
+          }
+        }
       }
       const form = forms.find((f) => f.viewId === data.form);
       if (!form) return reply({ ok: false, message: "This form isn't taking submissions." });

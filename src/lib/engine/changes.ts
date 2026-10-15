@@ -496,6 +496,11 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
           settings.public !== undefined
         )
           view.public = settings.public;
+        // A table "made public" is shared as data for public pages; it never becomes a page of the site.
+        else if (view.type === "table" && settings.public !== undefined) {
+          if (settings.public) view.publicData = true;
+          else delete view.publicData;
+        }
         if (fieldIds) setViewFields(view, findEntity(next, view.entityId), fieldIds);
         break;
       }

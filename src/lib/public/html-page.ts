@@ -67,6 +67,73 @@ export function htmlDocKeys(bp: Blueprint): string[] {
   return keys;
 }
 
+/**
+ * Data bindings, run inside the sandboxed page after the bridge (see src/lib/public/bindings.ts for the values):
+ * <template data-everyops-each="SOURCE" data-everyops-block="PART" data-everyops-limit="6" data-everyops-skip="@title="
+ * data-everyops-refresh="30"> repeats its content for each row; data-field / data-everyops-text set text,
+ * data-everyops-if / -unless keep an element only when a value is (or isn't) there or equal ("@kind=hours"), {key} in
+ * an attribute is replaced (data-src and data-href become src and href), and [data-everyops-state="loading|empty|
+ * error"] beside a template shows while it is in that state. data-everyops-record="SOURCE" fills one row (the one in the
+ * page's address by default). Outside a row, only site.* and route.* values are read. Values only ever become text or
+ * attribute values, never HTML, and URLs that would run script are dropped.
+ */
+const BINDINGS = `var ctx={site:{},route:{id:"",page:"",query:{}}},lists=0,siteP,routeP,E=window.EveryOps;
+E.site=function(){return siteP||(siteP=call("site","site"));};
+E.route=function(){return routeP||(routeP=call("route","route"));};
+E.items=function(source,block){return call("items",source,{block:block||""});};
+E.record=function(source,id){return (id?Promise.resolve(String(id)):E.route().then(function(r){return r&&r.ok?r.id:"";})).then(function(at){if(!at)return {ok:false,missing:true,message:"No record was chosen."};return call("record",source,{id:at});});};
+E.watch=function(source,fn,seconds){var stop=false,ms=Math.max(15,Number(seconds)||30)*1000;function run(){if(!stop&&!document.hidden)E.data(source).then(function(r){if(!stop)fn(r);});}function vis(){if(!document.hidden)run();}run();var t=setInterval(run,ms);document.addEventListener("visibilitychange",vis);return function(){stop=true;clearInterval(t);document.removeEventListener("visibilitychange",vis);};};
+function get(key,item){key=String(key||"").trim();var v;
+if(key.indexOf("site.")===0)v=ctx.site[key.slice(5)];
+else if(key.indexOf("route.query.")===0)v=(ctx.route.query||{})[key.slice(12)];
+else if(key.indexOf("route.")===0){v=ctx.route[key.slice(6)];if(typeof v==="object")v="";}
+else{var f=item&&item.fields||{};v=f[key];if(v==null)v=f[key.toLowerCase()];}
+return v==null?"":String(v);}
+function global(key){key=String(key||"").trim();return key.indexOf("site.")===0||key.indexOf("route.")===0;}
+function test(expr,item){var i=expr.indexOf("!=");if(i>0)return get(expr.slice(0,i),item)!==expr.slice(i+2).trim();i=expr.indexOf("=");if(i>0)return get(expr.slice(0,i),item)===expr.slice(i+1).trim();return get(expr,item)!=="";}
+function fill(text,item){return String(text).replace(/\\{([^{}]+)\\}/g,function(w,k){return get(k,item);});}
+var URLISH={href:1,src:1,action:1,formaction:1,poster:1};
+function setAttr(el,name,value){if(URLISH[name]&&/^\\s*(javascript|vbscript|data:text)/i.test(value))value="#";el.setAttribute(name,value);}
+function applyEl(el,item){var own=item!==undefined,x;
+x=el.getAttribute("data-everyops-if");if(x!=null&&(own||global(x))&&!test(x,item)){el.remove();return;}
+x=el.getAttribute("data-everyops-unless");if(x!=null&&(own||global(x))&&test(x,item)){el.remove();return;}
+x=el.getAttribute("data-field");if(x==null)x=el.getAttribute("data-everyops-text");
+if(x!=null&&(own||global(x))){var v=get(x,item);if(v||own)el.textContent=v;}
+if(!own&&!el.hasAttribute("data-everyops-bind"))return;
+var attrs=[].slice.call(el.attributes);for(var i=0;i<attrs.length;i++){var a=attrs[i];
+if(a.value.indexOf("{")<0||a.name==="data-field"||a.name.indexOf("data-everyops")===0)continue;
+var name=a.name==="data-src"?"src":a.name==="data-href"?"href":a.name;setAttr(el,name,fill(a.value,item));}}
+function fillTree(root,item){[].slice.call(root.querySelectorAll("*")).forEach(function(el){if(el.tagName!=="TEMPLATE")applyEl(el,item);});
+[].slice.call(root.querySelectorAll("template[data-everyops-each]")).forEach(function(t){var s=t.getAttribute("data-everyops-each")||"";if(s.charAt(0)!=="@")return;var sub=item&&item[s.slice(1)];renderItems(t,{ok:true,items:Array.isArray(sub)?sub:[]});});}
+function state(host,s,msg){if(!host)return;host.setAttribute("data-everyops-status",s);[].forEach.call(host.children,function(el){var want=el.getAttribute("data-everyops-state");if(want==null)return;el.hidden=want!==s;if(s==="error"&&want==="error"&&msg&&!el.textContent.trim())el.textContent=msg;});
+var box=host.closest("[data-everyops-hide-empty]");if(box)box.hidden=s==="empty"||s==="error";}
+function renderItems(tpl,r){var host=tpl.parentNode;if(!host)return;var key=tpl.__eo||(tpl.__eo="l"+(++lists));
+[].slice.call(host.querySelectorAll('[data-everyops-item="'+key+'"]')).forEach(function(el){el.remove();});
+if(!r||!r.ok){state(host,"error",r&&r.message);return;}
+var skip=tpl.getAttribute("data-everyops-skip"),limit=parseInt(tpl.getAttribute("data-everyops-limit"),10)||0,n=0;
+(r.items||[]).forEach(function(item){if(limit&&n>=limit)return;if(skip&&test(skip,item))return;n++;
+var frag=tpl.content.cloneNode(true);[].slice.call(frag.childNodes).forEach(function(node){if(node.nodeType===3&&!node.textContent.trim())node.remove();else if(node.nodeType===1)node.setAttribute("data-everyops-item",key);});
+fillTree(frag,item);host.insertBefore(frag,tpl);});
+state(host,n?"ready":"empty");}
+function renderList(tpl){var source=tpl.getAttribute("data-everyops-each")||"";if(!tpl.parentNode)return Promise.resolve();
+if(!tpl.__eo)state(tpl.parentNode,"loading");
+return E.items(source,tpl.getAttribute("data-everyops-block")||"").then(function(r){renderItems(tpl,r);if(tpl.parentNode)return scan(tpl.parentNode);});}
+function renderRecord(box){if(box.__eoHtml==null){box.__eoHtml=box.innerHTML;state(box,"loading");}
+var at=box.getAttribute("data-everyops-id");
+return E.record(box.getAttribute("data-everyops-record")||"",at?fill(at):"").then(function(r){box.innerHTML=box.__eoHtml;
+if(!r||!r.ok)return state(box,r&&r.missing?"empty":"error",r&&r.message);
+fillTree(box,r.item);state(box,"ready");});}
+function every(el,fn){var s=parseInt(el.getAttribute("data-everyops-refresh"),10);if(s>0)setInterval(function(){if(!document.hidden)fn().then(done);},Math.max(15,s)*1000);}
+function scan(root){var jobs=[];
+[].slice.call(root.querySelectorAll("template[data-everyops-each]")).forEach(function(t){if(t.__eoBound||(t.getAttribute("data-everyops-each")||"").charAt(0)==="@")return;t.__eoBound=true;jobs.push(renderList(t));every(t,function(){return renderList(t);});});
+[].slice.call(root.querySelectorAll("[data-everyops-record]")).forEach(function(b){if(b.__eoBound)return;b.__eoBound=true;jobs.push(renderRecord(b));every(b,function(){return renderRecord(b);});});
+return Promise.all(jobs);}
+function globals(){[].slice.call(document.querySelectorAll("[data-everyops-text],[data-everyops-if],[data-everyops-unless],[data-everyops-bind]")).forEach(function(el){if(!el.closest("[data-everyops-item],[data-everyops-record]"))applyEl(el);});}
+function done(){document.dispatchEvent(new CustomEvent("everyops:bound"));}
+E.bind=function(){return Promise.all([E.site(),E.route()]).then(function(r){if(r[0]&&r[0].ok)ctx.site=r[0].site||{};if(r[1]&&r[1].ok)ctx.route=r[1];globals();return scan(document);}).then(done);};
+function start(){if(document.querySelector("template[data-everyops-each],[data-everyops-record],[data-everyops-text],[data-everyops-if],[data-everyops-unless],[data-everyops-bind]"))E.bind();}
+if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",start);else start();`;
+
 /** Runs inside the sandboxed page. Kept tiny and dependency-free; it only talks to the page that embeds it. */
 const BRIDGE = `(function(){
 var waiting={},next=0,ready=false,queued=[],probe;
@@ -112,6 +179,7 @@ var text=r&&r.ok?(f.getAttribute("data-success")||"Thank you! We got it."+(r.ref
 var out=f.querySelector("[data-everyops-message]");if(!out){out=document.createElement("p");out.setAttribute("data-everyops-message","");out.setAttribute("role","status");f.appendChild(out);}out.textContent=text;
 if(r&&r.ok)f.reset();f.dispatchEvent(new CustomEvent("everyops:result",{detail:r,bubbles:true}));});},true);
 document.addEventListener("click",function(e){var a=e.target&&e.target.closest&&e.target.closest("a[href]");if(!a||a.target)return;var h=a.getAttribute("href")||"";if(!h||h.charAt(0)==="#"||/^javascript:/i.test(h))return;a.target="_top";},true);
+${BINDINGS}
 })();`;
 
 /**
