@@ -420,8 +420,9 @@ export function SetupInterview({
     setCollapsedTurn(messages.length);
   };
 
-  const reviewed = !!draft?.coverage?.length && !busy && !failure;
-  const setupItems = draft?.coverage?.length ? draft.coverage.map((item) => item.request) : plan;
+  const reviewed = !!(draft?.coverage?.length || draft?.gaps?.length) && !busy && !failure;
+  const gapItems = reviewed ? (draft?.gaps ?? []).map((item) => item.request) : [];
+  const setupItems = reviewed ? [...(draft?.coverage ?? []).map((item) => item.request), ...gapItems] : plan;
   const setupDetails = (
     <>
       <section>
@@ -447,27 +448,35 @@ export function SetupInterview({
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <h2 className="text-[13px] font-semibold">Setup checklist</h2>
             <span className="text-[11px] tabular-nums text-muted-foreground">
-              {reviewed ? setupItems.length : 0}/{setupItems.length}
+              {reviewed ? setupItems.length - gapItems.length : 0}/{setupItems.length}
             </span>
           </div>
           <ul className="space-y-3 text-[12.5px] leading-relaxed text-muted-foreground">
-            {setupItems.map((item) => (
-              <li key={item} className="flex items-start gap-2.5">
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "mt-1.5 size-1.5 shrink-0 rounded-full border",
-                    reviewed
-                      ? "border-primary/60 bg-primary/60"
-                      : "border-muted-foreground/40 bg-transparent",
-                  )}
-                />
-                <span>
-                  <span className="sr-only">{reviewed ? "Checked: " : "Pending review: "}</span>
-                  {item}
-                </span>
-              </li>
-            ))}
+            {setupItems.map((item, i) => {
+              const gap = i >= setupItems.length - gapItems.length;
+              return (
+                <li key={item} className="flex items-start gap-2.5">
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "mt-1.5 size-1.5 shrink-0 rounded-full border",
+                      reviewed && gap
+                        ? "border-amber-500/70 bg-transparent"
+                        : reviewed
+                          ? "border-primary/60 bg-primary/60"
+                          : "border-muted-foreground/40 bg-transparent",
+                    )}
+                  />
+                  <span>
+                    <span className="sr-only">
+                      {reviewed ? (gap ? "Not added yet: " : "Checked: ") : "Pending review: "}
+                    </span>
+                    {item}
+                    {gap ? <span className="ml-1.5 text-[11px] text-amber-500/90">Not added yet</span> : null}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </section>
       ) : null}
@@ -564,6 +573,23 @@ export function SetupInterview({
                       </li>
                     ))}
                   </ul>
+                  {draft.gaps?.length ? (
+                    <div className="border-t px-4 py-3 text-[12.5px]">
+                      <p className="font-medium">
+                        {draft.gaps.length === 1
+                          ? "1 thing from your plan isn't in it yet"
+                          : `${draft.gaps.length} things from your plan aren't in it yet`}
+                      </p>
+                      <ul className="mt-1.5 list-disc space-y-1 pl-4 text-muted-foreground">
+                        {draft.gaps.slice(0, 5).map((gap) => (
+                          <li key={gap.request}>{gap.request}</li>
+                        ))}
+                      </ul>
+                      <p className="mt-1.5 text-muted-foreground">
+                        Create the workspace, then ask EveryOps to add them.
+                      </p>
+                    </div>
+                  ) : null}
                   <div className="flex flex-wrap items-center gap-3 border-t px-4 py-3">
                     <Button onClick={create}>
                       <SparkleIcon data-icon="inline-start" />

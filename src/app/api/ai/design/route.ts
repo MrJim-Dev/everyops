@@ -57,6 +57,7 @@ export async function POST(request: Request) {
               data: result.data,
               preview: blueprintPreview(result.data),
               coverage: result.coverage,
+              ...(result.gaps?.length ? { gaps: result.gaps } : {}),
             },
           });
         else send({ type: "error", message: result.message });
