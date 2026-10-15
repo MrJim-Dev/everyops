@@ -11,7 +11,7 @@ import { blueprintOf, type ChangeEntry, randomToken, type Workspace } from "./wo
 export function applyPlan(
   ws: Workspace,
   plan: ChangePlan,
-  options: { by?: string; now?: Date } = {},
+  options: { by?: string; now?: Date; auto?: boolean } = {},
 ): { workspace: Workspace; entry: ChangeEntry } {
   const now = options.now ?? new Date();
   const redesign = plan.ops.length > 0;
@@ -65,6 +65,8 @@ export function applyPlan(
     toVersion: next.version,
     recordChanges: changes,
     appliedAt: now.toISOString(),
+    ...(options.by ? { appliedBy: options.by } : {}),
+    ...(options.auto ? { auto: true } : {}),
     ...(edits ? { createdRecordIds: edits.created, replacedRecords: edits.replaced } : {}),
     ...(removed.length ? { removedRecords: removed } : {}),
     ...(Object.keys(replacedDocs).length ? { replacedDocs } : {}),

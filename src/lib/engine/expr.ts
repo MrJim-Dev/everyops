@@ -237,6 +237,11 @@ export const FUNCTIONS: Record<string, Fn> = {
     const s = startOf(v);
     return s ? dateKey(s) === todayKey(ctx.now) : false;
   },
+  /** on_or_after(slot, '2026-10-20'): the record's date (Manila) is that day or later. Prices that change from a date. */
+  on_or_after: ([v, day]) => {
+    const s = startOf(v);
+    return s && typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day) ? dateKey(s) >= day : false;
+  },
   is_this_month: ([v], ctx) => {
     const s = startOf(v);
     return s ? dateKey(s).slice(0, 7) === todayKey(ctx.now).slice(0, 7) : false;
