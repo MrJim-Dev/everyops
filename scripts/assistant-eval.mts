@@ -20,7 +20,15 @@ async function call(path: string, init: RequestInit = {}) {
     headers: { "content-type": "application/json", origin: BASE, cookie, ...(init.headers ?? {}) },
   });
   const set = res.headers.getSetCookie?.() ?? [];
-  if (set.length) cookie = set.map((c) => c.split(";")[0]).join("; ");
+  // Merge by name: a response that refreshes one cookie must not drop the session cookie.
+  if (set.length) {
+    const jar = new Map(cookie ? cookie.split("; ").map((c) => [c.split("=")[0], c] as const) : []);
+    for (const c of set) {
+      const pair = c.split(";")[0];
+      jar.set(pair.split("=")[0], pair);
+    }
+    cookie = [...jar.values()].join("; ");
+  }
   return { status: res.status, text: await res.text() };
 }
 
