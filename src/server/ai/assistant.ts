@@ -1,6 +1,9 @@
 import "server-only";
 import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
+import { memoryContext, type WorkspaceMemory } from "@/lib/assistant/memory";
+import { permissionsText } from "@/lib/assistant/permissions";
+import { fieldUsage, renameInPages } from "@/lib/assistant/related";
 import {
   describeScreen,
   type Navigation,
@@ -1036,13 +1039,19 @@ export async function assistantTurn(input: {
   onStatus?: (status: string) => void;
   /** The business name, for the words of a new website. */
   workspaceName?: string;
+  /** What the workspace remembers about the business, and the owner's standing instructions. */
+  memory?: WorkspaceMemory;
+  /** The one-line description setup wrote for the workspace. */
+  summary?: string;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
-  const permissions = input.canDesign
+  const role = input.canDesign
     ? "The person can change the design and the data."
     : input.canEditRecords
       ? "The person is staff: they can change data (records) but not the design. Don't plan design changes; say an owner or admin can."
       : "The person is a viewer: answer questions only. For changes, say an owner or admin can make them.";
+  const allowed = input.memory && input.canEditRecords ? permissionsText(input.memory.permissions) : "";
+  const permissions = allowed ? `${role}\n${allowed}` : role;
   const screen = describeScreen(bp, records, input.screen, input.docs);
   const status = input.onStatus ?? (() => {});
   const where = bp.systems.find((s) => s.id === input.screen.systemId);
@@ -1075,7 +1084,14 @@ export async function assistantTurn(input: {
     messages: input.messages,
     onStatus: status,
   });
+  const about = input.memory ? memoryContext(input.memory, input.summary) : (input.summary ?? "");
+  const usage = fieldUsage(bp);
+  const written = pageExcerpts(bp, input.docs);
   const context = `Today in Manila: ${weekday}, ${today}
+
+About this business (the workspace's memory; read it first: it's what you are helping build):
+${about || "Nothing saved yet. Work it out from the workspace's pages and records."}
+
 ${permissions}${team}
 
 What the person is looking at:
@@ -1125,6 +1141,20 @@ ${bp.systems
 
 Blueprint:
 ${JSON.stringify(bp)}
+${
+  usage
+    ? `
+Where each field is used (what a change to it touches):
+${usage}`
+    : ""
+}${
+  written
+    ? `
+
+Pages with written text (they don't update themselves; a plan that makes them wrong should fix them):
+${written}`
+    : ""
+}
 
 Data (a digest: counts and totals per record type, then records on screen and small record types in full):
 ${digest}${
@@ -1282,6 +1312,9 @@ ${input.messages
     errors.push(...recordPart.errors);
     if (recordPart.ops.length && !input.canEditRecords) errors.push("This person can't change data.");
     const docOps = toDocOps(next, records, pageTexts, errors);
+    // Document and HTML pages that spell out a name this plan changes get the new name in the same plan.
+    const related = renameInPages(bp, design.ops, input.docs, docOps);
+    docOps.push(...related.docOps);
     if (docOps.length && !input.canEditRecords) errors.push("This person can't edit pages.");
     const teamOps = toTeamOps(input.team, a.plan.team, errors);
     if (teamOps.length && !input.canDesign) errors.push("Only owners and admins can change the team.");
@@ -1332,8 +1365,9 @@ ${input.messages
           title: a.plan.title || "Workspace change",
           facts: facts.slice(0, 6),
           steps: [
-            ...a.plan.steps.slice(0, Math.max(0, 10 - implied.length)),
+            ...a.plan.steps.slice(0, Math.max(0, 10 - implied.length - related.steps.length)),
             ...implied.map(({ label, detail }) => ({ kind: "add" as const, label, detail })),
+            ...related.steps,
           ],
           ops: design.ops,
           recordOps: recordPart.ops,
@@ -1652,4 +1686,42 @@ export function unbackedRuleSteps(
         `Step "${claimed.label}" changes an automation, but no operation does: add_rule with the automation's id and the complete new rule (trigger, and actions with target, fieldId and delta) replaces it.`,
       ]
     : [];
+}
+
+/**
+ * The text of document pages and the words of custom HTML pages, cut short, so the assistant knows what each page
+ * says and can fix one a change makes wrong (a renamed service, new hours, a changed price).
+ */
+export function pageExcerpts(
+  bp: Blueprint,
+  docs: Record<string, { body: string }> | undefined,
+  each = 900,
+  total = 5000,
+): string {
+  if (!docs) return "";
+  const out: string[] = [];
+  let used = 0;
+  for (const v of bp.views) {
+    if (v.type !== "document" && v.type !== "html") continue;
+    const body = docs[v.id]?.body?.trim();
+    if (!body) continue;
+    const words =
+      v.type === "html"
+        ? body
+            .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+        : body;
+    const cut = words.length > each ? `${words.slice(0, each)}…` : words;
+    if (used + cut.length > total) break;
+    used += cut.length;
+    const kind = v.type === "html" ? "custom HTML page, its words" : "document";
+    const indented = cut
+      .split("\n")
+      .map((l) => `  ${l}`)
+      .join("\n");
+    out.push(`- ${v.name} (${v.id}, ${kind}):\n${indented}`);
+  }
+  return out.join("\n");
 }

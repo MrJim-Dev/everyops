@@ -5,11 +5,14 @@ import {
   ArrowCounterClockwiseIcon,
   ArrowDownIcon,
   ArrowRightIcon,
+  BrainIcon,
 } from "@phosphor-icons/react";
+import NextLink from "next/link";
 import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MessageFiles } from "@/components/ai/composer-tools";
 import { LogoMark } from "@/components/brand/logo";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useFollowBottom } from "@/hooks/use-follow-bottom";
 import { typingMs, useTypewriter } from "@/hooks/use-typewriter";
 import { replyBlocks } from "@/lib/assistant/reply-format";
@@ -22,6 +25,22 @@ import { ActivityLog, type Link, Linked, recordName, SourceLinks } from "./reply
 import { RevertDialog } from "./revert-dialog";
 import { Thinking } from "./thinking";
 import type { AssistantChat, RevertPreview } from "./use-assistant-chat";
+
+/** What the assistant kept from this message, with a way to see or edit the workspace's memory. */
+function RememberedNote({ notes }: { notes: string[] }) {
+  const ws = useWorkspace();
+  return (
+    <div className="mt-2 flex max-w-full items-start gap-1.5 rounded-md border border-dashed border-foreground/10 px-2 py-1.5 text-[12px] text-muted-foreground">
+      <BrainIcon className="mt-px size-3.5 shrink-0 text-primary" />
+      <p className="min-w-0">
+        <span className="text-foreground/80">Remembered</span> {notes.join(" · ")}{" "}
+        <NextLink href={`${ws.basePath}/settings/assistant`} className="text-primary hover:underline">
+          Edit memory
+        </NextLink>
+      </p>
+    </div>
+  );
+}
 
 /** "**bold**" inside a line of a reply. */
 function Inline({ text, links }: { text: string; links: Link[] }) {
@@ -281,6 +300,7 @@ export function ChatThread({
                     style={fresh && !failed ? { animationDelay: `${typingMs(t.text)}ms` } : undefined}
                   >
                     {t.sources?.length ? <SourceLinks sources={t.sources} onGo={chat.go} /> : null}
+                    {t.remembered?.length ? <RememberedNote notes={t.remembered} /> : null}
                     {failed && i === turns.length - 1 && !pending ? (
                       <button
                         type="button"
@@ -305,6 +325,7 @@ export function ChatThread({
                       <PlanCard
                         plan={t.plan}
                         state={chat.planStateOf(t)}
+                        auto={t.autoApplied}
                         onApply={() => chat.apply(i, t.plan as ChangePlan)}
                         onDismiss={() => chat.dismiss(i)}
                         onUndo={() => chat.undo(i, t.changeId)}

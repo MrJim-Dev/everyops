@@ -1,6 +1,6 @@
 "use client";
 
-import { GearSixIcon, GlobeHemisphereWestIcon, UsersThreeIcon } from "@phosphor-icons/react";
+import { BrainIcon, GearSixIcon, GlobeHemisphereWestIcon, UsersThreeIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -16,6 +16,7 @@ export function SettingsLayout({ children }: { children: ReactNode }) {
   const items = [
     { id: "general", href: base, label: "General", icon: GearSixIcon },
     { id: "team", href: `${base}/team`, label: "Team", icon: UsersThreeIcon },
+    { id: "assistant", href: `${base}/assistant`, label: "Assistant", icon: BrainIcon },
     ...(canManage(ws.role)
       ? [{ id: "publish", href: `${base}/publish`, label: "Publish", icon: GlobeHemisphereWestIcon }]
       : []),
@@ -30,7 +31,7 @@ export function SettingsLayout({ children }: { children: ReactNode }) {
           className="animate-rise stagger mt-1 text-[13.5px] text-muted-foreground"
           style={{ "--i": 1 } as React.CSSProperties}
         >
-          Manage {ws.name}: its details, team and how it's shared.
+          Manage {ws.name}: its details, team, assistant and how it's shared.
         </p>
       </header>
       <div className="flex w-full flex-col gap-5 px-5 sm:px-6 lg:flex-row lg:gap-8">

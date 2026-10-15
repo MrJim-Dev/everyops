@@ -18,6 +18,10 @@ export type AssistantTurn = {
   navigate?: Navigation;
   /** The records and pages the reply is based on, as links. */
   sources?: Navigation[];
+  /** What this message added to the workspace's memory (Settings → Assistant). */
+  remembered?: string[];
+  /** The plan applied without Apply, as the workspace's permissions allow. */
+  autoApplied?: boolean;
   /** What the assistant did while working on this reply, in order, and how long it took. */
   activity?: string[];
   durationMs?: number;
