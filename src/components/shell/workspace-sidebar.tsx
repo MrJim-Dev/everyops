@@ -13,11 +13,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserMenu } from "@/components/auth/user-menu";
 import { UseSystemButton } from "@/components/community/use-system-dialog";
+import { isSitePage } from "@/components/setup/build-model";
+import { BuildPages } from "@/components/setup/build-sidebar";
 import { SystemIcon } from "@/components/system-icon";
 import { Kbd } from "@/components/ui/kbd";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useAssistant } from "@/lib/assistant/panel-store";
 import type { Blueprint, System } from "@/lib/blueprint/types";
+import { useBuildOf, useSetupSketch } from "@/lib/store/setup-build";
 import { useSidebar } from "@/lib/store/sidebar";
 import { cn } from "@/lib/utils";
 import { useCommandMenu } from "./command-menu";
@@ -52,6 +55,11 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
   const systems = ws.blueprint.systems.filter((s) => !website.includes(s));
   const toggleSidebar = useSidebar((s) => s.toggle);
   const collapsible = onNavigate === undefined;
+  // A workspace being set up: its pages land here as Gemini designs them, and the draft's stay until it's created.
+  const setupSketch = useSetupSketch(ws.id);
+  const setupBuild = useBuildOf(ws.id);
+  const setup = !ws.blueprint.systems.length && (!!setupSketch || !!setupBuild);
+  const setupSite = setup && !!setupSketch?.pages.some(isSitePage);
   // Website pages show a globe whatever icon they were saved with (often a house, which read as a second home).
   const systemLink = (system: System, site = false) => {
     const href = `${ws.basePath}/${system.id}`;
@@ -162,7 +170,9 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
       </div>
 
       <SidebarSection label="Systems">
-        {systems.length === 0 ? (
+        {setup ? (
+          <BuildPages workspaceId={ws.id} rail={rail} />
+        ) : systems.length === 0 ? (
           <p className="px-2 py-1 text-[12px] leading-relaxed text-muted-foreground">
             Your systems will appear here once EveryOps sets them up.
           </p>
@@ -172,6 +182,10 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
       </SidebarSection>
       {website.length ? (
         <SidebarSection label="Website">{website.map((s) => systemLink(s, true))}</SidebarSection>
+      ) : setupSite ? (
+        <SidebarSection label="Website">
+          <BuildPages workspaceId={ws.id} rail={rail} site />
+        </SidebarSection>
       ) : null}
 
       <div className={cn("mt-auto flex flex-col gap-2", rail ? "pt-[52px]" : "pt-4")}>
