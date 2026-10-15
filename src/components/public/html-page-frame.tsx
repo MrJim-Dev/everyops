@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { clip, kindOfTag } from "@/lib/assistant/picked";
+import { useScreen } from "@/lib/assistant/screen-store";
 import { withSiteLinks } from "@/lib/public/custom-site";
 import { formValues, frameDocument, HTML_PAGE_SANDBOX, type RawFormValues } from "@/lib/public/html-page";
 import type { PublicForm } from "@/lib/public/resolve";
@@ -50,6 +52,7 @@ export function HtmlPageFrame({
   slug,
   forms,
   preview,
+  pickable,
   title,
   className,
 }: {
@@ -57,20 +60,41 @@ export function HtmlPageFrame({
   slug: string;
   forms: PublicForm[];
   preview?: boolean;
+  /** In the workspace: parts of the page can be picked for the assistant (Pick from page). */
+  pickable?: boolean;
   title: string;
   className?: string;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   // Links the page was created with ("/s/<site>/book") point at this workspace's real pages.
   const doc = useMemo(() => frameDocument(withSiteLinks(html, slug)), [html, slug]);
-  const latest = useRef({ forms, preview, slug });
-  latest.current = { forms, preview, slug };
+  const latest = useRef({ forms, preview, slug, title, pickable });
+  latest.current = { forms, preview, slug, title, pickable };
+  const picking = useScreen((s) => !!pickable && s.picking);
+  const tellPicking = () => frame.current?.contentWindow?.postMessage({ everyops: "pick", on: picking }, "*");
+  useEffect(tellPicking, [picking]);
 
   useEffect(() => {
     const onMessage = async (e: MessageEvent) => {
       const target = frame.current?.contentWindow;
       if (!target || e.source !== target) return;
       const data = e.data as { everyops?: string; id?: unknown; form?: unknown; values?: unknown } | null;
+      if (data?.everyops === "picked" || data?.everyops === "pick-cancel") {
+        const screen = useScreen.getState();
+        if (!latest.current.pickable || !screen.picking) return;
+        if (data.everyops === "pick-cancel") return screen.setPicking(false);
+        const p = e.data as Record<string, unknown>;
+        const text = (v: unknown, max: number) => clip(typeof v === "string" ? v : "", max);
+        const label = text(p.label, 80) || text(p.tag, 20);
+        screen.addPicked({
+          kind: kindOfTag(text(p.tag, 20)),
+          label,
+          path: [latest.current.title, text(p.path, 160)].filter(Boolean).join(" › "),
+          ...(text(p.text, 300) && text(p.text, 300) !== label ? { text: text(p.text, 300) } : {}),
+          ...(text(p.html, 1200) ? { html: text(p.html, 1200) } : {}),
+        });
+        return;
+      }
       if ((data?.everyops !== "submit" && data?.everyops !== "call") || typeof data.id !== "number") return;
       const reply = (result: unknown) => target.postMessage({ everyops: "result", id: data.id, result }, "*");
       const { forms, preview, slug } = latest.current;
@@ -141,6 +165,7 @@ export function HtmlPageFrame({
       title={title}
       sandbox={HTML_PAGE_SANDBOX}
       srcDoc={doc}
+      onLoad={tellPicking}
       className={cn("block border-0 bg-white", className)}
     />
   );

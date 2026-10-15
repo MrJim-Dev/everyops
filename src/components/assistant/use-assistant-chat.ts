@@ -9,6 +9,7 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
 import type { DataEvidence } from "@/lib/assistant/evidence";
 import { type AssistantTurn, type ThreadSummary, useAssistant } from "@/lib/assistant/panel-store";
+import { pickedNote } from "@/lib/assistant/picked";
 import type { Navigation, Screen } from "@/lib/assistant/screen";
 import { type BlockRef, useScreen } from "@/lib/assistant/screen-store";
 import { useCurrentUser } from "@/lib/auth/client";
@@ -135,6 +136,8 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
   const showHistory = useAssistant((s) => s.showHistory);
   const pending = useAssistant((s) => s.pending[ws.id]);
   const block = useScreen((s) => s.block);
+  const picked = useScreen((s) => s.picked);
+  const picking = useScreen((s) => s.picking);
   const applyChange = useWorkspaces((s) => s.applyChange);
   const undoChange = useWorkspaces((s) => s.undoChange);
   const history = useWorkspaces((s) => s.workspaces[ws.id]?.changes ?? NO_CHANGES);
@@ -171,14 +174,19 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
   });
   const manager = canManage(ws.role);
   const editor = canEdit(ws.role);
+  // Picking something on the page puts the cursor in the message box, ready to ask about it.
+  const pickedCount = picked.length;
+  useEffect(() => {
+    if (pickedCount) requestAnimationFrame(() => textarea.current?.focus());
+  }, [pickedCount]);
   useEffect(() => {
     void useAssistant.getState().loadList(ws.id);
   }, [ws.id]);
   // Picking a section on the website puts the cursor in the message box, ready to describe the change.
-  const picked = block ? `${block.viewId}:${block.blockId}` : "";
+  const pickedBlock = block ? `${block.viewId}:${block.blockId}` : "";
   useEffect(() => {
-    if (picked) requestAnimationFrame(() => textarea.current?.focus());
-  }, [picked]);
+    if (pickedBlock) requestAnimationFrame(() => textarea.current?.focus());
+  }, [pickedBlock]);
 
   /** Opens a page (and a record on it). */
   const go = useCallback(
@@ -196,6 +204,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
     history: AssistantTurn[],
     attachments: AttachmentRef[],
     ref: BlockRef | null = block,
+    elements: AssistantTurn["picked"] = [],
   ) => {
     const { push, setPending } = useAssistant.getState();
     const userTurn: AssistantTurn = {
@@ -203,6 +212,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
       text,
       ...(attachments.length ? { attachments } : {}),
       ...(ref ? { ref: ref.label } : {}),
+      ...(elements?.length ? { picked: elements } : {}),
     };
     push(ws.id, userTurn);
     const controller = new AbortController();
@@ -218,6 +228,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
         text: [
           t.ref && `(About the ${t.ref} section I clicked)`,
           t.text,
+          t.picked?.length && pickedNote(t.picked, Math.min(2400, 3900 - t.text.length)),
           t.plan && `(Plan "${t.plan.title}" — ${planStateOf(t) ?? "pending"})`,
           t.navigate && `(${t.navigate.open ? "Opened" : "Linked to"} ${t.navigate.label})`,
         ]
@@ -290,12 +301,16 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
     const fromBox = text === undefined;
     const clean = (fromBox ? input : text).trim();
     const sent = fromBox ? files.refs : [];
-    if ((!clean && !sent.length) || pending || (fromBox && files.uploading)) return;
+    const elements = picked.map(({ id: _id, ...rest }) => rest);
+    if ((!clean && !sent.length && !elements.length) || pending || (fromBox && files.uploading)) return;
     if (fromBox) {
       setInput("");
       files.clear();
     }
-    void ask(clean, turns, sent);
+    const screenState = useScreen.getState();
+    screenState.clearPicked();
+    screenState.setPicking(false);
+    void ask(clean, turns, sent, block, elements);
   };
 
   const stop = () => inFlight.get(ws.id)?.abort();
@@ -454,6 +469,11 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
     /** The website section attached to the next message. */
     block,
     clearBlock: () => useScreen.getState().selectBlock(null),
+    /** Parts of the page picked for the next message, and whether clicking the page picks more. */
+    picked,
+    picking,
+    setPicking: (on: boolean) => useScreen.getState().setPicking(on),
+    removePicked: (id: string) => useScreen.getState().removePicked(id),
     input,
     setInput,
     textarea,

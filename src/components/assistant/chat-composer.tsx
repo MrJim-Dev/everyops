@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpIcon, CursorClickIcon, StopIcon, XIcon } from "@phosphor-icons/react";
+import { ArrowUpIcon, CrosshairSimpleIcon, CursorClickIcon, StopIcon, XIcon } from "@phosphor-icons/react";
 import { AttachmentTray, ComposerTools, DropOverlay } from "@/components/ai/composer-tools";
 import {
   InputGroup,
@@ -67,6 +67,33 @@ function SectionChip({ chat }: { chat: AssistantChat }) {
   );
 }
 
+/** Parts of the page picked for the next message (Pick from page), each with a way to let go of it. */
+function PickedChips({ chat }: { chat: AssistantChat }) {
+  if (!chat.picked.length) return null;
+  return (
+    <ul aria-label="Picked from the page" className="flex w-full flex-wrap gap-1.5">
+      {chat.picked.map((p) => (
+        <li
+          key={p.id}
+          title={p.path ? `${p.path} › ${p.label}` : p.label}
+          className="enter-up inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md border bg-background/40 py-0.5 pr-0.5 pl-2 text-[12px]"
+        >
+          <span className="shrink-0 text-muted-foreground">{p.kind}</span>
+          <span className="truncate text-foreground">{p.label}</span>
+          <button
+            type="button"
+            aria-label={`Remove ${p.label}`}
+            onClick={() => chat.removePicked(p.id)}
+            className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <XIcon className="size-3" />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /**
  * Where you write to the assistant. Enter sends, Shift+Enter starts a new line, and the box grows with
  * the text. While a request is out, the send button becomes Stop.
@@ -86,7 +113,7 @@ export function ChatComposer({
 }) {
   const { files, voice, pending } = chat;
   const page = size === "page";
-  const canSend = (!!chat.input.trim() || !!files.refs.length) && !files.uploading;
+  const canSend = (!!chat.input.trim() || !!files.refs.length || !!chat.picked.length) && !files.uploading;
 
   return (
     <form
@@ -105,9 +132,10 @@ export function ChatComposer({
         )}
       >
         <DropOverlay attachments={files} />
-        {files.items.length || chat.block ? (
+        {files.items.length || chat.block || chat.picked.length ? (
           <InputGroupAddon align="block-start" className="flex-col items-start gap-2 px-3 pt-3">
             <SectionChip chat={chat} />
+            <PickedChips chat={chat} />
             {files.items.length ? <AttachmentTray attachments={files} /> : null}
           </InputGroupAddon>
         ) : null}
@@ -118,9 +146,11 @@ export function ChatComposer({
           placeholder={
             chat.block
               ? `Describe the change to the ${chat.block.label.toLowerCase()} section…`
-              : chat.manager
-                ? "Ask a question or describe a change…"
-                : "Ask a question…"
+              : chat.picked.length
+                ? "What should change here, or what do you want to know?"
+                : chat.manager
+                  ? "Ask a question or describe a change…"
+                  : "Ask a question…"
           }
           value={chat.input}
           rows={page ? 2 : 2}
@@ -145,6 +175,22 @@ export function ChatComposer({
         >
           <span className="flex items-center gap-2">
             <ComposerTools attachments={files} voice={voice} disabled={!!pending} />
+            {page ? null : (
+              <InputGroupButton
+                size="icon-sm"
+                aria-label="Pick from page"
+                aria-pressed={chat.picking}
+                title={chat.picking ? "Stop picking (Esc)" : "Pick something on the page to ask about"}
+                disabled={!!pending}
+                onClick={() => chat.setPicking(!chat.picking)}
+                className={cn(
+                  "hidden cursor-pointer md:inline-flex",
+                  chat.picking && "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary",
+                )}
+              >
+                <CrosshairSimpleIcon />
+              </InputGroupButton>
+            )}
             {voice.state === "idle" && hint ? (
               <span className="hidden text-[11.5px] text-muted-foreground lg:inline">{hint}</span>
             ) : null}

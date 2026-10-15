@@ -6,6 +6,7 @@ import {
   ArrowDownIcon,
   ArrowRightIcon,
   BrainIcon,
+  CrosshairSimpleIcon,
 } from "@phosphor-icons/react";
 import NextLink from "next/link";
 import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -239,6 +240,23 @@ export function ChatThread({
                     <span className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/8 px-1.5 py-0.5 text-[11.5px] text-muted-foreground">
                       <span className="size-1.5 rounded-full bg-primary" />
                       {t.ref} section
+                    </span>
+                  ) : null}
+                  {t.picked?.length ? (
+                    <span className="flex flex-wrap justify-end gap-1">
+                      {t.picked.map((p, j) => (
+                        <span
+                          // biome-ignore lint/suspicious/noArrayIndexKey: a sent message's picks never change
+                          key={j}
+                          title={p.path ? `${p.path} › ${p.label}` : p.label}
+                          className="inline-flex max-w-60 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11.5px] text-muted-foreground"
+                        >
+                          <CrosshairSimpleIcon className="size-3 shrink-0" />
+                          <span className="truncate">
+                            {p.kind} · {p.label}
+                          </span>
+                        </span>
+                      ))}
                     </span>
                   ) : null}
                   <MessageFiles files={t.attachments} />

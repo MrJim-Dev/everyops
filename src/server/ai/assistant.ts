@@ -4,6 +4,7 @@ import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import type { DataEvidence } from "@/lib/assistant/evidence";
 import { memoryContext, type WorkspaceMemory } from "@/lib/assistant/memory";
 import { permissionsText } from "@/lib/assistant/permissions";
+import { withoutPickedNote } from "@/lib/assistant/picked";
 import { fieldUsage, renameInDesign, renameInPages } from "@/lib/assistant/related";
 import {
   describeScreen,
@@ -1438,7 +1439,9 @@ ${input.messages
         ...withNav,
         plan: {
           // History shows the person's own words, without the note about which section they clicked.
-          request: (input.messages.at(-1)?.text ?? "").replace(/^\(About the .+? section I clicked\)\n?/, ""),
+          request: withoutPickedNote(
+            (input.messages.at(-1)?.text ?? "").replace(/^\(About the .+? section I clicked\)\n?/, ""),
+          ),
           baseVersion: bp.version,
           coverage,
           title: a.plan.title || "Workspace change",

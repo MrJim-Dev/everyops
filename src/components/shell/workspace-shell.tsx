@@ -2,8 +2,9 @@
 
 import { ListIcon, SparkleIcon } from "@phosphor-icons/react";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { AssistantPanel } from "@/components/assistant/assistant-panel";
+import { ElementPicker } from "@/components/assistant/element-picker";
 import { RecordPanelsProvider } from "@/components/records/record-panels";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -19,6 +20,7 @@ import { WorkspaceSidebar } from "./workspace-sidebar";
 export function WorkspaceShell({ children }: { children: ReactNode }) {
   const ws = useWorkspace();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
   const assistantOpen = useAssistant((s) => s.open);
   const assistantInstant = useAssistant((s) => s.instant);
   const setAssistantOpen = useAssistant((s) => s.setOpen);
@@ -114,8 +116,12 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             ) : null}
           </div>
           <div className="flex min-h-0 flex-1 gap-2">
-            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background md:rounded-lg md:border">
+            <main
+              ref={mainRef}
+              className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background md:rounded-lg md:border"
+            >
               <RecordPanelsProvider>{children}</RecordPanelsProvider>
+              {live ? <ElementPicker root={mainRef} /> : null}
             </main>
             {/*
               Like the sidebar: the frame widens on the drawer curve while the panel inside, at its full width,
