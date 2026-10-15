@@ -29,6 +29,7 @@ import {
 } from "@/lib/public/slots";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { dateKey } from "@/lib/time";
+import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { saveImage } from "./storage";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
@@ -368,7 +369,8 @@ export async function submitPublicForm(
   rawExtras: Record<string, unknown> = {},
 ): Promise<SubmitResult> {
   if (!ID.test(slug)) return { ok: false, status: 404, message: "This page doesn't exist." };
-  return db.transaction().execute(async (trx) => {
+  let emailRuns: number[] = [];
+  const result: SubmitResult = await db.transaction().execute(async (trx): Promise<SubmitResult> => {
     // The same lock browser saves take, so revs stay put while the booking is checked and written.
     const { rows } = await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
     const bp = rows.length ? await currentBlueprint(trx, slug) : undefined;
@@ -394,6 +396,16 @@ export async function submitPublicForm(
     const saved = await putRecords(trx, slug, writes);
     if (saved.conflicts.length)
       throw new Error(`public submission conflicted on ${saved.conflicts.join(", ")}`);
+    if (fireOnSave(bp))
+      emailRuns = await logSaveRuns(
+        trx,
+        slug,
+        bp,
+        writes.map((w) => ({ before: before.get(w.record.id)?.record, after: w.record })),
+        data.records,
+        "booking",
+        now,
+      );
     await sql`update workspace set updated_at = now() where id = ${slug}`.execute(trx);
     const shown = entity.fields.filter(
       (f) =>
@@ -428,6 +440,8 @@ export async function submitPublicForm(
       ],
     } as const;
   });
+  deliverSoon(emailRuns);
+  return result;
 }
 
 /* A small per-address limit so a public form can't be flooded. */

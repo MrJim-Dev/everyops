@@ -18,6 +18,7 @@ import {
   workspaceFrom,
 } from "@/lib/store/workspace-model";
 import type { PatchResult, WorkspaceMeta, WorkspacePatch } from "@/lib/store/workspace-sync";
+import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { inviteEmail } from "./emails";
 import { appUrl, sendMail } from "./mail";
@@ -26,6 +27,7 @@ import {
   deleteRecords,
   metaFrom,
   putRecords,
+  readRecords,
   readWorkspace,
   writeChanges,
   writeContent,
@@ -291,6 +293,7 @@ export async function patchWorkspace(
   const newInvites: Invite[] = [];
   let revs: Record<string, number> = {};
   let updated: DataRecord[] = [];
+  let emailRuns: number[] = [];
   try {
     await db.transaction().execute(async (trx) => {
       // One save at a time per workspace (public bookings take the same lock); each is a few rows now.
@@ -367,6 +370,24 @@ export async function patchWorkspace(
             updated = numbered.changed;
           }
         }
+        // Automations that fire on a save are logged (and their emails queued) with the save itself.
+        const rulesBp = await currentBlueprint(trx, slug);
+        const watching = fireOnSave(rulesBp);
+        const editIds = puts.filter((p) => p.rev !== null).map((p) => p.record.id);
+        const beforeEdit = new Map<string, DataRecord>();
+        if (watching && editIds.length) {
+          const { rows } = await sql<{ id: string; entity_id: string; data: DataRecord["data"] }>`
+            select id, entity_id, data from workspace_record
+            where workspace_id = ${slug} and id = any(${editIds}::text[])`.execute(trx);
+          for (const r of rows)
+            beforeEdit.set(r.id, {
+              id: r.id,
+              entityId: r.entity_id,
+              data: r.data,
+              createdAt: "",
+              updatedAt: "",
+            });
+        }
         const put = await putRecords(trx, slug, puts);
         const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, patch.records.delete))];
         if (conflicts.length)
@@ -377,6 +398,11 @@ export async function patchWorkspace(
             conflicts,
           });
         revs = put.revs;
+        if (watching && rulesBp && puts.length) {
+          const changes = puts.map((p) => ({ before: beforeEdit.get(p.record.id), after: p.record }));
+          const records = (await readRecords(trx, slug)).map((s) => s.record);
+          emailRuns = await logSaveRuns(trx, slug, rulesBp, changes, records, "save");
+        }
       }
 
       if (patch.pages && Object.keys(patch.pages).length) {
@@ -464,6 +490,7 @@ export async function patchWorkspace(
       ),
     );
   }
+  deliverSoon(emailRuns);
   return { ok: true, revs, ...(updated.length ? { updated } : {}) };
 }
 
