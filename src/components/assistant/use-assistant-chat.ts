@@ -144,6 +144,20 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
   };
   const [input, setInput] = useState("");
   const textarea = useRef<HTMLTextAreaElement>(null);
+  // A request another screen started (Edit layout's "Describe a new part") lands in the composer, ready to finish.
+  const draft = useAssistant((s) => s.draft);
+  const setDraft = useAssistant((s) => s.setDraft);
+  useEffect(() => {
+    if (draft === null) return;
+    setInput(draft);
+    setDraft(null);
+    requestAnimationFrame(() => {
+      const el = textarea.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, [draft, setDraft]);
   const files = useAttachments();
   const voice = useVoiceInput((said) => {
     setInput((v) => (v.trim() ? `${v.trimEnd()} ${said}` : said));

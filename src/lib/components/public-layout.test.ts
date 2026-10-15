@@ -7,7 +7,12 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { resolveLayout } from "@/lib/public/layout";
 import { isPublic, resolvePage, siteOf } from "@/lib/public/resolve";
-import { keepValidParts, OVERVIEW_VIEW_ID, placeOverview } from "@/server/ai/overview-layout";
+import {
+  keepValidParts,
+  OVERVIEW_VIEW_ID,
+  placeOverview,
+  withTemplateLayout,
+} from "@/server/ai/overview-layout";
 import { aboutPeople, layoutPublicProblems } from "./public-safety";
 import { parseLayout } from "./registry";
 
@@ -175,12 +180,32 @@ describe("setup's Overview layout", () => {
     });
     expect(view.sections.map((s) => s.title)).toEqual(["Today"]);
     expect(view.sections[0].items.map((i) => i.props.title ?? i.component)).toEqual(["Bookings", "widget"]);
-    // The court template's Overview already has its cards: they stay what the page opens on, the layout joins as a tab.
+    // The layout is the Overview: it opens first, keeps the card it places, and the other cards leave the page (no
+    // second dashboard) but stay in the workspace for Edit layout to offer.
     const next = placeOverview(blueprint, view);
     const overview = next.systems.find((s) => s.id === "overview");
-    expect(overview?.viewIds.at(-1)).toBe(OVERVIEW_VIEW_ID);
-    expect(next.views.find((v) => v.id === OVERVIEW_VIEW_ID)?.name).toBe("Insights");
-    expect(overview?.widgetIds).toEqual(blueprint.systems.find((s) => s.id === "overview")?.widgetIds);
+    expect(overview?.viewIds[0]).toBe(OVERVIEW_VIEW_ID);
+    expect(next.views.find((v) => v.id === OVERVIEW_VIEW_ID)?.name).toBe("Overview");
+    const placed = view.sections.flatMap((s) =>
+      s.items.filter((i) => i.component === "widget").map((i) => String(i.props.widgetId)),
+    );
+    expect(overview?.widgetIds).toEqual(placed);
+    expect(next.widgets.length).toBe(blueprint.widgets.length);
+    expect(validateBlueprint(next)).toEqual([]);
+  });
+
+  it("lays the template cards out as the Overview when the AI layout step can't", () => {
+    const { blueprint } = sample();
+    const cards = blueprint.systems.find((s) => s.id === "overview")?.widgetIds ?? [];
+    const next = withTemplateLayout(blueprint);
+    const overview = next.systems.find((s) => s.id === "overview");
+    const page = next.views.find((v) => v.id === OVERVIEW_VIEW_ID);
+    if (page?.type !== "layout") throw new Error("no layout");
+    expect(overview?.viewIds[0]).toBe(OVERVIEW_VIEW_ID);
+    // Every card is on the page, in the dashboard's order, so nothing is left for a Dashboard tab.
+    expect(page.sections.flatMap((s) => s.items.map((i) => i.props.widgetId))).toEqual(cards);
+    expect(overview?.widgetIds).toEqual(cards);
+    expect(page.sections[0].title).toBe("Today");
     expect(validateBlueprint(next)).toEqual([]);
   });
 });
