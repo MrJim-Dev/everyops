@@ -17,4 +17,9 @@ describe("slidingCount", () => {
     expect(slidingCount(30, 1, 5 * MINUTE)).toBeCloseTo(16);
     expect(slidingCount(30, 1, 10 * MINUTE)).toBe(1);
   });
+
+  it("works the same over shorter windows (a public page's 1-minute data limit)", () => {
+    expect(slidingCount(120, 10, 15_000, MINUTE)).toBeCloseTo(100);
+    expect(slidingCount(120, 10, MINUTE, MINUTE)).toBe(10);
+  });
 });

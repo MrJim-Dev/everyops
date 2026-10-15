@@ -1,6 +1,7 @@
 import { detectFile } from "@/server/ai/attachments";
 import { takeAiToken } from "@/server/ai/rate-limit";
 import { transcribe } from "@/server/ai/transcribe";
+import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { apiUser, sameOrigin } from "@/server/session-api";
 
 /** About four minutes of compressed speech; the browser stops recording well before that. */
@@ -29,6 +30,9 @@ export async function POST(request: Request) {
       { ok: false, message: "That's a lot of voice messages. Wait a few minutes and try again." },
       { status: 429 },
     );
+  const overBudget = await startAiUsage(`account:${user.id}`);
+  if (overBudget) return overBudget;
+  enterAiUsage(`account:${user.id}`);
   const mime = type.mime.replace(/^video\//, "audio/");
   const result = await transcribe(bytes, mime);
   return Response.json(result, { status: result.ok ? 200 : 502 });

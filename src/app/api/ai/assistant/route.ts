@@ -6,6 +6,7 @@ import { blueprintOf, canEdit, canManage } from "@/lib/store/workspace-model";
 import { assistantTurn } from "@/server/ai/assistant";
 import { noteMemory } from "@/server/ai/memory";
 import { takeAiToken } from "@/server/ai/rate-limit";
+import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { readMemory, rememberEdits } from "@/server/workspace-memory";
 import { loadTeam, loadWorkspace } from "@/server/workspaces";
@@ -44,6 +45,9 @@ export async function POST(request: Request) {
       { ok: false, message: "That's a lot of questions. Wait a few minutes and try again." },
       { status: 429 },
     );
+  const overBudget = await startAiUsage(parsed.data.workspaceId);
+  if (overBudget) return overBudget;
+  enterAiUsage(parsed.data.workspaceId);
   const manager = canManage(found.role);
   const workspaceId = parsed.data.workspaceId;
   const [team, memory] = await Promise.all([

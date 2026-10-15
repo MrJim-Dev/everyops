@@ -29,6 +29,7 @@ import {
 } from "@/lib/public/slots";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { dateKey } from "@/lib/time";
+import { takeToken } from "./ai/rate-limit";
 import { db } from "./db";
 import { saveImage } from "./storage";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
@@ -430,15 +431,12 @@ export async function submitPublicForm(
   });
 }
 
-/* A small per-address limit so a public form can't be flooded. */
-const hits = new Map<string, number[]>();
-export function allowSubmission(key: string, limit = 8, windowMs = 10 * 60_000): boolean {
-  const now = Date.now();
-  const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
-  if (recent.length >= limit) return false;
-  recent.push(now);
-  hits.set(key, recent);
-  return true;
+/**
+ * A small per-address limit so a public form, upload or page can't be flooded. Counted in Postgres (shared by every
+ * Cloud Run instance and kept across restarts), like the AI limit; it falls back to memory if the database fails.
+ */
+export async function allowSubmission(key: string, limit = 8, windowMs = 10 * 60_000): Promise<boolean> {
+  return (await takeToken("public:" + key, limit, windowMs)).ok;
 }
 
 export type UploadResult = { ok: true; url: string } | { ok: false; status: number; message: string };

@@ -4,7 +4,7 @@ import { allowSubmission, submitPublicForm } from "@/server/public";
 export async function POST(request: Request, { params }: RouteContext<"/api/public/[workspace]/[view]">) {
   const { workspace, view } = await params;
   const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "local";
-  if (!allowSubmission(`${ip}:${workspace}`))
+  if (!(await allowSubmission(`${ip}:${workspace}`)))
     return Response.json(
       { ok: false, message: "Too many submissions. Try again in a few minutes." },
       { status: 429 },
