@@ -53,6 +53,7 @@ export function HtmlPageFrame({
   forms,
   preview,
   pickable,
+  readData,
   title,
   className,
 }: {
@@ -62,14 +63,15 @@ export function HtmlPageFrame({
   preview?: boolean;
   /** In the workspace: parts of the page can be picked for the assistant (Pick from page). */
   pickable?: boolean;
+  readData?: (viewId: string) => unknown;
   title: string;
   className?: string;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   // Links the page was created with ("/s/<site>/book") point at this workspace's real pages.
   const doc = useMemo(() => frameDocument(withSiteLinks(html, slug)), [html, slug]);
-  const latest = useRef({ forms, preview, slug, title, pickable });
-  latest.current = { forms, preview, slug, title, pickable };
+  const latest = useRef({ forms, preview, slug, readData, title, pickable });
+  latest.current = { forms, preview, slug, readData, title, pickable };
   const picking = useScreen((s) => !!pickable && s.picking);
   const tellPicking = () => frame.current?.contentWindow?.postMessage({ everyops: "pick", on: picking }, "*");
   useEffect(tellPicking, [picking]);
@@ -79,6 +81,10 @@ export function HtmlPageFrame({
       const target = frame.current?.contentWindow;
       if (!target || e.source !== target) return;
       const data = e.data as { everyops?: string; id?: unknown; form?: unknown; values?: unknown } | null;
+      if (data?.everyops === "connect") {
+        target.postMessage({ everyops: "ready" }, "*");
+        return;
+      }
       if (data?.everyops === "picked" || data?.everyops === "pick-cancel") {
         const screen = useScreen.getState();
         if (!latest.current.pickable || !screen.picking) return;
@@ -97,7 +103,16 @@ export function HtmlPageFrame({
       }
       if ((data?.everyops !== "submit" && data?.everyops !== "call") || typeof data.id !== "number") return;
       const reply = (result: unknown) => target.postMessage({ everyops: "result", id: data.id, result }, "*");
-      const { forms, preview, slug } = latest.current;
+      const { forms, preview, slug, readData } = latest.current;
+      if (data.everyops === "call" && e.data.method === "data") {
+        const viewId = str(data.form);
+        if (!viewId) return reply({ ok: false, message: "Choose a data source." });
+        const local = readData?.(viewId) as { ok?: boolean } | undefined;
+        if (local?.ok) return reply(local);
+        return reply(
+          await getJson(`/api/public/${encodeURIComponent(slug)}/${encodeURIComponent(viewId)}/data`),
+        );
+      }
       const form = forms.find((f) => f.viewId === data.form);
       if (!form) return reply({ ok: false, message: "This form isn't taking submissions." });
       const base = `/api/public/${slug}/${form.viewId}`;
@@ -131,7 +146,11 @@ export function HtmlPageFrame({
               }),
             );
           case "upload": {
-            if (preview) return reply({ ok: false, message: "Uploads work on the public page." });
+            if (preview)
+              return reply({
+                ok: false,
+                message: "Uploads are disabled in the editor preview. Open the page to upload.",
+              });
             if (!(a.file instanceof Blob)) return reply({ ok: false, message: "Choose a file." });
             const body = new FormData();
             body.append("file", a.file);
@@ -144,7 +163,7 @@ export function HtmlPageFrame({
       if (preview)
         return reply({
           ok: false,
-          message: "Preview only: nothing was saved. Submissions are saved on the public page.",
+          message: "Preview only: nothing was saved. Close the editor or open the public page to submit.",
         });
       const extras = cleanExtras((e.data as { extras?: unknown }).extras);
       reply(

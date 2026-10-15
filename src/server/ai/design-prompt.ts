@@ -1,3 +1,4 @@
+import { HTML_CAPABILITIES } from "./html-capabilities";
 import "server-only";
 import { z } from "zod";
 import { FUNCTIONS } from "@/lib/engine/expr";
@@ -258,9 +259,7 @@ export const view = z.union([
     html: z
       .string()
       .optional()
-      .describe(
-        "A short starting page only when asked to draft one; the owner pastes or uploads their own design",
-      ),
+      .describe("Complete HTML, CSS and JavaScript for a requested custom page, connected through EveryOps"),
   }),
   z.object({
     ...viewBase,
@@ -523,9 +522,10 @@ export const PUBLIC_PAGES_GUIDE = `Public pages (customers use them without an a
 - The website: a business whose customers book, order or sign up on their own gets a public form (the booking form)
   and a website. At setup EveryOps builds that website as a custom HTML page, designed and filled in from the data
   and the words in site (hero, highlights, what's offered, how it works, payment methods, FAQs and contact), with
-  buttons that open the booking form. When designing a workspace, don't add a landing or html view for it: write
-  the website's words in site, and EveryOps builds the page. A website added later with the assistant uses the
-  standard landing layout unless the person asks for HTML. Contact details come only from the brief or files;
+  buttons that open the booking form. For ordinary setup, write the website words in site and EveryOps builds
+  the page. For a requested customized or interactive design, write a complete html view instead, with live
+  connections. Use a separate published landing view with records blocks as its data source during setup
+  (the setup schema does not have layout views). For later customization, prefer complete HTML/CSS/JS. Contact details come only from the brief or files;
   never invent a phone number or address.
 - Booking forms can show their calendar three ways (the owner switches it on the form's page): a strip of days
   with that day's times, one day as a grid of every court or room side by side, or a month calendar. Stays and
@@ -595,8 +595,8 @@ Rules for a valid blueprint:
   are a notebook over a record type with a text title and a long_text body (titleFieldId, bodyFieldId).
   document views are one free markdown page with entityId "" and a starter outline. canvas views are a free
   whiteboard (shapes, text, sticky notes, arrows, pictures) with entityId "", for a floor plan, mood board,
-  layout or process map. html views are a page the owner designs in their own HTML (entityId ""); add one only
-  when asked for a custom HTML page. Use them when asked.
+  layout or process map. html views are fully coded custom pages (entityId "").
+  ${HTML_CAPABILITIES}
 - Charts plot over time (dateFieldId, bucket; kind line, area or bar) or by category (groupByFieldId; kind bar
   or donut). A reports page is a system with only widgets: stats for totals and several charts.
 - A stat that combines record types or needs arithmetic (total income = bookings + other income, profit,

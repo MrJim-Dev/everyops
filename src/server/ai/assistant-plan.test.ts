@@ -14,9 +14,56 @@ import {
   unanswerable,
   unbackedRuleSteps,
 } from "./assistant";
-import { toRule } from "./design";
+import { designOp } from "./assistant-prompt";
+import { toRule, withStandardSite } from "./design";
 
 describe("assistant plans", () => {
+  it("preserves publication on generated HTML and keeps private HTML private", () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-15T09:00:00+08:00"));
+    for (const published of [true, false]) {
+      const raw = [
+        {
+          op: "add_view",
+          systemId: blueprint.systems[0].id,
+          view: {
+            id: "custom",
+            entityId: "",
+            name: "Custom",
+            type: "html",
+            public: published,
+            starter: "<html><body>Custom design</body></html>",
+          },
+        },
+      ];
+      const parsed = raw.map((op) => designOp.parse(op)) as unknown as Parameters<typeof toDesignOps>[1];
+      const { ops, errors } = toDesignOps(blueprint, parsed);
+      expect(errors).toEqual([]);
+      const saved = applyOps(blueprint, ops).views.find((v) => v.id === "custom");
+      expect(saved).toMatchObject({ type: "html", html: "<html><body>Custom design</body></html>" });
+      expect(saved?.type === "html" && !!saved.public).toBe(published);
+    }
+  });
+  it("keeps a generated custom website and its data source intact during setup", () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-15T09:00:00+08:00"));
+    blueprint.views.push({
+      id: "site",
+      entityId: "",
+      name: "Site",
+      type: "html",
+      public: true,
+      html: "<h1>Custom</h1>",
+    });
+    blueprint.views.push({
+      id: "source",
+      entityId: "",
+      name: "Data",
+      type: "landing",
+      public: true,
+      blocks: [],
+    });
+    const before = structuredClone(blueprint);
+    expect(withStandardSite(blueprint, "Custom")).toEqual(before);
+  });
   // "Merge duplicate fields": Lapu-Lapu Aqua Flow had Rider (text) beside Rider Options (a choice), Oct 14.
   it("merges a duplicate into the field views use: redefined in place, options carried over, duplicate removed", () => {
     const { blueprint } = courtBookingsSample(new Date("2026-10-14T03:00:00Z"));
@@ -97,7 +144,9 @@ describe("assistant plans", () => {
       } as ChangeOp,
     ];
     embedForms(blueprint, records, missing, errors);
-    expect(errors[0]).toContain('data-everyops-embed="nope" isn\'t a public form');
+    expect(errors.some((error) => error.includes('data-everyops-embed="nope" isn\'t a public form'))).toBe(
+      true,
+    );
   });
   it("sends back a public form that requires what visitors can't fill in", () => {
     const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
