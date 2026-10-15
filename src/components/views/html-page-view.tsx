@@ -13,6 +13,7 @@ import {
   ImageIcon,
   PlugsConnectedIcon,
   ShareNetworkIcon,
+  UploadSimpleIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -38,6 +39,7 @@ import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { uploadImage } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 import { HtmlCodeEditor, type HtmlCodeEditorHandle } from "./html-code-editor";
+import { PageVersions } from "./page-versions";
 import { PublicBar } from "./public-bar";
 
 const SAVE_DELAY = 800;
@@ -169,6 +171,16 @@ function HtmlEditor({
   );
 
   const insert = (text: string) => area.current?.insert(text);
+  // Pictures already uploaded for this workspace's pages, newest first, so one upload serves every page.
+  const pictures = useMemo(() => {
+    const re = new RegExp(`/api/files/${ws.id}/[0-9a-f-]{36}\\.(?:png|jpg|gif|webp)`, "g");
+    const texts = [
+      draft,
+      ...Object.values(ws.docs).map((d) => d.body),
+      ...ws.blueprint.views.map((v) => (v.type === "html" ? (v.html ?? "") : "")),
+    ];
+    return [...new Set(texts.flatMap((t) => t.match(re) ?? []))].slice(0, 24);
+  }, [draft, ws.docs, ws.blueprint.views, ws.id]);
 
   const loadFile = async (file: File | undefined) => {
     if (!file) return;
@@ -292,10 +304,43 @@ function HtmlEditor({
               <FileArrowUpIcon data-icon="inline-start" />
               Upload .html
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => picture.current?.click()}>
-              <ImageIcon data-icon="inline-start" />
-              Picture
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
+                <ImageIcon data-icon="inline-start" />
+                Picture
+                <CaretDownIcon className="size-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-[70vh] w-80 overflow-y-auto">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => picture.current?.click()}>
+                    <UploadSimpleIcon />
+                    Upload a picture…
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                {pictures.length ? (
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>
+                      Already in your pages (hosted, not counted in the page size)
+                    </DropdownMenuLabel>
+                    <div className="grid grid-cols-4 gap-1.5 px-1.5 pb-1.5">
+                      {pictures.map((src) => (
+                        <DropdownMenuItem
+                          key={src}
+                          className="aspect-square p-0"
+                          aria-label="Insert this picture"
+                          onClick={() =>
+                            insert(`<img src="${src}" alt="" style="max-width:100%;height:auto">`)
+                          }
+                        >
+                          {/* biome-ignore lint/performance/noImgElement: a small preview of an upload */}
+                          <img src={src} alt="" className="size-full rounded bg-white object-cover" />
+                        </DropdownMenuItem>
+                      ))}
+                    </div>
+                  </DropdownMenuGroup>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
                 <PlugsConnectedIcon data-icon="inline-start" />
@@ -393,6 +438,7 @@ function HtmlEditor({
                 ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
+            <PageVersions workspaceId={ws.id} pageKey={view.id} current={draft} onRestore={setDraft} />
             <span
               className={cn("ml-auto px-1 text-[12px]", tooBig ? "text-warning" : "text-muted-foreground")}
               aria-live="polite"

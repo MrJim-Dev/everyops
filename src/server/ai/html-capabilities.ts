@@ -61,7 +61,11 @@ Use <div data-everyops-embed="FORM_VIEW_ID"></div> for a standard form in assist
 own <form data-everyops-form="FORM_VIEW_ID"> with inputs named by real field IDs. The bridge handles submission,
 disables submit buttons and writes a [data-everyops-message] status; success is only after the server confirms.
 For custom JavaScript use await EveryOps.form(id) => {ok:true,form:{viewId,title,fields,choices,booking,extras,...}}
-and await EveryOps.submit(id,values,extras) => {ok:true,reference,title,summary} or {ok:false,message}.
+and await EveryOps.submit(id,values,extras) => {ok:true,reference,title,summary,manage} or {ok:false,message}.
+manage is the visitor's private link to that one booking (/b/...): show it after booking so they can check it or
+send a proof of payment later. A page opened with ?manage=TOKEN can read that booking with EveryOps.mine() =>
+{ok:true,title,reference,status:{label},summary:[{name,text}],attach:[{fieldId,name,added}]} and add a picture to
+one of its attach fields with EveryOps.attach(fieldId,file); nothing else about the booking can be read or changed.
 values are strings (or string arrays); option/relation values must be IDs from form.fields/options or form.choices.
 Time ranges use FIELD_ID_start and FIELD_ID_end (ISO timestamps or Manila local date-times); date ranges use
 FIELD_ID_start and FIELD_ID_end dates. Read the form contract before building selectors. Private forms are not

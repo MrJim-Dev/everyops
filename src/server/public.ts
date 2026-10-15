@@ -30,6 +30,7 @@ import {
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { dateKey } from "@/lib/time";
 import { db } from "./db";
+import { managePath } from "./manage";
 import { saveImage } from "./storage";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
 
@@ -349,7 +350,14 @@ export async function quotePublicForm(
 }
 
 export type SubmitResult =
-  | { ok: true; reference: string; title: string; summary: { name: string; text: string }[] }
+  | {
+      ok: true;
+      reference: string;
+      title: string;
+      summary: { name: string; text: string }[];
+      /** A link to this booking for the visitor (/b/TOKEN): its status, details and a picture to add later. */
+      manage?: string;
+    }
   | { ok: false; status: number; message: string; fieldErrors?: { fieldId?: string; message: string }[] };
 
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : undefined);
@@ -410,6 +418,7 @@ export async function submitPublicForm(
           .map((f) => record.data[f.id])
           .find((v): v is string => typeof v === "string" && !!v) ?? record.id.slice(-6).toUpperCase(),
       title: recordTitle(entity, record),
+      manage: managePath({ workspace: slug, view: view.id, record: record.id }, now),
       summary: [
         ...shown
           .filter((f) => f.type !== "money" && !(f.type === "formula" && f.formula?.resultType === "money"))
