@@ -21,11 +21,13 @@ import {
   ATTACHMENT_RETENTION_DAYS,
   type AttachmentKind,
   type AttachmentRef,
+  MAX_ATTACHMENT_MB,
+  MAX_ATTACHMENTS,
   officeKind,
 } from "@/lib/assistant/attachments";
 import { cn } from "@/lib/utils";
 import type { Attachments } from "./use-attachments";
-import type { VoiceInput } from "./use-voice-input";
+import { MAX_SECONDS, type VoiceInput } from "./use-voice-input";
 
 const KIND_ICONS: Record<Exclude<AttachmentKind, "image">, typeof FileTextIcon> = {
   pdf: FilePdfIcon,
@@ -117,7 +119,10 @@ function Recording({ voice }: { voice: VoiceInput }) {
         {quiet ? (
           <span className="text-warning">Can't hear you. Check your mic.</span>
         ) : (
-          <span>Listening {clock(voice.seconds)}</span>
+          <span>
+            Listening {clock(voice.seconds)}{" "}
+            <span className="text-muted-foreground/60">/ {clock(MAX_SECONDS)}</span>
+          </span>
         )}
       </span>
       <InputGroupButton size="icon-sm" aria-label="Cancel recording" onClick={voice.cancel}>
@@ -195,8 +200,8 @@ export function ComposerTools({
           />
           <InputGroupButton
             size="icon-sm"
-            aria-label="Attach files"
-            title={`Attach photos, PDFs or files (kept for ${ATTACHMENT_RETENTION_DAYS} days)`}
+            aria-label={`Attach files: up to ${MAX_ATTACHMENTS}, ${MAX_ATTACHMENT_MB} MB each`}
+            title={`Attach up to ${MAX_ATTACHMENTS} photos, PDFs or files, ${MAX_ATTACHMENT_MB} MB each (kept for ${ATTACHMENT_RETENTION_DAYS} days)`}
             disabled={disabled}
             onClick={() => (onAttachClick ? onAttachClick() : input.current?.click())}
           >
@@ -207,8 +212,8 @@ export function ComposerTools({
       {onVoiceClick || voice?.supported ? (
         <InputGroupButton
           size="icon-sm"
-          aria-label="Speak your message"
-          title="Speak instead of typing"
+          aria-label={`Speak your message, up to ${MAX_SECONDS / 60} minutes`}
+          title={`Speak instead of typing (up to ${MAX_SECONDS / 60} minutes)`}
           disabled={disabled}
           onClick={() => (onVoiceClick ? onVoiceClick() : void voice?.start())}
         >

@@ -12,6 +12,8 @@ import {
   FileArrowUpIcon,
   ImageIcon,
   PlugsConnectedIcon,
+  ShareNetworkIcon,
+  UploadSimpleIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -28,14 +30,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { HtmlPageView as HtmlPageConfig } from "@/lib/blueprint/types";
-import { liveSiteHtml } from "@/lib/public/custom-site";
+import { sharedFields, sharedTableProblems } from "@/lib/components/public-safety";
+import { CONTACT_SNIPPET, listSnippet, MENU_SNIPPET, recordSnippet } from "@/lib/public/bindings";
 import { formSnippet, MAX_HTML_BYTES, pageHtml } from "@/lib/public/html-page";
-import { workspaceTableData } from "@/lib/public/page-data";
-import { htmlPage, isPublic, type PublicForm } from "@/lib/public/resolve";
-import { canManage } from "@/lib/store/workspaces";
+import { publicTableData, workspaceTableData } from "@/lib/public/page-data";
+import { htmlPage, isPublic, type PublicPageData, renderedHtml } from "@/lib/public/resolve";
+import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { uploadImage } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 import { HtmlCodeEditor, type HtmlCodeEditorHandle } from "./html-code-editor";
+import { PageVersions } from "./page-versions";
 import { PublicBar } from "./public-bar";
 
 const SAVE_DELAY = 800;
@@ -68,11 +72,15 @@ export function HtmlPageView({ view }: { view: HtmlPageConfig }) {
   const saved = pageHtml(view, ws.docs);
   // What visitors see: the page with its live parts drawn from the workspace's current data.
   const page = useMemo(
-    () => htmlPage(ws.blueprint, ws.records, ws.docs, view),
-    [ws.blueprint, ws.records, ws.docs, view],
+    () => htmlPage(ws.blueprint, ws.records, ws.docs, view, ws.name),
+    [ws.blueprint, ws.records, ws.docs, view, ws.name],
   );
-  const forms = page.forms ?? [];
   const [editing, setEditing] = useState(false);
+  // Public pages read what visitors would (published sources and shared tables); private pages read table views.
+  const readData = (id: string) =>
+    view.public
+      ? publicTableData(ws.blueprint, ws.records, id)
+      : workspaceTableData(ws.blueprint, ws.records, id);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -92,14 +100,17 @@ export function HtmlPageView({ view }: { view: HtmlPageConfig }) {
         ) : null}
       </PublicBar>
       {editing ? (
-        <HtmlEditor key={view.id} view={view} saved={saved} forms={forms} />
+        <HtmlEditor key={view.id} view={view} saved={saved} page={page} readData={readData} />
       ) : (
         <HtmlPageFrame
           pickable
           html={page.html ?? saved}
           slug={ws.id}
-          forms={forms}
-          readData={view.public ? undefined : (id) => workspaceTableData(ws.blueprint, ws.records, id)}
+          forms={page.forms ?? []}
+          readData={readData}
+          live={page.live}
+          site={page.site}
+          pageId={view.id}
           preview={ws.mode === "preview"}
           title={view.name}
           className="min-h-0 w-full flex-1"
@@ -109,8 +120,20 @@ export function HtmlPageView({ view }: { view: HtmlPageConfig }) {
   );
 }
 
-function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: string; forms: PublicForm[] }) {
+function HtmlEditor({
+  view,
+  saved,
+  page,
+  readData,
+}: {
+  view: HtmlPageConfig;
+  saved: string;
+  page: PublicPageData;
+  readData: (id: string) => unknown;
+}) {
   const ws = useWorkspace();
+  const applyChange = useWorkspaces((s) => s.applyChange);
+  const forms = page.forms ?? [];
   const [draft, setDraft] = useState(saved);
   const [shown, setShown] = useState(saved);
   const [device, setDevice] = useState<(typeof DEVICES)[number]["value"]>("desktop");
@@ -119,9 +142,9 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
   const htmlFile = useRef<HTMLInputElement>(null);
   const picture = useRef<HTMLInputElement>(null);
   const bytes = useMemo(() => new TextEncoder().encode(draft).length, [draft]);
-  // The preview fills the live parts from the workspace too, as visitors will see them.
+  // The preview fills the live parts and shared parts (includes) from the workspace too, as visitors will see them.
   const liveShown = useMemo(
-    () => liveSiteHtml(ws.blueprint, ws.records, ws.docs, view, shown),
+    () => renderedHtml(ws.blueprint, ws.records, ws.docs, view, shown),
     [ws.blueprint, ws.records, ws.docs, view, shown],
   );
   const tooBig = bytes > MAX_HTML_BYTES;
@@ -148,6 +171,16 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
   );
 
   const insert = (text: string) => area.current?.insert(text);
+  // Pictures already uploaded for this workspace's pages, newest first, so one upload serves every page.
+  const pictures = useMemo(() => {
+    const re = new RegExp(`/api/files/${ws.id}/[0-9a-f-]{36}\\.(?:png|jpg|gif|webp)`, "g");
+    const texts = [
+      draft,
+      ...Object.values(ws.docs).map((d) => d.body),
+      ...ws.blueprint.views.map((v) => (v.type === "html" ? (v.html ?? "") : "")),
+    ];
+    return [...new Set(texts.flatMap((t) => t.match(re) ?? []))].slice(0, 24);
+  }, [draft, ws.docs, ws.blueprint.views, ws.id]);
 
   const loadFile = async (file: File | undefined) => {
     if (!file) return;
@@ -171,22 +204,56 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
     }
   };
 
-  const sources = ws.blueprint.views.filter(
-    (v) =>
-      ((v.type === "layout" || v.type === "landing") && isPublic(v)) || (!view.public && v.type === "table"),
-  );
-  const insertData = (id: string) => {
-    // IDs are JSON encoded and '<' escaped before writing executable HTML.
-    const source = JSON.stringify(id).replaceAll("<", "\\u003c");
-    insert(`<section data-workspace-data role="status">Loading…</section>
-<script>
-(async () => {
-  const output = document.currentScript.previousElementSibling;
-  const result = await EveryOps.data(${source});
-  output.textContent = result.ok ? JSON.stringify(result, null, 2) : result.message;
-  output.style.whiteSpace = "pre-wrap";
-})();
-</script>`);
+  // What this page may read: published layouts and landing pages, tables shared as public data (or, on a private
+  // page, any table view), and a website's own sections.
+  const tables = ws.blueprint.views.filter((v) => v.type === "table");
+  const fieldsOf = (id: string) => {
+    const v = ws.blueprint.views.find((x) => x.id === id);
+    if (v?.type !== "table") return [];
+    if (view.public) return sharedFields(ws.blueprint, v).map((f) => ({ id: f.id, name: f.name }));
+    const entity = ws.blueprint.entities.find((e) => e.id === v.entityId);
+    return v.fieldIds
+      .flatMap((fid) => entity?.fields.filter((f) => f.id === fid) ?? [])
+      .map((f) => ({ id: f.id, name: f.name }));
+  };
+  const sources = [
+    ...(page.live ? [{ id: "page", name: "This page's sections" }] : []),
+    ...ws.blueprint.views.filter(
+      (v) =>
+        ((v.type === "layout" || v.type === "landing") && isPublic(v)) ||
+        (v.type === "table" && (!view.public || v.publicData)),
+    ),
+  ];
+  const shareable = view.public
+    ? tables.filter(
+        (v) =>
+          v.type === "table" &&
+          !v.publicData &&
+          !sharedTableProblems(ws.blueprint, { ...v, publicData: true }).length,
+      )
+    : [];
+  const shared = view.public ? tables.filter((v) => v.type === "table" && v.publicData) : [];
+  const share = (id: string, name: string, on: boolean) => {
+    const entry = applyChange(ws.id, {
+      request: `${on ? "Share" : "Stop sharing"} ${name} ${on ? "as public data" : "publicly"}`,
+      title: on ? `Share ${name} with public pages` : `Stop sharing ${name}`,
+      facts: [],
+      steps: [
+        {
+          kind: "change",
+          label: name,
+          detail: on ? "Team only → Shared with public pages" : "Shared → Team only",
+        },
+      ],
+      ops: [{ op: "update_view", viewId: id, patch: { public: on } }],
+    });
+    if (!entry) return;
+    if (on) {
+      insert(listSnippet(id, fieldsOf(id).length ? fieldsOf(id) : []));
+      toast.success(`${name} is shared with public pages`, {
+        description: "Only its fields that don't identify people or show costs are shared.",
+      });
+    } else toast.success(`${name} is no longer shared`);
   };
   const width = DEVICES.find((d) => d.value === device)?.width ?? "100%";
 
@@ -237,10 +304,43 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
               <FileArrowUpIcon data-icon="inline-start" />
               Upload .html
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => picture.current?.click()}>
-              <ImageIcon data-icon="inline-start" />
-              Picture
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
+                <ImageIcon data-icon="inline-start" />
+                Picture
+                <CaretDownIcon className="size-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-[70vh] w-80 overflow-y-auto">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => picture.current?.click()}>
+                    <UploadSimpleIcon />
+                    Upload a picture…
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                {pictures.length ? (
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>
+                      Already in your pages (hosted, not counted in the page size)
+                    </DropdownMenuLabel>
+                    <div className="grid grid-cols-4 gap-1.5 px-1.5 pb-1.5">
+                      {pictures.map((src) => (
+                        <DropdownMenuItem
+                          key={src}
+                          className="aspect-square p-0"
+                          aria-label="Insert this picture"
+                          onClick={() =>
+                            insert(`<img src="${src}" alt="" style="max-width:100%;height:auto">`)
+                          }
+                        >
+                          {/* biome-ignore lint/performance/noImgElement: a small preview of an upload */}
+                          <img src={src} alt="" className="size-full rounded bg-white object-cover" />
+                        </DropdownMenuItem>
+                      ))}
+                    </div>
+                  </DropdownMenuGroup>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
                 <PlugsConnectedIcon data-icon="inline-start" />
@@ -270,25 +370,75 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
                 Connect data
                 <CaretDownIcon className="size-3" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-72">
+              <DropdownMenuContent align="start" className="max-h-[70vh] w-80 overflow-y-auto">
                 <DropdownMenuGroup>
-                  <DropdownMenuLabel>
-                    {view.public ? "Published data sources" : "Workspace data sources"}
-                  </DropdownMenuLabel>
+                  <DropdownMenuLabel>A list that stays current, from</DropdownMenuLabel>
                   {sources.length ? (
                     sources.map((source) => (
-                      <DropdownMenuItem key={source.id} onClick={() => insertData(source.id)}>
+                      <DropdownMenuItem
+                        key={source.id}
+                        onClick={() => insert(listSnippet(source.id, fieldsOf(source.id)))}
+                      >
                         {source.name}
                       </DropdownMenuItem>
                     ))
                   ) : (
                     <DropdownMenuItem disabled>
-                      Publish a layout with the fields visitors may see to connect data here.
+                      Share a table below, or publish a layout, to show its records here.
                     </DropdownMenuItem>
                   )}
                 </DropdownMenuGroup>
+                {sources.some((s) => fieldsOf(s.id).length) ? (
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>One record (for /{view.id}/record-id)</DropdownMenuLabel>
+                    {sources
+                      .filter((s) => fieldsOf(s.id).length)
+                      .map((source) => (
+                        <DropdownMenuItem
+                          key={source.id}
+                          onClick={() => insert(recordSnippet(source.id, view.id, fieldsOf(source.id)))}
+                        >
+                          {source.name}
+                        </DropdownMenuItem>
+                      ))}
+                  </DropdownMenuGroup>
+                ) : null}
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>From the site</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => insert(MENU_SNIPPET)}>
+                    Menu of published pages
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => insert(CONTACT_SNIPPET)}>Contact details</DropdownMenuItem>
+                  {ws.blueprint.views
+                    .filter((v) => v.type === "html" && v.id !== view.id && !v.public)
+                    .map((v) => (
+                      <DropdownMenuItem
+                        key={v.id}
+                        onClick={() => insert(`<div data-everyops-include="${v.id}"></div>`)}
+                      >
+                        Shared part: {v.name}
+                      </DropdownMenuItem>
+                    ))}
+                </DropdownMenuGroup>
+                {canManage(ws.role) && (shareable.length || shared.length) ? (
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Share a table with public pages</DropdownMenuLabel>
+                    {shareable.map((v) => (
+                      <DropdownMenuItem key={v.id} onClick={() => share(v.id, v.name, true)}>
+                        <ShareNetworkIcon />
+                        Share {v.name}
+                      </DropdownMenuItem>
+                    ))}
+                    {shared.map((v) => (
+                      <DropdownMenuItem key={v.id} onClick={() => share(v.id, v.name, false)}>
+                        Stop sharing {v.name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
+            <PageVersions workspaceId={ws.id} pageKey={view.id} current={draft} onRestore={setDraft} />
             <span
               className={cn("ml-auto px-1 text-[12px]", tooBig ? "text-warning" : "text-muted-foreground")}
               aria-live="polite"
@@ -304,8 +454,8 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
           <p className="border-t px-3 py-2 text-[11.5px] text-muted-foreground">
             Your page runs in a sandbox, apart from EveryOps. Forms save when they have
             <code className="mx-1 rounded bg-muted px-1">data-everyops-form</code>
-            and inputs named after the form's fields. Read connected views with EveryOps.data(viewId).{" "}
-            {kb(bytes)} of {kb(MAX_HTML_BYTES)}.
+            and inputs named after the form's fields. Connect data adds lists that fill themselves from your
+            records. {kb(bytes)} of {kb(MAX_HTML_BYTES)}.
           </p>
         </section>
         <section
@@ -332,7 +482,10 @@ function HtmlEditor({ view, saved, forms }: { view: HtmlPageConfig; saved: strin
                 html={liveShown}
                 slug={ws.id}
                 forms={forms}
-                readData={view.public ? undefined : (id) => workspaceTableData(ws.blueprint, ws.records, id)}
+                readData={readData}
+                live={page.live}
+                site={page.site}
+                pageId={view.id}
                 preview
                 title={`${view.name} preview`}
                 className="h-full w-full"

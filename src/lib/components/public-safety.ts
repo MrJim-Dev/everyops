@@ -1,4 +1,4 @@
-import type { Blueprint, Entity, Field, LayoutView } from "@/lib/blueprint/types";
+import type { Blueprint, Entity, Field, LayoutView, TableView } from "@/lib/blueprint/types";
 import { type ComponentDef, componentDef, layoutItems, type Ref } from "./registry";
 
 /**
@@ -27,13 +27,23 @@ export function aboutPeople(entity: Entity): boolean {
   return (
     PEOPLE.test(words(entity)) ||
     PEOPLE.test(entity.pluralName) ||
-    entity.fields.some((f) => (f.type === "text" || f.type === "long_text") && CONTACT.test(words(f)))
+    entity.fields.some(
+      (f) =>
+        f.type === "email" ||
+        f.type === "phone" ||
+        ((f.type === "text" || f.type === "long_text") && CONTACT.test(words(f))),
+    )
   );
 }
 
-/** A field that names or reaches a person: a person field, contact details, a person's name, or a link to people. */
+/**
+ * A field that names or reaches a person: a person field, contact details (email and phone fields, or anything
+ * named like them), a person's name, or a link to people. File fields are the team's documents and count too.
+ */
 export function personalField(bp: Blueprint, field: Field): boolean {
-  if (field.type === "person" || CONTACT.test(words(field)) || PEOPLE.test(words(field))) return true;
+  if (field.type === "person" || field.type === "email" || field.type === "phone" || field.type === "file")
+    return true;
+  if (CONTACT.test(words(field)) || PEOPLE.test(words(field))) return true;
   if (field.type === "relation") {
     const target = bp.entities.find((e) => e.id === field.relation?.entityId);
     return !!target && aboutPeople(target);
@@ -93,4 +103,40 @@ export function layoutPublicProblems(bp: Blueprint, view: LayoutView): string[] 
     const parsed = d.props.safeParse(item.props);
     return parsed.success ? publicProblems(bp, d, parsed.data) : [];
   });
+}
+
+/** Fields a shared table never sends besides people and contact details: the team's own numbers. */
+const INTERNAL = /cost|margin|supplier|internal|password|salary|commission/i;
+
+/** The fields of a table shared as public data (TableView.publicData) that visitors may read, in the view's order. */
+export function sharedFields(bp: Blueprint, view: TableView): Field[] {
+  const entity = bp.entities.find((e) => e.id === view.entityId);
+  if (!entity) return [];
+  return view.fieldIds.flatMap((id) => {
+    const f = entity.fields.find((x) => x.id === id);
+    return f && !personalField(bp, f) && !INTERNAL.test(words(f)) ? [f] : [];
+  });
+}
+
+/** Why a table view can't be shared as public data, or nothing when it can. */
+export function sharedTableProblems(bp: Blueprint, view: TableView): string[] {
+  const entity = bp.entities.find((e) => e.id === view.entityId);
+  if (!entity) return [];
+  if (aboutPeople(entity))
+    return [`${view.name} lists ${entity.pluralName}, which are about people; it can't be shared publicly`];
+  // Bookings, orders and sales belong to someone even with the name left off: each row is a person's transaction.
+  const owner = entity.fields.find((f) => {
+    if (f.type === "person") return true;
+    const target = f.type === "relation" ? bp.entities.find((e) => e.id === f.relation?.entityId) : undefined;
+    return !!target && target.id !== entity.id && aboutPeople(target);
+  });
+  if (owner)
+    return [
+      `${view.name} lists ${entity.pluralName}, which each belong to someone (${owner.name}); it can't be shared publicly`,
+    ];
+  if (!sharedFields(bp, view).length)
+    return [
+      `${view.name} has no fields visitors may see (people, contact details and costs are never shared)`,
+    ];
+  return [];
 }

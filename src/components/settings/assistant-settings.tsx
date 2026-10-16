@@ -31,6 +31,7 @@ import {
 import { formatDateTime } from "@/lib/format";
 import { canManage } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
+import { AiUsageCard } from "./ai-usage-card";
 import { SettingsPage, SettingsSection } from "./settings-section";
 
 const SOURCE: Record<MemoryNote["source"], string> = {
@@ -132,6 +133,7 @@ export function AssistantSettings() {
 
   return (
     <SettingsPage>
+      <AiUsageCard workspaceId={ws.id} />
       <SettingsSection
         title="Permissions"
         description="How much Ask EveryOps may do on its own. People's roles still apply, and anything it applies is saved to History so it can be undone."

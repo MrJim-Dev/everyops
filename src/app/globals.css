@@ -86,6 +86,18 @@
   --animate-orbit: orbit 900ms linear infinite;
   /* The EveryOps mark while the AI works: bars draw in and out, staggered. A loop on the strong in-out curve. */
   --animate-mark: mark-think 1400ms cubic-bezier(0.77, 0, 0.175, 1) infinite;
+  /* Setup's live preview: a page tossed into the sidebar from the canvas, settling with a small overshoot. */
+  --animate-throw-in: throw-in 520ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  /* Setup's live preview: a tab dropped into the tab bar. */
+  --animate-drop-in: drop-in 420ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  /* The tint behind something that just landed: up quickly, then gone. */
+  --animate-land: land 1000ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  /* The setup cursor pressing as it reaches what it added (waits for the glide to finish). */
+  --animate-tap: tap 240ms cubic-bezier(0.23, 1, 0.32, 1) 520ms;
+  /* A soft band of light crossing a page that's still being built. Constant motion, so linear. */
+  --animate-sweep: sweep 2400ms linear infinite;
+  /* Chart bars on a page being built, rising and falling as if the numbers were settling. */
+  --animate-breathe: breathe 2800ms cubic-bezier(0.77, 0, 0.175, 1) infinite;
 
   @keyframes rise {
     from {
@@ -190,6 +202,61 @@
     45% {
       transform: scaleX(0.38);
       opacity: 0.45;
+    }
+  }
+  @keyframes throw-in {
+    from {
+      opacity: 0;
+      transform: translate(32px, -10px) rotate(-6deg) scale(0.92);
+    }
+    60% {
+      opacity: 1;
+      transform: translate(-3px, 1px) rotate(1deg) scale(1.01);
+    }
+    to {
+      transform: none;
+    }
+  }
+  @keyframes drop-in {
+    from {
+      opacity: 0;
+      transform: translateY(-10px) rotate(-3deg) scale(0.94);
+    }
+    65% {
+      opacity: 1;
+      transform: translateY(1px) rotate(0.5deg);
+    }
+    to {
+      transform: none;
+    }
+  }
+  @keyframes land {
+    from {
+      opacity: 0;
+    }
+    25% {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes tap {
+    40% {
+      transform: scale(0.82);
+    }
+  }
+  @keyframes sweep {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(300%);
+    }
+  }
+  @keyframes breathe {
+    50% {
+      transform: scaleY(0.78);
     }
   }
 }

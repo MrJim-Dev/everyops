@@ -1,10 +1,12 @@
 import "server-only";
 import { sql } from "kysely";
+import { normalizeUrl } from "@/lib/blueprint/contact";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, FieldValue, FormView, RecordData } from "@/lib/blueprint/types";
 import { createRecord, isImagePath } from "@/lib/engine/records";
 import { autoReferenceFields, nextReference } from "@/lib/engine/references";
 import { isTimeRange } from "@/lib/format";
+import { listedText, publicTableData } from "@/lib/public/page-data";
 import {
   formatCell,
   formPageOf,
@@ -28,7 +30,10 @@ import {
 } from "@/lib/public/slots";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { dateKey } from "@/lib/time";
+import { takeToken } from "./ai/rate-limit";
+import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
+import { managePath } from "./manage";
 import { saveImage } from "./storage";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
 
@@ -68,7 +73,19 @@ export async function publicPage(
     new Date(),
     doc.meta.name,
   );
-  return page ? { site, page } : null;
+  if (!page) return null;
+  if (page.type === "html") page.listed = listedText(bp, doc.records, page);
+  return { site, page };
+}
+
+/**
+ * A table view the owner shared as public data, for public custom pages; null when the workspace isn't published.
+ */
+export async function sharedData(slug: string, viewId: string) {
+  const doc = await readDoc(slug);
+  if (!doc || doc.meta.setup) return null;
+  const data = publicTableData(doc.blueprint, doc.records, viewId);
+  return data.ok ? data : null;
 }
 
 export async function publicSlots(
@@ -139,6 +156,16 @@ function draftFromVisitor(
         break;
       case "long_text":
         value = text(v, 4000);
+        break;
+      // Kept as typed (trimmed) so the engine refuses a wrong one with a message, instead of dropping it.
+      case "email":
+        value = text(v, 254);
+        break;
+      case "phone":
+        value = text(v, 40);
+        break;
+      case "url":
+        value = typeof v === "string" ? (normalizeUrl(v.slice(0, 2000)) ?? text(v, 300)) : undefined;
         break;
       case "number":
       case "money":
@@ -336,7 +363,14 @@ export async function quotePublicForm(
 }
 
 export type SubmitResult =
-  | { ok: true; reference: string; title: string; summary: { name: string; text: string }[] }
+  | {
+      ok: true;
+      reference: string;
+      title: string;
+      summary: { name: string; text: string }[];
+      /** A link to this booking for the visitor (/b/TOKEN): its status, details and a picture to add later. */
+      manage?: string;
+    }
   | { ok: false; status: number; message: string; fieldErrors?: { fieldId?: string; message: string }[] };
 
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : undefined);
@@ -355,7 +389,8 @@ export async function submitPublicForm(
   rawExtras: Record<string, unknown> = {},
 ): Promise<SubmitResult> {
   if (!ID.test(slug)) return { ok: false, status: 404, message: "This page doesn't exist." };
-  return db.transaction().execute(async (trx) => {
+  let emailRuns: number[] = [];
+  const result: SubmitResult = await db.transaction().execute(async (trx): Promise<SubmitResult> => {
     // The same lock browser saves take, so revs stay put while the booking is checked and written.
     const { rows } = await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
     const bp = rows.length ? await currentBlueprint(trx, slug) : undefined;
@@ -381,6 +416,16 @@ export async function submitPublicForm(
     const saved = await putRecords(trx, slug, writes);
     if (saved.conflicts.length)
       throw new Error(`public submission conflicted on ${saved.conflicts.join(", ")}`);
+    if (fireOnSave(bp))
+      emailRuns = await logSaveRuns(
+        trx,
+        slug,
+        bp,
+        writes.map((w) => ({ before: before.get(w.record.id)?.record, after: w.record })),
+        data.records,
+        "booking",
+        now,
+      );
     await sql`update workspace set updated_at = now() where id = ${slug}`.execute(trx);
     const shown = entity.fields.filter(
       (f) =>
@@ -397,6 +442,7 @@ export async function submitPublicForm(
           .map((f) => record.data[f.id])
           .find((v): v is string => typeof v === "string" && !!v) ?? record.id.slice(-6).toUpperCase(),
       title: recordTitle(entity, record),
+      manage: managePath({ workspace: slug, view: view.id, record: record.id }, now),
       summary: [
         ...shown
           .filter((f) => f.type !== "money" && !(f.type === "formula" && f.formula?.resultType === "money"))
@@ -415,17 +461,16 @@ export async function submitPublicForm(
       ],
     } as const;
   });
+  deliverSoon(emailRuns);
+  return result;
 }
 
-/* A small per-address limit so a public form can't be flooded. */
-const hits = new Map<string, number[]>();
-export function allowSubmission(key: string, limit = 8, windowMs = 10 * 60_000): boolean {
-  const now = Date.now();
-  const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
-  if (recent.length >= limit) return false;
-  recent.push(now);
-  hits.set(key, recent);
-  return true;
+/**
+ * A small per-address limit so a public form, upload or page can't be flooded. Counted in Postgres (shared by every
+ * Cloud Run instance and kept across restarts), like the AI limit; it falls back to memory if the database fails.
+ */
+export async function allowSubmission(key: string, limit = 8, windowMs = 10 * 60_000): Promise<boolean> {
+  return (await takeToken("public:" + key, limit, windowMs)).ok;
 }
 
 export type UploadResult = { ok: true; url: string } | { ok: false; status: number; message: string };

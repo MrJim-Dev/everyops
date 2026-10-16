@@ -2,6 +2,7 @@ import { z } from "zod";
 import { attachmentRef } from "@/lib/assistant/attachments";
 import { type InterviewPartial, interviewTurn } from "@/server/ai/interview";
 import { takeAiToken } from "@/server/ai/rate-limit";
+import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { apiUser, sameOrigin } from "@/server/session-api";
 
 const body = z.object({
@@ -42,6 +43,9 @@ export async function POST(request: Request) {
       { ok: false, message: "That's a lot of messages. Wait a few minutes and try again." },
       { status: 429 },
     );
+  const overBudget = await startAiUsage(`account:${user.id}`);
+  if (overBudget) return overBudget;
+  enterAiUsage(`account:${user.id}`);
   // JSON lines: the reply as Gemini writes it ({ type: "partial" }, or partial: null when a rejected answer is being
   // written again), a ping every 10 s, then { type: "done", result }. The owner reads the reply seconds in, while
   // the rest of the turn (questions, plan, the brief) is still being written.

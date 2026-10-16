@@ -1,3 +1,4 @@
+import { isEmail, isFilePath, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
 import { findRecord, getEntity, optionOf } from "@/lib/blueprint/lookup";
 import type {
   Blueprint,
@@ -5,10 +6,10 @@ import type {
   Entity,
   FieldValue,
   RecordData,
-  Rule,
   WorkspaceData,
 } from "@/lib/blueprint/types";
 import { formatRange, isTimeRange } from "@/lib/format";
+import { isOn, runSaveRules } from "./automations";
 import { findConflict, resourceLabel } from "./availability";
 import type { RecordOp } from "./changes";
 import { computeAll } from "./compute";
@@ -68,6 +69,28 @@ export function validateRecord(
         if (!isImagePath(value))
           errors.push({ fieldId: field.id, message: `Upload ${field.name.toLowerCase()} again` });
         break;
+      case "email":
+        if (typeof value !== "string" || !isEmail(value))
+          errors.push({
+            fieldId: field.id,
+            message: `${field.name} needs an email address like name@example.com`,
+          });
+        break;
+      case "phone":
+        if (typeof value !== "string" || !isPhone(value))
+          errors.push({
+            fieldId: field.id,
+            message: `${field.name} needs a phone number like 0917 555 0123`,
+          });
+        break;
+      case "url":
+        if (typeof value !== "string" || !normalizeUrl(value))
+          errors.push({ fieldId: field.id, message: `${field.name} needs a web address like example.com` });
+        break;
+      case "file":
+        if (!isFilePath(value))
+          errors.push({ fieldId: field.id, message: `Upload ${field.name.toLowerCase()} again` });
+        break;
     }
   }
   if (errors.length === 0 && entity.booking) {
@@ -86,65 +109,7 @@ export function validateRecord(
 
 /* ---------- Rules ---------- */
 
-function template(message: string, data: RecordData): string {
-  return message.replace(/\{\{(\w+)\}\}/g, (_, id: string) => String(data[id] ?? ""));
-}
-
-function matches(rule: Rule, record: DataRecord, event: "created" | "updated", changed: string[]) {
-  const t = rule.trigger;
-  if (t.entityId !== record.entityId) return false;
-  if (t.event === "created") return event === "created";
-  if (t.event === "updated") return event === "updated";
-  return (
-    event === "updated" &&
-    !!t.fieldId &&
-    changed.includes(t.fieldId) &&
-    (t.to === undefined || record.data[t.fieldId] === t.to)
-  );
-}
-
-function runRules(
-  bp: Blueprint,
-  records: DataRecord[],
-  record: DataRecord,
-  event: "created" | "updated",
-  changed: string[],
-  now: Date,
-): { records: DataRecord[]; notices: string[] } {
-  const notices: string[] = [];
-  let rows = records;
-  const entity = getEntity(bp, record.entityId);
-  for (const rule of bp.rules) {
-    if (!matches(rule, record, event, changed)) continue;
-    const ctx = recordContext(bp, entity, record.data, rows, now);
-    if (rule.when && !truthy(run(rule.when, ctx))) continue;
-    for (const raw of rule.actions) {
-      // Saved automations with the stock field or amount left blank still do what their name says.
-      const action = completeAction(bp, rule, raw);
-      if (!action) continue;
-      if (action.type === "notify") {
-        notices.push(template(action.message, record.data));
-        continue;
-      }
-      const targetId = action.target.kind === "self" ? record.id : record.data[action.target.fieldId];
-      if (typeof targetId !== "string") continue;
-      rows = rows.map((row) => {
-        if (row.id !== targetId) return row;
-        const current = row.data[action.fieldId];
-        const value =
-          action.type === "set_field"
-            ? run(action.value, ctx)
-            : (Number(current) || 0) + (Number(run(action.delta, ctx)) || 0);
-        return {
-          ...row,
-          data: { ...row.data, [action.fieldId]: value },
-          updatedAt: now.toISOString(),
-        };
-      });
-    }
-  }
-  return { records: rows, notices };
-}
+// What a save sets off lives in ./automations (shared with public bookings and the server runner).
 
 type Contribution = { targetId: string; fieldId: string; amount: number };
 
@@ -158,7 +123,8 @@ function contributions(bp: Blueprint, records: DataRecord[], record: DataRecord,
   if (!entity) return [];
   const out: Contribution[] = [];
   for (const rule of bp.rules) {
-    if (rule.trigger.event !== "created" || rule.trigger.entityId !== record.entityId) continue;
+    if (!isOn(rule) || rule.trigger.event !== "created" || rule.trigger.entityId !== record.entityId)
+      continue;
     const ctx = recordContext(bp, entity, record.data, records, now);
     if (rule.when && !truthy(run(rule.when, ctx))) continue;
     for (const raw of rule.actions) {
@@ -230,7 +196,7 @@ export function createRecord(
     createdAt: stamp,
     updatedAt: stamp,
   };
-  const ruled = runRules(bp, [...ws.records, record], record, "created", [], now);
+  const ruled = runSaveRules(bp, [...ws.records, record], record, "created", [], now);
   const records = computeAll(bp, ruled.records, now);
   const saved = records.find((r) => r.id === record.id) ?? record;
   return { ok: true, data: { ...ws, records }, record: saved, notices: ruled.notices };
@@ -255,7 +221,7 @@ export function updateRecord(
   );
   const record: DataRecord = { ...existing, data, updatedAt: now.toISOString() };
   const replaced = ws.records.map((r) => (r.id === id ? record : r));
-  const ruled = runRules(bp, replaced, record, "updated", changed, now);
+  const ruled = runSaveRules(bp, replaced, record, "updated", changed, now);
   let synced = settle(
     ruled.records,
     contributions(bp, ws.records, existing, now),

@@ -460,7 +460,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
         });
       } }));
       default: {
-        var t = /email/i.test(f.name) ? "email" : /phone|mobile/i.test(f.name) ? "tel" : "text";
+        var t = f.type === "email" || /email/i.test(f.name) ? "email" : f.type === "phone" || /phone|mobile/i.test(f.name) ? "tel" : f.type === "url" ? "url" : "text";
         return el("input", Object.assign({ type: t, value: v || "", autocomplete: t === "tel" ? "tel" : t === "email" ? "email" : /name/i.test(f.name) ? "name" : null, oninput: on }, common));
       }
     }
@@ -579,6 +579,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
       el("h2", { text: "You're booked!" }),
       el("p", { class: "muted", text: "Your reference is " + r.reference + ". Keep it for when you arrive." }),
       el("dl", {}, (r.summary || []).map(function (l) { return el("div", {}, [el("dt", { text: l.name }), el("dd", { text: l.text })]); })),
+      r.manage ? el("p", { class: "muted" }, [el("a", { href: r.manage, target: "_top" }, ["View or update your booking"]), " (keep this link to send a proof of payment later)"]) : el("span", {}),
       el("a", { class: "button primary", href: HOME, target: "_top" }, ["Back to home"])
     ]));
   }

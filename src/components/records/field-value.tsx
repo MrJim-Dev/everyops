@@ -1,7 +1,8 @@
 "use client";
 
-import { CheckIcon } from "@phosphor-icons/react";
+import { ArrowUpRightIcon, CheckIcon, FileIcon } from "@phosphor-icons/react";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { fileName, isFilePath, normalizeUrl, telHref, urlLabel } from "@/lib/blueprint/contact";
 import { displayKind } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { Field, FieldValue as Value } from "@/lib/blueprint/types";
@@ -92,6 +93,66 @@ export function FieldValue({
       );
     case "person":
       return <PersonChip name={String(value)} />;
+    case "email":
+      return (
+        <a
+          href={`mailto:${String(value)}`}
+          onClick={(e) => e.stopPropagation()}
+          className={cn("truncate text-primary underline-offset-2 hover:underline", className)}
+        >
+          {String(value)}
+        </a>
+      );
+    case "phone":
+      return (
+        <a
+          href={telHref(String(value))}
+          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            "truncate whitespace-nowrap text-primary underline-offset-2 hover:underline",
+            className,
+          )}
+        >
+          {String(value)}
+        </a>
+      );
+    case "url": {
+      const href = normalizeUrl(String(value));
+      return href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            "inline-flex max-w-full items-center gap-1 text-primary underline-offset-2 hover:underline",
+            className,
+          )}
+        >
+          <span className="truncate">{urlLabel(href)}</span>
+          <ArrowUpRightIcon className="size-3 shrink-0" />
+        </a>
+      ) : (
+        <span className={cn("truncate", className)}>{String(value)}</span>
+      );
+    }
+    case "file":
+      return isFilePath(value) ? (
+        <a
+          href={value}
+          download={fileName(value)}
+          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            "inline-flex max-w-full items-center gap-1.5 rounded-md border bg-muted/40 px-1.5 py-0.5 text-[12.5px] hover:bg-muted",
+            className,
+          )}
+        >
+          <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{fileName(value)}</span>
+        </a>
+      ) : (
+        <Empty />
+      );
     case "image":
       return typeof value === "string" ? (
         // biome-ignore lint/performance/noImgElement: uploads are served by our own route at their own size

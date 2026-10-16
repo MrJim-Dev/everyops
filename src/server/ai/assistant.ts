@@ -4,7 +4,12 @@ import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import type { DataEvidence } from "@/lib/assistant/evidence";
 import { memoryContext, type WorkspaceMemory } from "@/lib/assistant/memory";
-import { permissionsText } from "@/lib/assistant/permissions";
+import {
+  type AssistantPermissions,
+  appliesOnItsOwn,
+  permissionsText,
+  removesSomething,
+} from "@/lib/assistant/permissions";
 import { withoutPickedNote } from "@/lib/assistant/picked";
 import { fieldUsage, renameInDesign, renameInPages } from "@/lib/assistant/related";
 import {
@@ -67,9 +72,10 @@ import {
   assistantAnswer,
   designOp,
 } from "./assistant-prompt";
+import { toAssistantRule } from "./assistant-rule";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
 import { reviewCoverage } from "./coverage";
-import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
+import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toView } from "./design";
 import { view } from "./design-prompt";
 import { dataDigest } from "./digest";
 import { generateJsonHedged } from "./gemini";
@@ -494,7 +500,7 @@ export function toDesignOps(
         else errors.push(`${at}: needs system`);
         break;
       case "add_rule":
-        if (o.rule) ops.push({ op: "add_rule", rule: toRule(o.rule) });
+        if (o.rule) ops.push({ op: "add_rule", rule: toAssistantRule(o.rule) });
         else errors.push(`${at}: needs rule`);
         break;
       case "move_view":
@@ -1149,7 +1155,9 @@ export async function assistantTurn(input: {
                             .join(
                               "",
                             )}${v.fieldIds?.length ? `, fieldIds: ${JSON.stringify(v.fieldIds)}` : ""}`
-                        : "";
+                        : v.type === "table" && v.publicData
+                          ? ", shared as public data for public html pages"
+                          : "";
               return `${v.name} (${v.id}, ${v.type}${v.entityId ? ` of ${v.entityId}` : ""}${extra})`;
             }),
             ...(s.widgetIds.length ? [`${s.widgetIds.length} dashboard widgets`] : []),
@@ -1223,6 +1231,9 @@ ${input.messages
   // Two rounds of fixes: a big multi-part request can slip in a new place after the first one.
   let repairs = 0;
   let restarted = false;
+  // Requirements the last plan was rejected for, when the review was its only problem. Missed again after a repair,
+  // the planner can't add them (dummy pictures it has no way to make); another round would only fail the same way.
+  let missedBefore: string[] = [];
   for (let attempt = 0; attempt < 4; attempt++) {
     status(
       attempt === 0
@@ -1381,7 +1392,27 @@ ${input.messages
         errors.push(...strandedOptions(bp, next, optionUsage(bp, rehearsal?.data.records ?? staged.records)));
     }
     let coverage: ChangePlan["coverage"];
-    if (!errors.length && (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)) {
+    let missed: string[] = [];
+    const quick =
+      !errors.length &&
+      skipsReview(
+        input.messages.at(-1)?.text ?? "",
+        // What Gemini wrote, not the follow-on changes code adds (a renamed page's other tabs, cards and pages).
+        a.plan.ops.length +
+          a.plan.renames.length +
+          a.plan.formulas.length +
+          a.plan.recordOps.length +
+          a.plan.pageTexts.length +
+          a.plan.team.length,
+        { ops: design.ops, recordOps: recordPart.ops, docOps, teamOps },
+        input.memory?.permissions,
+      );
+    if (quick) console.info(JSON.stringify({ event: "request_coverage", skipped: "single_ask" }));
+    if (
+      !quick &&
+      !errors.length &&
+      (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)
+    ) {
       status("Checking each part of your request");
       const checked = await reviewCoverage({
         blueprint: bp,
@@ -1421,6 +1452,7 @@ ${input.messages
           ...withNav,
         };
       errors.push(...checked.errors.map((e) => `Request coverage: ${e}`));
+      missed = checked.missing;
       coverage = checked.covered;
     }
     if (!errors.length && (design.ops.length || recordPart.ops.length || docOps.length || teamOps.length)) {
@@ -1478,6 +1510,20 @@ ${input.messages
         ops: JSON.stringify(a.plan.ops).slice(0, 3000),
       }),
     );
+    const reviewOnly = missed.length > 0 && errors.every((e) => e.startsWith("Request coverage: "));
+    if (reviewOnly && missedBefore.length)
+      return {
+        ok: true,
+        kind: "clarify",
+        reply: `I couldn't fit every part of this into a change I can make here:\n\n${missed
+          .map((m) => `- ${m}`)
+          .join(
+            "\n",
+          )}\n\nNothing has changed. Tell me how you'd like to handle that part (for example, attach the pictures), or ask again without it.`,
+        suggestions: [],
+        ...withNav,
+      };
+    missedBefore = reviewOnly ? missed : [];
     if (repairs === 2) break;
     repairs++;
     if (errors.some((e) => e.endsWith("needs options")))
@@ -1492,6 +1538,32 @@ ${input.messages
     ok: false,
     message: "I couldn't put together a valid change for that. Try describing it a little differently.",
   };
+}
+
+/** Most changes Gemini may write for a plan that skips the request review. */
+const MAX_QUICK_CHANGES = 3;
+
+/**
+ * Whether a plan can go to the person without the request review (a second Gemini call, 8–26 s): a short request that
+ * asks for one thing, a plan of a few changes written by Gemini (`asked`; renaming a page, it renames the page's tab
+ * too) that removes nothing, and only when the person approves it before it applies. There's no other part of the
+ * request to miss, and the plan card already shows what it will do. A one-line request for a lot ("add stock
+ * management") makes a bigger plan and is still reviewed.
+ */
+export function skipsReview(
+  request: string,
+  asked: number,
+  plan: Pick<ChangePlan, "ops" | "recordOps" | "docOps" | "teamOps">,
+  permissions?: AssistantPermissions,
+): boolean {
+  if (asked < 1 || asked > MAX_QUICK_CHANGES || plan.teamOps?.length || removesSomething(plan)) return false;
+  if (permissions && appliesOnItsOwn(plan, permissions)) return false;
+  const ask = withoutPickedNote(request.replace(/^\(About the .+? section I clicked\)\n?/, "")).trim();
+  return (
+    ask.length > 0 &&
+    ask.length <= 160 &&
+    !/[,;\n&]|\b(and|also|then|plus|as well|but|except|unless)\b/i.test(ask)
+  );
 }
 
 /**

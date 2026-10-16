@@ -3,6 +3,7 @@ import { type Checkup, checkupKey } from "@/lib/assistant/checkup";
 import { blueprintOf, canEdit } from "@/lib/store/workspace-model";
 import { runCheckup } from "@/server/ai/checkup";
 import { takeAiToken } from "@/server/ai/rate-limit";
+import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { hideFinding, readCheckup, readMemory, saveCheckup } from "@/server/workspace-memory";
 import { loadWorkspace, roleIn } from "@/server/workspaces";
@@ -32,6 +33,9 @@ export async function GET(request: Request) {
       { ok: false, message: "Checked a lot already. Try again in a few minutes." },
       { status: 429 },
     );
+  const overBudget = await startAiUsage(workspaceId);
+  if (overBudget) return overBudget;
+  enterAiUsage(workspaceId);
   try {
     const started = Date.now();
     const findings = await runCheckup({

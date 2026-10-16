@@ -44,6 +44,25 @@ export function templateOverview(bp: Blueprint): void {
   const plural = entity.pluralName;
   const resource = field(entity.booking?.resourceFieldId);
   const table = bp.views.find((v) => v.type === "table" && v.entityId === entity.id);
+  // The template fills gaps around what the designer already put on the Overview. When the owner asked for their own
+  // chart over time (collections by month) or their own list of what's owed (overdue invoices by due date), the
+  // template's revenue-by-day chart and Needs payment list stay out: the brief check read them as the owner's
+  // request done wrong and rejected every repair.
+  const designed = (bp.systems.find((s) => /overview|dashboard/i.test(`${s.id} ${s.name}`))?.widgetIds ?? [])
+    .map((wid) => bp.widgets.find((w) => w.id === wid))
+    .filter((w): w is Widget => !!w);
+  const ownChart = designed.some(
+    (w) => w.type === "chart" && !!w.chart?.dateFieldId && !w.chart.groupByFieldId,
+  );
+  const owed = (w: Widget) =>
+    /unpaid|payment|pending|due|overdue|outstanding/i.test(`${w.title} ${w.filter ?? ""}`);
+  const ownOwed = designed.some((w) => w.type === "list" && owed(w));
+  const addChart = !ownChart;
+  const addOwed = !!isUnpaid && !ownOwed;
+  // A list of what's owed reads in due order when the records have a due date.
+  const due = entity.fields.find(
+    (f) => (f.type === "date" || f.type === "datetime") && /due/i.test(`${f.id} ${f.name}`),
+  );
   const built: Widget[] = [
     {
       id: id("count_today"),
@@ -76,15 +95,16 @@ export function templateOverview(bp: Blueprint): void {
       filter: both(`is_today(${date.id})`, isUnpaid),
       metric: { op: "sum", fieldId: money.id },
     });
-  built.push({
-    id: id("by_day"),
-    title: money ? "Revenue this month" : `${plural} this month`,
-    entityId: entity.id,
-    type: "chart",
-    filter: both(money ? isPaid || live : live),
-    metric: money ? { op: "sum", fieldId: money.id } : { op: "count" },
-    chart: { kind: "bar", dateFieldId: date.id, bucket: "day" },
-  });
+  if (addChart)
+    built.push({
+      id: id("by_day"),
+      title: money ? "Revenue this month" : `${plural} this month`,
+      entityId: entity.id,
+      type: "chart",
+      filter: both(money ? isPaid || live : live),
+      metric: money ? { op: "sum", fieldId: money.id } : { op: "count" },
+      chart: { kind: "bar", dateFieldId: date.id, bucket: "day" },
+    });
   if (timed)
     built.push({
       id: id("schedule"),
@@ -95,7 +115,7 @@ export function templateOverview(bp: Blueprint): void {
       metric: { op: "count" },
       agenda: { dateFieldId: date.id, fieldIds: [resource?.id, status?.id].filter((x): x is string => !!x) },
     });
-  if (isUnpaid)
+  if (addOwed)
     built.push({
       id: id("needs_payment"),
       title: "Needs payment",
@@ -104,10 +124,10 @@ export function templateOverview(bp: Blueprint): void {
       filter: isUnpaid,
       metric: { op: "count" },
       list: {
-        fieldIds: [date.id, resource?.id, money?.id].filter((x): x is string => !!x),
+        fieldIds: [(due ?? date).id, resource?.id, money?.id].filter((x): x is string => !!x),
         limit: 5,
         ...(table ? { viewId: table.id } : {}),
-        sort: [{ fieldId: date.id, dir: "asc" }],
+        sort: [{ fieldId: (due ?? date).id, dir: "asc" }],
       },
     });
   if (timed)
@@ -134,18 +154,27 @@ export function templateOverview(bp: Blueprint): void {
     bp.systems.unshift(fresh);
     board = fresh;
   }
-  // What the designer put on the Overview stays below the template, unless the template already shows it.
+  // What the designer put on the Overview stays below the template, unless the template already shows it: a plain
+  // count or total of the same records, their schedule, busy hours, revenue by day, or what's unpaid. Cards the owner
+  // asked for (a pipeline value, a win rate, a monthly chart) are kept; dropping every stat once removed them all,
+  // and the brief check then rejected each repair for missing them.
   const covered = (w: Widget) =>
-    w.type === "stat" ||
-    (w.entityId === entity.id &&
-      (w.type === "agenda" ||
-        w.type === "heatmap" ||
-        (w.type === "chart" && !!w.chart?.dateFieldId && !w.chart.groupByFieldId) ||
-        (w.type === "list" && /unpaid|payment|pending|due/i.test(`${w.title} ${w.filter ?? ""}`))));
+    w.entityId === entity.id &&
+    ((w.type === "stat" &&
+      !w.filter &&
+      (w.metric.op === "count" || (w.metric.op === "sum" && w.metric.fieldId === money?.id))) ||
+      w.type === "agenda" ||
+      w.type === "heatmap" ||
+      (w.type === "chart" &&
+        addChart &&
+        !!w.chart?.dateFieldId &&
+        !w.chart.groupByFieldId &&
+        (w.chart.bucket ?? "day") === "day") ||
+      (w.type === "list" && addOwed && owed(w)));
   const extras = board.widgetIds
     .map((wid) => bp.widgets.find((w) => w.id === wid))
     .filter((w): w is Widget => !!w && !covered(w))
-    .slice(0, 4);
+    .slice(0, 8);
   const others = bp.systems.filter((s) => s !== board);
   const kept = new Set(extras.map((w) => w.id));
   bp.widgets = bp.widgets.filter(
@@ -179,14 +208,20 @@ export function mainRecords(bp: Blueprint): { entity: Entity; date: Field } | un
   return entity ? { entity, date: dateOf(entity) as Field } : undefined;
 }
 
-/** The amount a record is worth: its total when it has one, else its first money field that isn't a rate. */
+/**
+ * The amount a record is worth: its total when it has one, else its first money field that isn't a rate. Side
+ * amounts (a subtotal, VAT, a discount, a deposit) only when there's nothing else: an invoice's VAT once stood in
+ * for its total on every Overview card.
+ */
 export function moneyField(e: Entity): Field | undefined {
   const money = e.fields.filter(
     (f) => f.type === "money" || (f.type === "formula" && f.formula?.resultType === "money"),
   );
+  const text = (f: Field) => `${f.id} ${f.name}`;
+  const side = /sub.?total|vat|tax|discount|deposit|fee|commission|tip|rate|price|cost|unit|per\b/i;
   return (
-    money.find((f) => /total|grand|amount/i.test(`${f.id} ${f.name}`)) ??
-    money.find((f) => !/rate|price|cost|unit|per/i.test(`${f.id} ${f.name}`)) ??
+    money.find((f) => /total|grand|amount/i.test(text(f)) && !side.test(text(f))) ??
+    money.find((f) => !side.test(text(f))) ??
     money[0]
   );
 }

@@ -16,7 +16,7 @@ import type { PublicField, PublicForm, ResolvedBlock } from "@/lib/public/resolv
 import { at, dateKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
-type Done = { reference: string; title: string; summary: { name: string; text: string }[] };
+type Done = { reference: string; title: string; summary: { name: string; text: string }[]; manage?: string };
 
 const selectClass =
   "h-9 w-full rounded-md border bg-transparent px-2.5 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50 aria-invalid:border-destructive";
@@ -184,6 +184,14 @@ export function PublicFormView({
               </div>
             ))}
           </dl>
+        ) : null}
+        {done.manage ? (
+          <a
+            href={done.manage}
+            className="mt-1 text-[13.5px] font-medium text-primary underline-offset-2 hover:underline"
+          >
+            View or update your booking
+          </a>
         ) : null}
         <Button
           variant="outline"
@@ -544,7 +552,15 @@ function PublicInput({
       return (
         <Input
           {...common}
-          type={/email/i.test(field.name) ? "email" : /phone|mobile/i.test(field.name) ? "tel" : "text"}
+          type={
+            field.type === "email" || /email/i.test(field.name)
+              ? "email"
+              : field.type === "phone" || /phone|mobile/i.test(field.name)
+                ? "tel"
+                : field.type === "url"
+                  ? "url"
+                  : "text"
+          }
           value={String(value ?? "")}
           onChange={(e) => onChange(e.target.value)}
         />

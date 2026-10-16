@@ -47,10 +47,24 @@ export const turn = z.object({
   brief: z
     .string()
     .describe(
-      "Only when designing: a complete specification of the systems to build (records, fields, screens, dashboards, rules, sample data), written for the designer. Empty when asking.",
+      "Only when designing: a complete specification of the systems to build (records, fields, screens, dashboards, rules, what sample data to make), written for the designer. Empty when asking.",
     ),
 });
 export type Turn = z.infer<typeof turn>;
+
+/**
+ * Longest text, in characters, for the interview's short fields. A value that runs far past its limit is stopped as a
+ * runaway in seconds instead of streaming for half a minute.
+ */
+export const INTERVIEW_TEXT_LIMITS = {
+  question: 200,
+  answer: 300,
+  options: 60,
+  label: 60,
+  value: 300,
+  plan: 200,
+  workspaceName: 80,
+};
 
 export const INTERVIEW_SYSTEM = `You are Ask EveryOps, the setup assistant inside EveryOps. EveryOps gives a small business in the
 Philippines the systems it needs (bookings, point of sale, projects, HR, finance, content, inventory, and more) inside one
@@ -129,14 +143,17 @@ Ask about each system the owner named (a POS and HR in one business means both l
   every status with all its stages in order (where new records start, the working stages, and each way it ends),
   the lists the owner will add to as their own record types (categories, plans, rates, types, departments),
   the sidebar pages (one per area the owner manages, e.g. Bookings, Courts, Players, plus every separate page
-  they asked for, such as "a Calendar page") and the tabs on each, the dashboard, any rules, and 3 to 5 realistic sample
-  records for each main record type, with Filipino names and PHP amounts.
+  they asked for, such as "a Calendar page") and the tabs on each, the dashboard, any rules, and one line per main
+  record type on the sample records to make (how many, and the real names, items and prices the owner gave).
+  Never write sample records out one by one: the designer makes them, with Filipino names and PHP amounts.
   Include everything in the plan: public forms with their steps and add-ons (which record type holds the items, the
   line items and the totals), payment methods, approvals and dashboards.
   Use every answer on the checklist (real names, counts, hours and prices) in the brief and its sample records.
   Booking businesses get a custom HTML landing page and a custom HTML booking page (EveryOps writes both), so the
   brief only lists the public booking form's steps, fields and add-ons. Name the community system you built on
   (by its id) in the brief when you used one; the plan, profile and message never show ids.
+  When the conversation comes with a "Starting point" (a community system EveryOps will adapt), the brief is short
+  and follows the Starting point's instructions instead: the facts, what to add, remove and rename.
   Your message then tells the owner in one or two sentences what you're building for them. Never mention the brief,
   the designer, blueprints or other internal steps.
 - Keep the profile up to date every turn. Write like a helpful colleague: short, plain, no jargon, no field ids.

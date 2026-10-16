@@ -7,6 +7,7 @@ import {
   ThinkingLevel,
 } from "@google/genai";
 import { z } from "zod";
+import { countTokens } from "./usage";
 
 /**
  * Gemini on Vertex AI. On Cloud Run the client signs in as the service account (everyops-run);
@@ -47,7 +48,7 @@ export type GenerateResult<T> =
       ms: number;
       tokens: { input: number; output: number; thinking: number };
     }
-  | { ok: false; error: string; retryable: boolean };
+  | { ok: false; error: string; retryable: boolean; rateLimited?: boolean };
 
 /**
  * Read-only functions Gemini may call while it answers (the assistant's record lookups). Each round's calls run, their
@@ -335,6 +336,11 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       usage.output += roundUsage?.candidatesTokenCount ?? 0;
       usage.thinking += roundUsage?.thoughtsTokenCount ?? 0;
       usage.cached += roundUsage?.cachedContentTokenCount ?? 0;
+      countTokens(
+        (roundUsage?.promptTokenCount ?? 0) +
+          (roundUsage?.candidatesTokenCount ?? 0) +
+          (roundUsage?.thoughtsTokenCount ?? 0),
+      );
       const wanted = parts.filter((p) => p.functionCall);
       if (runaway || !wanted.length || !input.tools) break;
       calls += wanted.length;
@@ -347,7 +353,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
             functionResponse: {
               name: call.name,
               ...(call.id ? { id: call.id } : {}),
-              response: { output: JSON.stringify(output).slice(0, 12_000) },
+              response: { output: fitToolOutput(output, 12_000) },
             },
           } satisfies Part;
         }),
@@ -428,6 +434,8 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
     }
     console.error(JSON.stringify({ event: "gemini_error", task: input.task, model: MODEL, message }));
     const timedOut = /abort|timeout/i.test(message);
+    // Out of quota: retried, but only after a pause (see hedged), since asking again at once only adds to the load.
+    const rateLimited = /\b429\b|RESOURCE_EXHAUSTED|Too Many Requests/i.test(message);
     // A dropped connection ("terminated" is undici's word for a response cut off mid-stream), a reset socket or a
     // busy Vertex answers fine on the next try. A bad request (400) does not, so it stays final.
     const transient =
@@ -436,12 +444,52 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       );
     return {
       ok: false,
-      error: timedOut ? "Gemini took too long to answer." : "Gemini is unavailable right now.",
-      retryable: timedOut || transient,
+      error: timedOut
+        ? "Gemini took too long to answer."
+        : rateLimited
+          ? "Gemini is busy right now. Try again in a minute."
+          : "Gemini is unavailable right now.",
+      retryable: timedOut || transient || rateLimited,
+      ...(rateLimited ? { rateLimited: true } : {}),
     };
   } finally {
     clearTimeout(idleTimer);
   }
+}
+
+/**
+ * A lookup result as JSON of at most `max` characters. Cutting the text instead left Gemini half a record and broken
+ * JSON; here the longest list loses rows until it fits, and a note says how many are left out.
+ */
+export function fitToolOutput(output: unknown, max: number): string {
+  const whole = JSON.stringify(output) ?? "null";
+  if (whole.length <= max) return whole;
+  const copy = JSON.parse(whole) as unknown;
+  const lists: unknown[][] = [];
+  const collect = (node: unknown) => {
+    if (Array.isArray(node)) {
+      lists.push(node);
+      node.forEach(collect);
+    } else if (node && typeof node === "object") Object.values(node).forEach(collect);
+  };
+  collect(copy);
+  const longest = lists.sort((a, b) => JSON.stringify(b).length - JSON.stringify(a).length)[0];
+  if (longest && longest.length > 1) {
+    const total = longest.length;
+    let text = whole;
+    while (longest.length > 1) {
+      longest.splice(Math.max(1, Math.floor(longest.length * 0.75)));
+      text = JSON.stringify({
+        result: copy,
+        cut: `Only the first ${longest.length} of ${total} items fit here. Ask a narrower lookup for the rest.`,
+      });
+      if (text.length <= max) return text;
+    }
+  }
+  return JSON.stringify({
+    cut: "This result was too large to show. Ask a narrower lookup.",
+    preview: whole.slice(0, Math.max(0, max - 200)),
+  });
 }
 
 /** Gemini sometimes writes null for an optional field it means to leave out; drop those keys before validating. */
@@ -498,11 +546,17 @@ export function generateJsonHedged<T>(
   );
 }
 
-type Outcome = { ok: true } | { ok: false; retryable: boolean };
+type Outcome = { ok: true } | { ok: false; retryable: boolean; rateLimited?: boolean };
+
+/** How long to wait before asking again after an out-of-quota answer: about 2, 4, then 8 s, with some jitter. */
+export function quotaPause(failures: number, random = Math.random): number {
+  return Math.min(8_000, 2_000 * 2 ** failures) * (0.75 + random() * 0.5);
+}
 
 /**
  * Runs `run` and, while no good answer is in, a fresh copy every `hedgeMs` (or at once after a retryable failure).
  * With afterSilence, a call's hedgeMs starts over each time it reports progress, and each call starts at most one twin.
+ * After an out-of-quota failure the next copy waits (quotaPause), and no twins start while waiting.
  */
 export function hedged<R extends Outcome>(
   run: (signal: AbortSignal, progress: () => void, attempt: number) => Promise<R>,
@@ -516,6 +570,8 @@ export function hedged<R extends Outcome>(
   return new Promise((resolve) => {
     let started = 0;
     let running = 0;
+    let waiting = false;
+    let quotaFailures = 0;
     let done = false;
     let last: R | undefined;
     const controllers: AbortController[] = [];
@@ -537,7 +593,7 @@ export function hedged<R extends Outcome>(
         clearTimeout(hedge);
         hedge = setTimeout(() => {
           fired = true;
-          if (done || started >= attempts) return;
+          if (done || waiting || quotaFailures || started >= attempts) return;
           onHedge?.(started + 1);
           launch();
         }, hedgeMs);
@@ -552,8 +608,17 @@ export function hedged<R extends Outcome>(
         if (done) return;
         if (result.ok) return finish(result);
         last = result;
-        if (result.retryable) launch();
-        if (running === 0) finish(last);
+        if (result.retryable && result.rateLimited && !waiting && started < attempts) {
+          waiting = true;
+          setTimeout(() => {
+            waiting = false;
+            launch();
+            if (running === 0 && !done) finish(last as R);
+          }, quotaPause(quotaFailures++));
+          return;
+        }
+        if (result.retryable && !waiting) launch();
+        if (running === 0 && !waiting) finish(last);
       });
     };
     launch();

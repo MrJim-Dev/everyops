@@ -39,3 +39,27 @@ export async function uploadImage(
   if (!body?.ok || !body.url) throw new Error(body?.message ?? "Couldn't upload the image. Try again.");
   return body.url;
 }
+
+/** Largest document a file field takes. */
+export const MAX_FILE_BYTES = 10_000_000;
+
+/** Uploads a document for a file field and returns its link (with the file's name). Previews can't keep files. */
+export async function uploadFile(
+  picked: File,
+  workspace: { mode: "live" | "preview"; id: string },
+): Promise<string> {
+  if (workspace.mode === "preview") throw new Error("Files can be added once this workspace is yours.");
+  if (picked.size > MAX_FILE_BYTES) throw new Error("That file is over 10 MB.");
+  const form = new FormData();
+  form.set("file", picked);
+  form.set("workspaceId", workspace.id);
+  form.set("kind", "file");
+  const res = await fetch("/api/uploads", { method: "POST", body: form }).catch(() => null);
+  const body = (await res?.json().catch(() => null)) as {
+    ok: boolean;
+    url?: string;
+    message?: string;
+  } | null;
+  if (!body?.ok || !body.url) throw new Error(body?.message ?? "Couldn't upload the file. Try again.");
+  return body.url;
+}

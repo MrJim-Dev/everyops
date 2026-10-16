@@ -3,6 +3,7 @@ import { attachmentRef } from "@/lib/assistant/attachments";
 import type { Blueprint } from "@/lib/blueprint/types";
 import { planChangeWithGemini } from "@/server/ai/plan-change";
 import { takeAiToken } from "@/server/ai/rate-limit";
+import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { auth } from "@/server/auth";
 
 const body = z.object({
@@ -34,6 +35,9 @@ export async function POST(request: Request) {
       { ok: false, message: "You've asked for a lot of changes. Wait a few minutes and try again." },
       { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } },
     );
+  const overBudget = await startAiUsage(`account:${session.user.id}`);
+  if (overBudget) return overBudget;
+  enterAiUsage(`account:${session.user.id}`);
 
   const result = await planChangeWithGemini(
     parsed.data.blueprint as unknown as Blueprint,

@@ -8,7 +8,7 @@ export async function POST(
 ) {
   const { workspace, view } = await params;
   const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "local";
-  if (!allowSubmission(`upload:${ip}:${workspace}`, 12))
+  if (!(await allowSubmission(`upload:${ip}:${workspace}`, 12)))
     return Response.json(
       { ok: false, message: "Too many uploads. Try again in a few minutes." },
       { status: 429 },

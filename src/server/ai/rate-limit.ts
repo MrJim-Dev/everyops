@@ -14,16 +14,16 @@ const MAX_REQUESTS = Number(process.env.AI_RATE_LIMIT ?? 30);
 export type TokenResult = { ok: true } | { ok: false; retryAfterSeconds: number };
 
 /** How many requests the sliding window holds: all of this window, and the part of the last one still inside it. */
-export function slidingCount(previous: number, current: number, elapsedMs: number) {
-  return previous * Math.max(0, 1 - elapsedMs / WINDOW_MS) + current;
+export function slidingCount(previous: number, current: number, elapsedMs: number, windowMs = WINDOW_MS) {
+  return previous * Math.max(0, 1 - elapsedMs / windowMs) + current;
 }
 
 /** Seconds until enough of the previous window has slid out for one more request (at most until this one ends). */
-function retryAfter(previous: number, current: number, elapsedMs: number, max: number) {
-  const untilWindowEnds = Math.ceil((WINDOW_MS - elapsedMs) / 1000);
+function retryAfter(previous: number, current: number, elapsedMs: number, max: number, windowMs: number) {
+  const untilWindowEnds = Math.ceil((windowMs - elapsedMs) / 1000);
   if (!previous || current >= max) return untilWindowEnds;
   const neededFraction = 1 - (max - current) / previous;
-  return Math.min(untilWindowEnds, Math.max(1, Math.ceil((neededFraction * WINDOW_MS - elapsedMs) / 1000)));
+  return Math.min(untilWindowEnds, Math.max(1, Math.ceil((neededFraction * windowMs - elapsedMs) / 1000)));
 }
 
 /**
@@ -31,8 +31,16 @@ function retryAfter(previous: number, current: number, elapsedMs: number, max: n
  * budget). Refused requests aren't counted, so waiting is enough to be let back in.
  */
 export async function takeAiToken(key: string, max = MAX_REQUESTS): Promise<TokenResult> {
+  return takeToken(key, max, WINDOW_MS);
+}
+
+/**
+ * The same sliding-window limit for any key and window, shared by every instance through Postgres (public forms,
+ * uploads and page data use it with their own prefixes and windows). Falls back to memory when the database fails.
+ */
+export async function takeToken(key: string, max: number, windowMs: number): Promise<TokenResult> {
   const now = Date.now();
-  const start = Math.floor(now / WINDOW_MS) * WINDOW_MS;
+  const start = Math.floor(now / windowMs) * windowMs;
   const elapsed = now - start;
   try {
     const { rows } = await sql<{ current: number; previous: number }>`
@@ -42,7 +50,7 @@ export async function takeAiToken(key: string, max = MAX_REQUESTS): Promise<Toke
         returning hits
       )
       select (select hits from bump) as current,
-             coalesce((select hits from ai_rate_limit where key = ${key} and window_start = ${new Date(start - WINDOW_MS)}), 0) as previous
+             coalesce((select hits from ai_rate_limit where key = ${key} and window_start = ${new Date(start - windowMs)}), 0) as previous
     `.execute(db);
     const current = Number(rows[0]?.current ?? 1);
     const previous = Number(rows[0]?.previous ?? 0);
@@ -50,14 +58,14 @@ export async function takeAiToken(key: string, max = MAX_REQUESTS): Promise<Toke
       void sql`delete from ai_rate_limit where window_start < ${new Date(now - 24 * 60 * 60 * 1000)}`
         .execute(db)
         .catch(() => {});
-    if (slidingCount(previous, current, elapsed) <= max) return { ok: true };
+    if (slidingCount(previous, current, elapsed, windowMs) <= max) return { ok: true };
     await sql`update ai_rate_limit set hits = hits - 1 where key = ${key} and window_start = ${new Date(start)}`.execute(
       db,
     );
-    return { ok: false, retryAfterSeconds: retryAfter(previous, current - 1, elapsed, max) };
+    return { ok: false, retryAfterSeconds: retryAfter(previous, current - 1, elapsed, max, windowMs) };
   } catch (error) {
     warnOnce(error);
-    return takeLocalToken(key, max, now);
+    return takeLocalToken(key, max, now, windowMs);
   }
 }
 
@@ -71,13 +79,32 @@ function warnOnce(error: unknown) {
 
 /** The per-instance fallback: timestamps of recent requests, kept in memory. */
 const hits = new Map<string, number[]>();
-function takeLocalToken(key: string, max: number, now: number): TokenResult {
-  const recent = (hits.get(key) ?? []).filter((t) => now - t < WINDOW_MS);
+function takeLocalToken(key: string, max: number, now: number, windowMs: number): TokenResult {
+  const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
   if (recent.length >= max) {
     hits.set(key, recent);
-    return { ok: false, retryAfterSeconds: Math.ceil((WINDOW_MS - (now - recent[0])) / 1000) };
+    return { ok: false, retryAfterSeconds: Math.ceil((windowMs - (now - recent[0])) / 1000) };
   }
   recent.push(now);
   hits.set(key, recent);
   return { ok: true };
+}
+
+/** How much of the AI limit a key has used in the last 10 minutes (for showing it, not for deciding). */
+export async function aiRequestsUsed(key: string): Promise<{ used: number; max: number }> {
+  const now = Date.now();
+  const start = Math.floor(now / WINDOW_MS) * WINDOW_MS;
+  try {
+    const { rows } = await sql<{ window_start: Date; hits: number }>`
+      select window_start, hits from ai_rate_limit where key = ${key}
+        and window_start in (${new Date(start)}, ${new Date(start - WINDOW_MS)})`.execute(db);
+    const current = rows.find((r) => r.window_start.getTime() === start)?.hits ?? 0;
+    const previous = rows.find((r) => r.window_start.getTime() === start - WINDOW_MS)?.hits ?? 0;
+    return {
+      used: Math.min(MAX_REQUESTS, Math.round(slidingCount(previous, current, now - start))),
+      max: MAX_REQUESTS,
+    };
+  } catch {
+    return { used: 0, max: MAX_REQUESTS };
+  }
 }

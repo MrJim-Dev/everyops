@@ -67,7 +67,12 @@ describe("designWorkspace when repairs run out", () => {
     vi.mocked(generateJsonHedged).mockImplementation(
       async (_schema, input) => (input.task === "design" ? ok(habitDesign()) : ok({})) as never,
     );
-    vi.mocked(reviewCoverage).mockResolvedValue({ covered: [], errors: [gap], questions: [] });
+    vi.mocked(reviewCoverage).mockResolvedValue({
+      covered: [],
+      missing: ["Daily reading log"],
+      errors: [gap],
+      questions: [],
+    });
     const result = await designWorkspace("A habit tracker with habits and a daily reading log.", "Habits");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -85,7 +90,12 @@ describe("designWorkspace when repairs run out", () => {
           ? ok(habitDesign())
           : { ok: false, error: "Gemini is unavailable right now.", retryable: true }) as never,
     );
-    vi.mocked(reviewCoverage).mockResolvedValue({ covered: [], errors: [gap], questions: [] });
+    vi.mocked(reviewCoverage).mockResolvedValue({
+      covered: [],
+      missing: ["Daily reading log"],
+      errors: [gap],
+      questions: [],
+    });
     const result = await designWorkspace("A habit tracker with habits and a daily reading log.", "Habits");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.gaps?.map((g) => g.request)).toEqual(["Daily reading log"]);

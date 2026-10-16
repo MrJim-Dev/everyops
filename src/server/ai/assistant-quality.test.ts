@@ -82,9 +82,15 @@ describe("assistant quality gates", () => {
         tokens: { input: 1, output: 1, thinking: 0 },
       });
     vi.mocked(reviewCoverage)
-      .mockResolvedValueOnce({ covered: [], errors: ["Courts must become Venues."], questions: [] })
+      .mockResolvedValueOnce({
+        covered: [],
+        missing: ["Rename Courts to Venues"],
+        errors: ["Courts must become Venues."],
+        questions: [],
+      })
       .mockResolvedValueOnce({
         covered: [{ request: "Rename Players and Courts", detail: "Both pages renamed." }],
+        missing: [],
         errors: [],
         questions: [],
       });
@@ -105,5 +111,27 @@ describe("assistant quality gates", () => {
     const result = await assistantTurn(input());
     expect(result).toMatchObject({ ok: true, kind: "clarify" });
     expect(result).not.toHaveProperty("plan");
+  });
+  it("asks the person instead of failing when a repair keeps missing the same part", async () => {
+    // Production: "add dummy images" was rejected on every attempt (the planner can't make pictures), and after three
+    // rounds the person got "I couldn't put together a valid change".
+    vi.mocked(generateJsonHedged).mockResolvedValue({
+      ok: true,
+      data: answer(true),
+      model: "test",
+      ms: 1,
+      tokens: { input: 1, output: 1, thinking: 0 },
+    });
+    vi.mocked(reviewCoverage).mockResolvedValue({
+      covered: [],
+      missing: ["Add dummy images to the new projects"],
+      errors: ["Add dummy images to the new projects: thumbnails are empty."],
+      questions: [],
+    });
+    const result = await assistantTurn(input());
+    expect(result).toMatchObject({ ok: true, kind: "clarify" });
+    expect(result.ok && result.reply).toContain("Add dummy images to the new projects");
+    expect(result).not.toHaveProperty("plan");
+    expect(generateJsonHedged).toHaveBeenCalledTimes(2);
   });
 });

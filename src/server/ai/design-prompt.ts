@@ -38,6 +38,10 @@ const FIELD_TYPES = [
   "relation",
   "checkbox",
   "image",
+  "email",
+  "phone",
+  "url",
+  "file",
   "formula",
   "rollup",
 ] as const;
@@ -60,7 +64,8 @@ export const field = z.object({
   formula: z
     .object({
       expr: z.string(),
-      resultType: z.enum(["number", "money", "text", "checkbox", "date"]),
+      // Plain strings with the choices described: the schema sits near Gemini's limit (validation checks them).
+      resultType: z.string().describe("number, money, text, checkbox or date"),
       freezeWhen: z.string().optional(),
     })
     .optional()
@@ -69,8 +74,9 @@ export const field = z.object({
     .object({
       childEntityId: z.string(),
       viaFieldId: z.string().describe("the relation field on the child that points back here"),
-      op: z.enum(["sum", "count", "min", "max", "avg"]),
+      op: z.string().describe("sum, count, min, max or avg"),
       fieldId: z.string().optional(),
+      filter: z.string().optional().describe("Only children this formula is true for, e.g. status == 'paid'"),
     })
     .optional()
     .describe("rollup only"),
@@ -435,7 +441,7 @@ export const design = z.object({
             value: z
               .string()
               .describe(
-                "number/money as digits; checkbox true/false; select/status the option id; multi_select ids joined by commas; relation the ref of the linked sample; date YYYY-MM-DD; datetime YYYY-MM-DDTHH:MM; time_range start/end with the same formats",
+                "number/money as digits; checkbox true/false; select/status the option id; multi_select ids joined by commas; relation the ref of the linked sample; date YYYY-MM-DD; datetime YYYY-MM-DDTHH:MM; time_range start/end with the same formats; email, phone and url as plain text; image and file left empty",
               ),
           }),
         ),
@@ -512,6 +518,32 @@ export const PATCH_INSTRUCTIONS = `Return only what changes, as a patch:
   section id). Delete only what a problem needs.
 - Sample records only for record types you add.`;
 
+/**
+ * The template route: the design to start from is a community system for this kind of business, and Gemini returns
+ * the changes that make it this owner's. Same patch shape as a repair, with samples replaced per record type.
+ */
+export const TEMPLATE_INSTRUCTIONS = `Make the starting design this business's, as a patch:
+- Put in what the brief gives: the real courts, rooms, units, services or products with their real prices and hours
+  (as the complete set of sample records of that record type, replacing the starting ones), the opening hours and
+  slot length on resources, the payment methods the owner named, the statuses the owner uses.
+- A booking business: always return the bookable record type (courts, rooms, units) with its resource settings set
+  to the brief's opening hours and slot length (opensAt, closesAt, slotMinutes), even when nothing else about it
+  changes, and its rate fields or rate records set to the brief's prices.
+- Add what the brief asks for that the starting design lacks (record types, fields, statuses, pages and tabs, a
+  public form in steps with add-ons, payment methods, rules, dashboard cards), following the references and the
+  starting design's conventions. Keep what the business will obviously use even if the brief doesn't mention it.
+- Remove what this business doesn't do (remove, by id). Rename what the owner calls differently (return the item
+  whole with the same id and the new name).
+- Sample records: only for record types whose records change or are new, and then the complete set for that record
+  type (all 6 courts, every menu item), with realistic Filipino names and PHP amounts dated around today. Records
+  of other types that linked to replaced ones are re-linked for you; leave them out unless they change too.
+- Return only what changes, as a patch:
+  - Each record type, view, widget, rule or sidebar section you change or add, whole, with its id. A record type
+    you return keeps any of its fields you leave out, so return only the fields you change or add.
+  - Leave everything else out: it stays exactly as it is.
+  - Ids to delete go in remove ("court" for a record type, "court.notes" for a field, or a view, widget, rule or
+    section id).`;
+
 /** How public pages, payments and FAQs are built. Shared by the designer and the workspace assistant. */
 export const PUBLIC_PAGES_GUIDE = `Public pages (customers use them without an account, at /s/<workspace>/<view>):
 - A public form is a form view with public true, e.g. a public booking page. Visitors see only its fields; statuses
@@ -572,7 +604,11 @@ Rules for a valid blueprint:
 - Every id referenced (fields, entities, views, widgets, options) must exist. Ids are snake_case.
 - Each record type has a primary field (a text field) and only the fields it needs.
 - select, multi_select and status fields need options. Use status for workflows (kanban boards, approvals).
-- relation fields set relation.entityId. rollup fields sum/count child records through the child's relation field.
+- relation fields set relation.entityId. rollup fields sum/count child records through the child's relation field;
+  rollup.filter counts only some of them (paid payments: status == 'paid'; open tasks: done == false).
+- Contact details and documents have their own types: email (an email address), phone (a phone number), url (a
+  website or link) and file (a document such as a PDF receipt, contract or ID scan; the team uploads it). Use
+  them instead of text for those, and keep names plain (Email, Phone, Website, Contract).
 - Kanban boards use a status field. Calendars use a date, datetime or time_range field.
 - Bookings of courts, rooms, tables or similar: always a resource record type (courts) with resource hours, and a
   booking record type with booking settings: resourceFieldId (a required relation to the resource), timeFieldId (a

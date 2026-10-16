@@ -22,6 +22,9 @@ import { cn } from "@/lib/utils";
 /** Field types that can be edited right inside a table cell. */
 const INLINE = new Set<Field["type"]>([
   "text",
+  "email",
+  "phone",
+  "url",
   "long_text",
   "number",
   "percent",
@@ -32,7 +35,16 @@ const INLINE = new Set<Field["type"]>([
   "checkbox",
 ]);
 /** Types where typing on a selected cell starts editing with that character, like a spreadsheet. */
-const TYPE_TO_EDIT = new Set<Field["type"]>(["text", "long_text", "number", "percent", "money"]);
+const TYPE_TO_EDIT = new Set<Field["type"]>([
+  "text",
+  "long_text",
+  "number",
+  "percent",
+  "money",
+  "email",
+  "phone",
+  "url",
+]);
 
 export function canEditInline(field: Field) {
   return INLINE.has(field.type) && !field.formula && !field.rollup;
