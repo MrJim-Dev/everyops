@@ -16,6 +16,7 @@ import { isDemoEmail } from "@/lib/auth/demo";
 import { changePasswordSchema, type FormErrors, fieldErrors, profileSchema } from "@/lib/auth/schemas";
 import { formatDate, initials } from "@/lib/format";
 import { useWorkspaces } from "@/lib/store/workspaces";
+import { ApiKeysSection } from "./api-keys-section";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
 import { SettingsPage, SettingsSection } from "./settings-section";
 
@@ -164,7 +165,9 @@ export function AccountSettings() {
             </Button>
           </form>
         </SettingsSection>
-
+      </fieldset>
+      <ApiKeysSection />
+      <fieldset disabled={demo} className="contents">
         <SettingsSection
           title="Delete account"
           tone="danger"
