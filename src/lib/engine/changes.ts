@@ -163,6 +163,14 @@ export type ChangePlan = {
   teamOps?: TeamOp[];
   /** The blueprint version the plan was checked against; a design plan can't be applied to a newer one. */
   baseVersion?: number;
+  /**
+   * Where the plan came from when it isn't a person or Ask EveryOps: "import" is a spreadsheet brought in. Its
+   * records are added in one pass without the save automations (an import is data that already happened: old
+   * bookings shouldn't email their guests or take stock again), and the server doesn't run them either.
+   */
+  source?: "import";
+  /** An import whose owner chose to run the save automations on its rows (this week's stock movements, say). */
+  runAutomations?: boolean;
 };
 
 export type RecordChange = {

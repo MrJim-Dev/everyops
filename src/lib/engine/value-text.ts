@@ -60,3 +60,47 @@ export function toCsv(bp: Blueprint, records: DataRecord[], fields: Field[], row
     lines.push(fields.map((f) => cell(valueText(bp, records, f, row.data[f.id]))).join(","));
   return lines.join("\n");
 }
+
+/** A column of a spreadsheet export: its header and how Excel should show it. */
+export type SheetColumn = {
+  header: string;
+  format: "text" | "number" | "money" | "percent" | "date" | "datetime";
+};
+export type SheetCell = string | number | boolean | null;
+
+/**
+ * Rows for an Excel export: numbers stay numbers (money in pesos), dates are dates (date-times as Manila wall time),
+ * yes/no stays true/false, and everything else reads as it does on screen. Excel can then sort, sum and filter them.
+ */
+export function toSheet(
+  bp: Blueprint,
+  records: DataRecord[],
+  fields: Field[],
+  rows: DataRecord[],
+): { columns: SheetColumn[]; rows: SheetCell[][] } {
+  const formats = fields.map((f): SheetColumn["format"] => {
+    const kind = displayKind(bp, f);
+    if (kind === "money" || kind === "number" || kind === "percent") return kind;
+    if (kind === "date" || kind === "datetime") return kind;
+    return "text";
+  });
+  const manila = (iso: string) => new Date(Date.parse(iso) + 8 * 3_600_000).toISOString().slice(0, 16);
+  return {
+    columns: fields.map((f, i) => ({ header: f.name, format: formats[i] })),
+    rows: rows.map((row) =>
+      fields.map((f, i) => {
+        const value = row.data[f.id];
+        if (value === undefined || value === null || value === "") return null;
+        const format = formats[i];
+        if (format === "money" || format === "number" || format === "percent") {
+          const n = Number(value);
+          return Number.isFinite(n) ? n : null;
+        }
+        if (format === "date" && typeof value === "string") return value.slice(0, 10);
+        if (format === "datetime" && typeof value === "string") return manila(value);
+        if (displayKind(bp, f) === "checkbox") return !!value;
+        return valueText(bp, records, f, value);
+      }),
+    ),
+  };
+}
