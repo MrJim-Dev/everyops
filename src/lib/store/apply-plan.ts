@@ -1,6 +1,6 @@
 import { applyOps, type ChangePlan, commitChange, revertChange } from "@/lib/engine/changes";
 import { computeAll } from "@/lib/engine/compute";
-import { applyRecordOps } from "@/lib/engine/records";
+import { applyImportOps, applyRecordOps } from "@/lib/engine/records";
 import { blueprintOf, type ChangeEntry, randomToken, type Workspace } from "./workspace-model";
 
 /**
@@ -24,7 +24,13 @@ export function applyPlan(
   const { data, changes } = redesign
     ? commitChange({ blueprint: current, records: kept }, next, now)
     : { data: { blueprint: current, records: kept }, changes: [] };
-  const edits = plan.recordOps?.length ? applyRecordOps(data, plan.recordOps, now) : null;
+  const edits = plan.recordOps?.length
+    ? (plan.source === "import" && !plan.runAutomations ? applyImportOps : applyRecordOps)(
+        data,
+        plan.recordOps,
+        now,
+      )
+    : null;
 
   const docs = { ...(ws.docs ?? {}) };
   const replacedDocs: Record<string, { body: string; updatedAt: string } | null> = {};
@@ -67,6 +73,8 @@ export function applyPlan(
     appliedAt: now.toISOString(),
     ...(options.by ? { appliedBy: options.by } : {}),
     ...(options.auto ? { auto: true } : {}),
+    ...(plan.source ? { source: plan.source } : {}),
+    ...(plan.source && plan.runAutomations ? { ranAutomations: true } : {}),
     ...(edits ? { createdRecordIds: edits.created, replacedRecords: edits.replaced } : {}),
     ...(removed.length ? { removedRecords: removed } : {}),
     ...(Object.keys(replacedDocs).length ? { replacedDocs } : {}),
