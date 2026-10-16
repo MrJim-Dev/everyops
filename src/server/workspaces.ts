@@ -101,6 +101,23 @@ async function seedIfNew(userId: string) {
 }
 
 /** One workspace's team and pending invites, for owners and admins (the assistant uses it for team changes). */
+/** The workspaces someone can open, with their role in each: light enough for every API call. */
+export async function accessibleWorkspaces(
+  userId: string,
+): Promise<{ id: string; name: string; role: Role; ownerId: string }[]> {
+  const { rows } = await sql<{ id: string; name: string; owner_id: string; role: MemberRole | null }>`
+    select w.id, w.doc->>'name' as name, w.owner_id, m.role
+    from workspace w left join workspace_member m on m.workspace_id = w.id and m.user_id = ${userId}
+    where w.owner_id = ${userId} or m.user_id is not null
+    order by w.doc->>'name'`.execute(db);
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    ownerId: r.owner_id,
+    role: r.owner_id === userId ? "owner" : (r.role as Role),
+  }));
+}
+
 export async function loadTeam(workspaceId: string): Promise<{ members: Member[]; invites: Invite[] }> {
   const members = await sql<{
     user_id: string;
