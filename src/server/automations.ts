@@ -18,6 +18,7 @@ import type { RecordPut } from "@/lib/store/workspace-sync";
 import { logActivity, recordEntries } from "./activity";
 import { db } from "./db";
 import { sendMail } from "./mail";
+import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, putRecords, readRecords } from "./workspace-data";
 
 type Ex = Parameters<typeof readRecords>[0];
@@ -241,7 +242,8 @@ export async function runTimedAutomations(
       const done = await db.transaction().execute(async (trx) => {
         await sql`select 1 from workspace where id = ${id} for update`.execute(trx);
         const bp = await currentBlueprint(trx, id);
-        if (!bp || !bp.rules.some((r) => isOn(r) && isTimed(r))) return { runs: 0, pending: [] as number[] };
+        if (!bp || !bp.rules.some((r) => isOn(r) && isTimed(r)))
+          return { runs: 0, pending: [] as number[], hooks: 0 };
         const stored = await readRecords(trx, id);
         let records = stored.map((s) => s.record);
         const due = dueRuns(bp, records, now, { ruleId: options.ruleId, force: options.force });
@@ -285,7 +287,7 @@ export async function runTimedAutomations(
             where id = ${runId}`.execute(trx);
           if (outcome.emails.length) ids.push(Number(runId));
         }
-        if (!count) return { runs: 0, pending: ids };
+        if (!count) return { runs: 0, pending: ids, hooks: 0 };
         const computed = computeAll(bp, records, now);
         const before = new Map(stored.map((s) => [s.record.id, s]));
         const writes = computed.flatMap((r): RecordPut[] => {
@@ -328,10 +330,19 @@ export async function runTimedAutomations(
             },
             recordEntries(id, writes),
           );
-        return { runs: count, pending: ids };
+        const hooks = writes.length
+          ? await queueChanges(
+              trx,
+              id,
+              bp,
+              writes.map((w) => ({ before: before.get(w.record.id)?.record, after: w.record })),
+            )
+          : 0;
+        return { runs: count, pending: ids, hooks };
       });
       runs += done.runs;
       pending.push(...done.pending);
+      sendSoon(done.hooks);
     } catch (error) {
       console.error(JSON.stringify({ event: "automation_timed_error", workspace: id, error: String(error) }));
     }

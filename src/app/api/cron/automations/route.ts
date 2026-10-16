@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { trimActivity } from "@/server/activity";
 import { deliverPending, runTimedAutomations } from "@/server/automations";
+import { deliverWebhooks, trimDeliveries } from "@/server/webhooks";
 
 /**
  * Called every 15 minutes by Cloud Scheduler with "Authorization: Bearer $CRON_SECRET": runs schedules and dates
@@ -17,6 +18,9 @@ export async function POST(request: Request) {
   const fresh = await deliverPending(timed.pending);
   const retried = await deliverPending();
   const trimmed = await trimActivity();
+  // Webhook retries that are due (fresh deliveries go right after the change that caused them).
+  const hooks = await deliverWebhooks(200);
+  await trimDeliveries();
   const result = {
     ok: true,
     workspaces: timed.workspaces,
@@ -24,6 +28,8 @@ export async function POST(request: Request) {
     sent: fresh.sent + retried.sent,
     failed: fresh.failed + retried.failed,
     activityTrimmed: trimmed,
+    webhooksSent: hooks.sent,
+    webhooksFailed: hooks.failed,
   };
   console.info(JSON.stringify({ event: "automations", ...result }));
   return Response.json(result);

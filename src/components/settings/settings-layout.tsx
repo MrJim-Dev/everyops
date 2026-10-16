@@ -7,6 +7,7 @@ import {
   GlobeHemisphereWestIcon,
   LightningIcon,
   UsersThreeIcon,
+  WebhooksLogoIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -28,6 +29,7 @@ export function SettingsLayout({ children }: { children: ReactNode }) {
     ...(canManage(ws.role)
       ? [
           { id: "publish", href: `${base}/publish`, label: "Publish", icon: GlobeHemisphereWestIcon },
+          { id: "webhooks", href: `${base}/webhooks`, label: "Webhooks", icon: WebhooksLogoIcon },
           { id: "activity", href: `${base}/activity`, label: "Activity", icon: ClockCounterClockwiseIcon },
         ]
       : []),

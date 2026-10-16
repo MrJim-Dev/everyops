@@ -8,6 +8,7 @@ import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { type Actor, logActivity } from "./activity";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
+import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, deleteRecords, putRecords, readRecords, writePages } from "./workspace-data";
 
 /**
@@ -33,6 +34,7 @@ export async function writeRecord(
   now = new Date(),
 ): Promise<WriteResult> {
   let emailRuns: number[] = [];
+  let hooks = 0;
   let removed: string[] = [];
   let entityId: string | null = change.kind === "create" ? change.entityId : null;
   const result = await db.transaction().execute(async (trx) => {
@@ -96,6 +98,10 @@ export async function writeRecord(
       const put = await putRecords(trx, slug, puts);
       const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, gone))];
       if (conflicts.length) throw new Error(`record write conflicted on ${conflicts.join(", ")}`);
+      hooks = await queueChanges(trx, slug, bp, [
+        ...puts.map((p) => ({ before: before.get(p.record.id)?.record, after: p.record })),
+        ...gone.map((g) => ({ before: before.get(g.id)?.record })),
+      ]);
       if (fireOnSave(bp) && puts.length)
         emailRuns = await logSaveRuns(
           trx,
@@ -134,6 +140,7 @@ export async function writeRecord(
     return done;
   });
   deliverSoon(emailRuns);
+  sendSoon(hooks);
   return result;
 }
 
