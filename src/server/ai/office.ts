@@ -57,6 +57,39 @@ async function workbookText(bytes: Uint8Array): Promise<string | null> {
 }
 
 /** The text of a Word document, paragraph by paragraph (tables come out one cell per line). */
+export type SheetCells = { name: string; lines: string[][]; more: boolean };
+
+/**
+ * Every visible sheet of a workbook as rows of cell text (the same reading as for Gemini: formula results, dates as
+ * YYYY-MM-DD, rich text as text), for the spreadsheet import. Null when it isn't a readable workbook.
+ */
+export async function workbookSheets(
+  bytes: Uint8Array,
+  maxRows = MAX_ROWS + 1,
+): Promise<SheetCells[] | null> {
+  try {
+    const { default: ExcelJS } = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(bytes) as unknown as ArrayBuffer);
+    const sheets: SheetCells[] = [];
+    for (const sheet of workbook.worksheets) {
+      if (sheet.state !== "visible" && sheet.state !== undefined) continue;
+      const lines: string[][] = [];
+      sheet.eachRow({ includeEmpty: false }, (row) => {
+        if (lines.length >= maxRows) return;
+        const cells: string[] = [];
+        const width = Math.min(row.cellCount, MAX_COLUMNS);
+        for (let c = 1; c <= width; c++) cells.push(cellText(row.getCell(c)).trim());
+        lines.push(cells);
+      });
+      if (lines.length) sheets.push({ name: sheet.name, lines, more: sheet.actualRowCount > maxRows });
+    }
+    return sheets;
+  } catch {
+    return null;
+  }
+}
+
 async function documentText(bytes: Uint8Array): Promise<string | null> {
   const mammoth = await import("mammoth");
   const { value } = await mammoth.extractRawText({ buffer: Buffer.from(bytes) });
