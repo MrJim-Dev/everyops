@@ -8,6 +8,7 @@ import { htmlDocKeys } from "@/lib/public/html-page";
 import {
   type ChangeEntry,
   type Invite,
+  importedIds,
   type Member,
   type MemberRole,
   mergeStaffChanges,
@@ -415,8 +416,12 @@ export async function patchWorkspace(
             conflicts,
           });
         revs = put.revs;
-        if (watching && rulesBp && puts.length) {
-          const changes = puts.map((p) => ({ before: beforeEdit.get(p.record.id), after: p.record }));
+        // Records an import in this save added or changed are data that already happened: the browser didn't run
+        // the save automations on them (applyImportOps), and neither does the server, so old bookings don't email.
+        const imported = importedIds(patch.changes);
+        const watched = imported.size ? puts.filter((p) => !imported.has(p.record.id)) : puts;
+        if (watching && rulesBp && watched.length) {
+          const changes = watched.map((p) => ({ before: beforeEdit.get(p.record.id), after: p.record }));
           const records = (await readRecords(trx, slug)).map((s) => s.record);
           emailRuns = await logSaveRuns(trx, slug, rulesBp, changes, records, "save");
         }
