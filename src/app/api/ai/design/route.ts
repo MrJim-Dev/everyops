@@ -4,6 +4,7 @@ import type { DesignStreamEvent } from "@/lib/assistant/design-sketch";
 import { blueprintPreview } from "@/lib/assistant/preview";
 import { designWorkspace } from "@/server/ai/design";
 import { takeAiToken } from "@/server/ai/rate-limit";
+import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { apiUser, sameOrigin } from "@/server/session-api";
 
 const body = z.object({
@@ -30,6 +31,9 @@ export async function POST(request: Request) {
   const limit = await takeAiToken(user.id);
   if (!limit.ok)
     return Response.json({ ok: false, message: "Wait a few minutes and try again." }, { status: 429 });
+  const overBudget = await startAiUsage(`account:${user.id}`);
+  if (overBudget) return overBudget;
+  enterAiUsage(`account:${user.id}`);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

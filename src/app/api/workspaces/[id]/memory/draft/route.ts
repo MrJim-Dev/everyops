@@ -1,6 +1,7 @@
 import { blueprintOf, canManage } from "@/lib/store/workspace-model";
 import { draftMemory } from "@/server/ai/memory-draft";
 import { takeAiToken } from "@/server/ai/rate-limit";
+import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { readMemory } from "@/server/workspace-memory";
 import { loadWorkspace } from "@/server/workspaces";
@@ -20,6 +21,9 @@ export async function POST(request: Request, { params }: RouteContext<"/api/work
     );
   const limit = await takeAiToken(user.id);
   if (!limit.ok) return Response.json({ ok: false, message: "Try again in a few minutes." }, { status: 429 });
+  const overBudget = await startAiUsage(id);
+  if (overBudget) return overBudget;
+  enterAiUsage(id);
   try {
     const notes = await draftMemory({
       blueprint: blueprintOf(found.workspace),

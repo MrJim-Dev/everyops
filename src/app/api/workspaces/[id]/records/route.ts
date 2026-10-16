@@ -1,4 +1,5 @@
 import { db } from "@/server/db";
+import { jsonResponse } from "@/server/json-response";
 import { apiUser } from "@/server/session-api";
 import { recordChangesSince } from "@/server/workspace-data";
 import { roleIn } from "@/server/workspaces";
@@ -14,5 +15,5 @@ export async function GET(request: Request, { params }: RouteContext<"/api/works
   if (!(await roleIn(id, user.id)))
     return Response.json({ ok: false, message: "Workspace not found." }, { status: 404 });
   const since = new URL(request.url).searchParams.get("since") ?? "";
-  return Response.json({ ok: true, ...(await recordChangesSince(db, id, since)) });
+  return jsonResponse(request, { ok: true, ...(await recordChangesSince(db, id, since)) });
 }

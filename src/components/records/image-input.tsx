@@ -47,31 +47,36 @@ export function ImageInput({
           <ImageIcon className="size-5 text-muted-foreground" />
         )}
       </div>
-      <div className="flex flex-wrap gap-2">
-        <input
-          ref={input}
-          id={id}
-          type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif,.heic,.heif"
-          className="sr-only"
-          onChange={(e) => void pick(e.target.files?.[0])}
-        />
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={busy}
-          onClick={() => input.current?.click()}
-        >
-          <UploadSimpleIcon data-icon="inline-start" />
-          {busy ? "Uploading…" : value ? "Replace" : "Upload image"}
-        </Button>
-        {value ? (
-          <Button type="button" size="sm" variant="ghost" onClick={() => onChange(null)}>
-            <TrashIcon data-icon="inline-start" />
-            Remove
+      <div className="flex flex-col gap-1.5">
+        <div className="flex flex-wrap gap-2">
+          <input
+            ref={input}
+            id={id}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif,.heic,.heif"
+            className="sr-only"
+            onChange={(e) => void pick(e.target.files?.[0])}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => input.current?.click()}
+          >
+            <UploadSimpleIcon data-icon="inline-start" />
+            {busy ? "Uploading…" : value ? "Replace" : "Upload image"}
           </Button>
-        ) : null}
+          {value ? (
+            <Button type="button" size="sm" variant="ghost" onClick={() => onChange(null)}>
+              <TrashIcon data-icon="inline-start" />
+              Remove
+            </Button>
+          ) : null}
+        </div>
+        <span className="text-[12px] text-muted-foreground">
+          PNG, JPG, WebP, GIF or iPhone photo. Big photos are made smaller, to 5 MB at most.
+        </span>
       </div>
     </div>
   );

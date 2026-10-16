@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 /** Long enough for a detailed request; short enough to stay a quick message. */
-const MAX_SECONDS = 120;
+/** Longest voice message; recording stops by itself here. */
+export const MAX_SECONDS = 120;
 const TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
 export type VoiceState = "idle" | "recording" | "transcribing";

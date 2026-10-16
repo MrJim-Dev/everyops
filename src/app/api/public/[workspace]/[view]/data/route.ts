@@ -9,7 +9,7 @@ export async function GET(request: Request, { params }: RouteContext<"/api/publi
   const { workspace, view } = await params;
   const ip = (request.headers.get("x-forwarded-for") ?? "local").split(",")[0].trim();
   const headers = { "Cache-Control": "no-store" };
-  if (!allowSubmission(`page-data:${ip}:${workspace}`, 120, 60_000))
+  if (!(await allowSubmission(`page-data:${ip}:${workspace}`, 120, 60_000)))
     return Response.json(
       { ok: false, message: "Too many requests. Try again shortly." },
       { status: 429, headers },

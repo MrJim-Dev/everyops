@@ -7,6 +7,7 @@ import {
   ThinkingLevel,
 } from "@google/genai";
 import { z } from "zod";
+import { countTokens } from "./usage";
 
 /**
  * Gemini on Vertex AI. On Cloud Run the client signs in as the service account (everyops-run);
@@ -335,6 +336,11 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       usage.output += roundUsage?.candidatesTokenCount ?? 0;
       usage.thinking += roundUsage?.thoughtsTokenCount ?? 0;
       usage.cached += roundUsage?.cachedContentTokenCount ?? 0;
+      countTokens(
+        (roundUsage?.promptTokenCount ?? 0) +
+          (roundUsage?.candidatesTokenCount ?? 0) +
+          (roundUsage?.thoughtsTokenCount ?? 0),
+      );
       const wanted = parts.filter((p) => p.functionCall);
       if (runaway || !wanted.length || !input.tools) break;
       calls += wanted.length;

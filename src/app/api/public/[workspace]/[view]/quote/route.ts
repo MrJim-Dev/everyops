@@ -7,7 +7,7 @@ export async function POST(
 ) {
   const { workspace, view } = await params;
   const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "local";
-  if (!allowSubmission(`quote:${ip}:${workspace}`, 60))
+  if (!(await allowSubmission(`quote:${ip}:${workspace}`, 60)))
     return Response.json({ ok: false, message: "Too many requests." }, { status: 429 });
   const body = (await request.json().catch(() => null)) as {
     values?: Record<string, unknown>;
