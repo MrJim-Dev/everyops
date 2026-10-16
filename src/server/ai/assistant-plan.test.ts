@@ -350,4 +350,19 @@ describe("automation changes", () => {
     });
     expect(rule.actions[0]).toMatchObject({ fieldId: "stock", delta: "quantity * product.pack_size" });
   });
+
+  it("reads the amount when Gemini puts that in value", () => {
+    // Both shapes a bakery's "Purchase and In movements should add to stock" came back in.
+    const rule = (action: { fieldId?: string; value?: string; delta?: string }) =>
+      toRule({
+        id: "in",
+        name: "Adjust stock on positive movement",
+        trigger: { entityId: "stock_movement", event: "created" },
+        when: "type == 'purchase' || type == 'in'",
+        actions: [{ type: "adjust_number", target: { kind: "relation", fieldId: "product" }, ...action }],
+      }).actions[0];
+    expect(rule({ fieldId: "stock", value: "qty" })).toMatchObject({ fieldId: "stock", delta: "qty" });
+    // The same word in value and delta is the amount; the field is left for completeRule (the product's stock).
+    expect(rule({ value: "qty", delta: "qty" })).toMatchObject({ fieldId: "", delta: "qty" });
+  });
 });

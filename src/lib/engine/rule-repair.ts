@@ -63,17 +63,39 @@ export function completeAction(bp: Blueprint, rule: Rule, action: Action): Actio
     if (!link || !targetEntity) return undefined;
     target = { kind: "relation", fieldId: link.id };
   }
-  if (action.type === "set_field")
-    return targetEntity.fields.some((f) => f.id === action.fieldId) ? { ...action, target } : undefined;
+  if (action.type === "set_field") {
+    if (targetEntity.fields.some((f) => f.id === action.fieldId)) return { ...action, target };
+    // A value that only picks options ("balance_due <= 0 ? 'paid' : 'partially_paid'") names its field: the one
+    // status or select with all of them. Gemini left it out of a print shop's payment rule three times running.
+    const picks = [...action.value.matchAll(/'([^']*)'/g)].map((m) => m[1]);
+    const fits = picks.length
+      ? targetEntity.fields.filter(
+          (f) =>
+            (f.type === "status" || f.type === "select") &&
+            picks.every((p) => f.options?.some((o) => o.id === p)),
+        )
+      : [];
+    return fits.length === 1 ? { ...action, target, fieldId: fits[0].id } : undefined;
+  }
+  // Through a link, a field the linked record doesn't have is the record's own quantity in the wrong place
+  // ("fieldId": "qty" on a stock movement): the change goes to the linked record's stock. On a bakery's
+  // "In movements add stock" every repair round then ran away arguing about fieldId and delta.
+  const misplaced =
+    !action.fieldId ||
+    (target.kind === "relation" && !targetEntity.fields.some((f) => f.id === action.fieldId));
   const field =
     targetEntity.fields.find((f) => f.id === action.fieldId && NUMERIC.has(f.type)) ??
-    (action.fieldId ? undefined : stockFieldOf(targetEntity));
+    (misplaced ? stockFieldOf(targetEntity) : undefined);
   if (!field) return undefined;
   let delta = action.delta.trim();
   if (!delta || delta === "0") {
     const qty = source.fields.find((f) => f.type === "number" && QTY.test(`${f.id} ${f.name}`));
     if (!qty) return undefined;
-    delta = STOCK_IN.test(`${source.id} ${source.name} ${rule.name}`) ? qty.id : `-${qty.id}`;
+    // "when type == 'purchase' || type == 'in'" says it adds, like a name that does.
+    const adds =
+      STOCK_IN.test(`${source.id} ${source.name} ${rule.name} ${rule.when ?? ""}`) ||
+      /'in'|'stock_in'/.test(rule.when ?? "");
+    delta = adds ? qty.id : `-${qty.id}`;
   }
   return { ...action, target, fieldId: field.id, delta };
 }
@@ -96,10 +118,131 @@ export function completeTrigger(bp: Blueprint, rule: Rule): Rule["trigger"] {
 
 /** The rule with every blank it can fill filled in. Actions it can't complete stay as they were, for validation to report. */
 export function completeRule(bp: Blueprint, rule: Rule): Rule {
-  return {
+  rule = qualifyLinked(bp, rule);
+  return fullReceipt(bp, {
     ...rule,
     trigger: completeTrigger(bp, rule),
     actions: rule.actions.map((a) => completeAction(bp, rule, a) ?? a),
+  });
+}
+
+const NAME = /(?<![.\w])([a-z_][a-z0-9_]*)(?![\w(])/gi;
+const RESERVED = new Set(["true", "false", "null"]);
+
+/**
+ * A rule on a payment that reads its order's totals by their bare names ("balance_due <= 0") can't run: the formula
+ * is worked out on the payment. Every setup of a print shop's "a confirmed payment marks the job Paid or Partially
+ * paid" was rejected for it, twice, and the owner got it as "not added yet". A name the record doesn't have, that
+ * exactly one of its links has, is read through that link (job_order.balance_due). Quoted text stays as it is.
+ */
+export function qualifyLinked(bp: Blueprint, rule: Rule): Rule {
+  const source = bp.entities.find((e) => e.id === rule.trigger.entityId);
+  if (!source) return rule;
+  const links = source.fields.filter((f) => f.type === "relation" && f.relation?.entityId);
+  const fix = (expr: string) =>
+    expr
+      .split(/('[^']*')/)
+      .map((part, i) =>
+        i % 2
+          ? part
+          : part.replace(NAME, (name: string) => {
+              if (RESERVED.has(name.toLowerCase()) || source.fields.some((f) => f.id === name)) return name;
+              const owners = links.filter((l) =>
+                bp.entities.find((e) => e.id === l.relation?.entityId)?.fields.some((f) => f.id === name),
+              );
+              return owners.length === 1 ? `${owners[0].id}.${name}` : name;
+            }),
+      )
+      .join("");
+  const actions = rule.actions.map((a) =>
+    a.type === "set_field"
+      ? { ...a, value: fix(a.value) }
+      : a.type === "adjust_number"
+        ? { ...a, delta: fix(a.delta) }
+        : a,
+  );
+  return { ...rule, ...(rule.when ? { when: fix(rule.when) } : {}), actions };
+}
+
+const RECEIVED = /receiv|delivered|arrived/i;
+const ORDERED = /order|qty|quantity/i;
+
+/**
+ * A purchase order line that adds its received quantity to stock once the order is received adds nothing when
+ * nobody types a received quantity, and the order's "Mark as received" button doesn't. On a production ERP that
+ * left stock unchanged after every delivery. When the line also has the quantity ordered, a blank received quantity
+ * means everything ordered arrived: the stock goes up by what was received, else by what was ordered. Only rules
+ * that wait for the parent's status (when purchase_order.status == 'received') change, at design time.
+ */
+export function fullReceipt(bp: Blueprint, rule: Rule): Rule {
+  const line = bp.entities.find((e) => e.id === rule.trigger.entityId);
+  const parentLink = line?.parent?.fieldId;
+  if (!line || !parentLink || !rule.when?.includes(`${parentLink}.`)) return rule;
+  const numbers = line.fields.filter((f) => f.type === "number" && !f.formula && !f.rollup);
+  const ordered = numbers.find(
+    (f) => !RECEIVED.test(`${f.id} ${f.name}`) && ORDERED.test(`${f.id} ${f.name}`),
+  );
+  if (!ordered) return rule;
+  return {
+    ...rule,
+    actions: rule.actions.map((a) => {
+      if (a.type !== "adjust_number") return a;
+      const received = numbers.find((f) => f.id === a.delta.trim() && RECEIVED.test(`${f.id} ${f.name}`));
+      return received ? { ...a, delta: `${received.id} > 0 ? ${received.id} : ${ordered.id}` } : a;
+    }),
+  };
+}
+
+/**
+ * Automations that move a record's workflow backwards: while it's Preparing (and paid), set it to Confirmed. Status
+ * options are written in lifecycle order, so the earlier option undoes the step the owner just took; a catering
+ * ERP's paid bookings bounced back to Confirmed every time they were moved to Preparing. Returns their ids.
+ */
+export function backwardsRules(bp: Blueprint): string[] {
+  return bp.rules
+    .filter((rule) => {
+      const entity = bp.entities.find((e) => e.id === rule.trigger.entityId);
+      return rule.actions.some((a) => {
+        if (a.type !== "set_field" || a.target.kind !== "self") return false;
+        const field = entity?.fields.find((f) => f.id === a.fieldId && f.type === "status");
+        const order = field?.options?.map((o) => o.id) ?? [];
+        const from = [
+          ...(rule.when ?? "").matchAll(new RegExp(`\\b${a.fieldId}\\s*==\\s*'([^']+)'`, "g")),
+        ].map((m) => order.indexOf(m[1]));
+        const to = [...a.value.matchAll(/'([^']+)'/g)].map((m) => order.indexOf(m[1])).filter((i) => i >= 0);
+        return from.length === 1 && from[0] >= 0 && to.some((i) => i < from[0]);
+      });
+    })
+    .map((rule) => rule.id);
+}
+
+/**
+ * Fields an automation fills in when a record is added (a line's unit price from its product) can't also be required:
+ * the form refuses to save without them, so the automation never runs. On production a plan added such an automation
+ * and the owner needed a second request to make the field optional. Returns the blueprint with those fields optional.
+ */
+export function unrequireFilled(bp: Blueprint): Blueprint {
+  const filled = new Set<string>();
+  for (const rule of bp.rules)
+    if (rule.enabled !== false && rule.trigger.event === "created")
+      for (const a of rule.actions)
+        if (a.type === "set_field" && a.target.kind === "self")
+          filled.add(`${rule.trigger.entityId}.${a.fieldId}`);
+  if (!filled.size) return bp;
+  return {
+    ...bp,
+    entities: bp.entities.map((e) =>
+      e.fields.some((f) => f.required && filled.has(`${e.id}.${f.id}`) && f.id !== e.primaryFieldId)
+        ? {
+            ...e,
+            fields: e.fields.map((f) =>
+              f.required && filled.has(`${e.id}.${f.id}`) && f.id !== e.primaryFieldId
+                ? { ...f, required: false }
+                : f,
+            ),
+          }
+        : e,
+    ),
   };
 }
 
@@ -111,8 +254,10 @@ export function repairRules(bp: Blueprint): Rule[] {
   const out: Rule[] = [];
   for (const rule of bp.rules) {
     if (!bp.entities.some((e) => e.id === rule.trigger.entityId)) continue;
-    const actions = rule.actions.flatMap((a) => completeAction(bp, rule, a) ?? []);
-    if (actions.length) out.push({ ...rule, trigger: completeTrigger(bp, rule), actions });
+    const qualified = qualifyLinked(bp, rule);
+    const actions = qualified.actions.flatMap((a) => completeAction(bp, qualified, a) ?? []);
+    if (actions.length)
+      out.push(fullReceipt(bp, { ...qualified, trigger: completeTrigger(bp, qualified), actions }));
   }
   return out;
 }

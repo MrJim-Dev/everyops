@@ -26,10 +26,10 @@ import { CATALOG } from "@/lib/catalog";
 import { samplesThisYear } from "@/lib/catalog/shift";
 import { computeAll } from "@/lib/engine/compute";
 import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
-import { impliedRules } from "@/lib/engine/implied-rules";
+import { impliedRules, linePriceRules, widenMovements } from "@/lib/engine/implied-rules";
 import { templateOverview } from "@/lib/engine/overview-template";
 import { isImagePath } from "@/lib/engine/records";
-import { repairRules } from "@/lib/engine/rule-repair";
+import { backwardsRules, repairRules, unrequireFilled } from "@/lib/engine/rule-repair";
 import { parsePartialJson } from "@/lib/partial-json";
 import { withCustomSite } from "@/lib/public/custom-site";
 import { MAX_HTML_BYTES } from "@/lib/public/html-page";
@@ -276,9 +276,15 @@ export function toRule(r: Design["rules"][number]): Rule {
             : {
                 type: "adjust_number" as const,
                 target: target(a.target),
-                // Gemini sometimes names the field it changes in value ("value": "stock").
-                fieldId: a.fieldId ?? (a.value && /^[a-z_][a-z0-9_]*$/.test(a.value) ? a.value : ""),
-                delta: a.delta ?? "0",
+                // Gemini sometimes names the field it changes in value ("value": "stock"), and sometimes the amount:
+                // "value": "qty" beside "fieldId": "stock", or the same word in value and delta. Read as the field,
+                // that amount sent a bakery's "In movements add stock" through every repair round.
+                fieldId:
+                  a.fieldId ??
+                  (a.value && /^[a-z_][a-z0-9_]*$/.test(a.value) && a.value !== a.delta?.trim()
+                    ? a.value
+                    : ""),
+                delta: a.delta ?? (a.fieldId && a.value?.trim() ? a.value : "0"),
               },
     ),
   };
@@ -557,10 +563,21 @@ export function tidy(bp: Blueprint): Blueprint {
     .filter((sys) => sys.viewIds.length + sys.widgetIds.length > 0);
   bp.rules = bp.rules.filter((r) => entityIds.has(r.trigger.entityId));
   bp.rules = repairRules(bp);
+  bp.rules = widenMovements(bp);
+  const backwards = backwardsRules(bp);
+  if (backwards.length) {
+    console.info(
+      JSON.stringify({ event: "design_rules_dropped", why: "moves status back", rules: backwards }),
+    );
+    bp.rules = bp.rules.filter((r) => !backwards.includes(r.id));
+  }
   // Totals the design moves (stock received and sold, leave days, balances) stay in sync even when the designer
   // didn't write the automation.
   const empty = { ...bp, entities: [], rules: [] };
   bp.rules.push(...impliedRules(empty, bp).map((x) => x.rule));
+  bp.rules.push(...linePriceRules(bp));
+  // A field an automation fills in on add (a line's unit price from its product) can't block the form.
+  bp.entities = unrequireFilled(bp).entities;
   // The Overview follows the court-bookings template: comparison stats, revenue by day, today's schedule, what
   // needs payment and busy hours, built from the business's own bookings or sales.
   templateOverview(bp);
@@ -809,7 +826,22 @@ export function asksFor(brief: string, pattern: RegExp): boolean {
   return false;
 }
 
-function extraChecks(bp: Blueprint, brief: string): string[] {
+/**
+ * The brief without the community systems it names ("adapted from Canteen POS and Rental Operations", "Base:
+ * Canteen POS"): the ones setup matched, by name or id, and any named after "adapted from", "based on" and the like.
+ */
+export function withoutBases(brief: string, systems: string[] = []): string {
+  const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const named = systems
+    .filter((s) => s.trim().length > 2)
+    .reduce((text, s) => text.replace(new RegExp(`\\b${literal(s)}\\b`, "gi"), " "), brief);
+  return named.replace(
+    /\b(adapted from|based on|built on|build on|builds on|on top of|starting from|extends?|from our)\s+(?:the |our )?(?:[A-Z][\w'&-]*\s*)+(?:(?:and|&|,)\s+(?:[A-Z][\w'&-]*\s*)+)*/g,
+    "$1 ",
+  );
+}
+
+function extraChecks(bp: Blueprint, brief: string, systems: string[] = []): string[] {
   const errors: string[] = [];
   const entityIds = new Set(bp.entities.map((e) => e.id));
   if (!bp.systems.length) errors.push("The workspace has no systems.");
@@ -819,7 +851,12 @@ function extraChecks(bp: Blueprint, brief: string): string[] {
   // Same for a register: a POS without one is just tables of orders. Only "POS" or "point of sale" asks for one: a
   // finance tracker's "Cashier / Manager" field and a "Cash Register" account type each cost repair rounds that
   // added a register nobody wanted.
-  if (asksFor(brief, /\bpos\b|point[- ]of[- ]sale/gi) && !bp.views.some((v) => v.type === "checkout"))
+  // Nor does naming the community system a design starts from: "adapted from Canteen POS and Rental Operations"
+  // sent a catering workspace through two repairs for a register and showed it as missing.
+  if (
+    asksFor(withoutBases(brief, systems), /\bpos\b|point[- ]of[- ]sale/gi) &&
+    !bp.views.some((v) => v.type === "checkout")
+  )
     errors.push(
       "The brief asks for a point of sale, but there is no checkout view (products, orders with line items and a payment field).",
     );
@@ -992,6 +1029,23 @@ export function toFieldValue(
   }
 }
 
+/**
+ * The review's findings without the ones about sample records of a type that has none yet: those get samples after
+ * the review (fillEmptySamples), so "3 sample pre-orders" isn't missing. On a bakery's template route it cost a
+ * repair round and still showed on the review card as "not added yet", above nine sample pre-orders.
+ */
+export function awaitingSamples(bp: Blueprint, samples: Design["samples"], findings: string[]): string[] {
+  const waiting = bp.entities.filter((e) => !samples.some((s) => s.entityId === e.id));
+  const names = (e: Entity) => [e.name, e.pluralName, e.id.replace(/_/g, " ")].map((n) => n.toLowerCase());
+  return findings.filter((finding) => {
+    const text = finding.toLowerCase().replace(/[-_]/g, " ");
+    return !(
+      /\bsamples?\b/.test(text) &&
+      waiting.some((e) => names(e).some((n) => text.includes(n.replace(/-/g, " "))))
+    );
+  });
+}
+
 /** Converts sample values (strings) into typed record data, dropping anything that doesn't fit. */
 export function toRecords(bp: Blueprint, samples: Design["samples"], now: Date): DataRecord[] {
   const stamp = now.toISOString();
@@ -1003,6 +1057,18 @@ export function toRecords(bp: Blueprint, samples: Design["samples"], now: Date):
   );
   const counts = new Map<string, number>();
   const dropped: Record<string, number> = {};
+  const orphans: Record<string, number> = {};
+  // Quantities an automation already subtracts (stock -= qty used) are written positive; a sample of -12 "used"
+  // would otherwise read as twelve added.
+  const subtracted = new Set(
+    (bp.rules ?? []).flatMap((rule) =>
+      rule.actions.flatMap((a) => {
+        const m =
+          a.type === "adjust_number" ? /^\s*(?:0\s*)?-\s*([a-z_][a-z0-9_]*)\s*$/i.exec(a.delta) : null;
+        return m ? [`${rule.trigger.entityId}.${m[1]}`] : [];
+      }),
+    ),
+  );
   const records = samples.flatMap((s, i) => {
     const entity = bp.entities.find((e) => e.id === s.entityId);
     if (!entity) return [];
@@ -1011,7 +1077,28 @@ export function toRecords(bp: Blueprint, samples: Design["samples"], now: Date):
       const field = entity.fields.find((f) => f.id === fieldId);
       if (!field) continue;
       const converted = toFieldValue(field, value, (v) => ids.get(v));
-      if (converted !== undefined) data[field.id] = converted;
+      if (converted === undefined) continue;
+      data[field.id] =
+        typeof converted === "number" && converted < 0 && subtracted.has(`${entity.id}.${field.id}`)
+          ? -converted
+          : converted;
+    }
+    // A line item with no order, or a bill-of-materials row with no material, is noise every total and automation
+    // trips over (4 of 6 BOM rows on a production ERP had no product). Lines whose parent or required links don't
+    // resolve are left out.
+    if (
+      entity.parent &&
+      entity.fields.some(
+        (f) =>
+          f.type === "relation" &&
+          (f.id === entity.parent?.fieldId || f.required) &&
+          (data[f.id] == null ||
+            data[f.id] === "" ||
+            (Array.isArray(data[f.id]) && !(data[f.id] as unknown[]).length)),
+      )
+    ) {
+      orphans[entity.id] = (orphans[entity.id] ?? 0) + 1;
+      return [];
     }
     const n = (counts.get(entity.id) ?? 0) + 1;
     counts.set(entity.id, n);
@@ -1033,6 +1120,8 @@ export function toRecords(bp: Blueprint, samples: Design["samples"], now: Date):
     return [{ id: `${s.entityId}_${i + 1}`, entityId: entity.id, data, createdAt: stamp, updatedAt: stamp }];
   });
   if (Object.keys(dropped).length) console.warn(JSON.stringify({ event: "design_samples_dropped", dropped }));
+  if (Object.keys(orphans).length)
+    console.warn(JSON.stringify({ event: "design_samples_orphaned", orphans }));
   return records;
 }
 
@@ -1076,7 +1165,14 @@ export type DesignResult =
   | { ok: false; message: string };
 
 /** "Request: what's missing" (a coverage finding or a check) as something the owner can ask for afterwards. */
-function asGap(error: string): SetupGap {
+/**
+ * A review finding ("requirement: why it's missing") as a gap. The requirement can have a colon of its own
+ * ("Implement automatic rule: when a Piece-Rate Log is Approved, …"); cut at the first one, two different gaps on a
+ * garment ERP both read "Implement automatic rule". The review's own list of requirements says where it ends.
+ */
+export function asGap(error: string, requests: string[] = []): SetupGap {
+  const known = requests.find((r) => error.startsWith(`${r}: `));
+  if (known) return { request: known, detail: error.slice(known.length + 2) };
   const at = error.indexOf(": ");
   return at > 0
     ? { request: error.slice(0, at), detail: error.slice(at + 2) }
@@ -1342,7 +1438,7 @@ export async function designWorkspace(
       return finish({
         built: { ...lastBroken, bp: saved.bp },
         coverage: [],
-        gaps: [...saved.removed, ...lastBroken.advisory.map(asGap)],
+        gaps: [...saved.removed, ...lastBroken.advisory.map((e) => asGap(e))],
       });
     }
     return failed(reason);
@@ -1546,7 +1642,14 @@ export async function designWorkspace(
         ...widgetProblems(bp).map((p) => p.message),
         ...partial,
       ];
-      const advisory = [...extraChecks(bp, brief), ...(seedRef ? templateChecks(seedRef, data) : [])];
+      const advisory = [
+        ...extraChecks(
+          bp,
+          brief,
+          [...refs.systems, ...(route.base ? [route.base] : [])].flatMap((s) => [s.name, s.id]),
+        ),
+        ...(seedRef ? templateChecks(seedRef, data) : []),
+      ];
       const errors = [...structural, ...advisory];
       return { data, samples, name, bp, partial, errors, structural, advisory };
     };
@@ -1596,11 +1699,12 @@ export async function designWorkspace(
       });
       // The review is a second opinion: when it's unavailable, a workspace that validates is still handed over, and a
       // question it raises is shown to the owner instead of stopping setup (the interview already asked).
-      const gaps: SetupGap[] = built.advisory.map(asGap);
+      const gaps: SetupGap[] = built.advisory.map((e) => asGap(e));
       if (checked) {
-        errors.push(...checked.errors.map((e) => `Brief coverage: ${e}`));
+        const found = awaitingSamples(bp, samples, checked.errors);
+        errors.push(...found.map((e) => `Brief coverage: ${e}`));
         gaps.push(
-          ...checked.errors.map(asGap),
+          ...found.map((e) => asGap(e, checked.missing)),
           ...checked.questions.map((q) => ({ request: "A detail to confirm", detail: q })),
         );
       }
@@ -1637,14 +1741,15 @@ function tidyPublicForm(bp: Blueprint, v: Extract<View, { type: "form" }>) {
   const entity = bp.entities.find((e) => e.id === v.entityId);
   if (!entity) return;
   const field = (id: string) => entity.fields.find((f) => f.id === id);
-  // Who is booking (a name) and how to reach them (a phone or email), asked as plain text.
-  const asked = (pattern: RegExp) =>
+  // Who is booking (a name) and how to reach them (a phone or email). A Phone or Email field counts: a bakery's
+  // pre-order form asked for "Customer Phone" and then a required "Mobile number" again.
+  const asked = (pattern: RegExp, types: string[] = ["text"]) =>
     v.fieldIds.filter((id) => {
       const f = field(id);
-      return f?.type === "text" && pattern.test(f.id);
+      return !!f && types.includes(f.type) && pattern.test(f.id);
     });
   const names = asked(/name|guest|customer|client|player/);
-  const reach = asked(/phone|mobile|cell|email|contact/);
+  const reach = asked(/phone|mobile|cell|email|contact/, ["text", "phone", "email"]);
   const added = [
     ...(names.length ? [] : [{ id: "guest_name", name: "Your name", type: "text" as const, required: true }]),
     ...(reach.length

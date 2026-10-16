@@ -1320,6 +1320,14 @@ ${input.messages
     // A tab swapped for another layout keeps its place (see replacedTabs).
     replacedTabs(bp, design.ops, errors);
     let next = design.ops.length ? applyOps(bp, design.ops) : bp;
+    // The plan card and the request review read each automation as it will run, with its blanks filled and a quantity
+    // written in the wrong place moved to the amount. The review refused a bakery's "In movements add stock" three
+    // times over a field applyOps fills in.
+    for (const op of design.ops)
+      if (op.op === "add_rule") {
+        const done = next.rules.find((r) => r.id === op.rule.id);
+        if (done) op.rule = structuredClone(done);
+      }
     // An automation Gemini got wrong that EveryOps can work out itself is replaced, not sent back.
     const replace = design.ops.length
       ? replaceableRules(
@@ -1657,7 +1665,11 @@ export function openUpPublicForms(
         ops.push({ op: "update_field", entityId: entity.id, fieldId: f.id, patch: { required: false } });
     const contact = view.fieldIds.some((id) => {
       const f = entity.fields.find((x) => x.id === id);
-      return f?.type === "text" && /name|phone|mobile|email|contact|guest|customer|client/.test(f.id);
+      return (
+        !!f &&
+        ["text", "phone", "email"].includes(f.type) &&
+        /name|phone|mobile|email|contact|guest|customer|client/.test(f.id)
+      );
     });
     if (contact) continue;
     const guest = [

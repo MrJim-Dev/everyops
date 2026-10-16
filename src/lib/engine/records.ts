@@ -174,6 +174,29 @@ function withdraw(bp: Blueprint, records: DataRecord[], gone: ReadonlySet<string
 
 /* ---------- Mutations ---------- */
 
+/**
+ * Whether the save automations of a record type read something a save changes elsewhere: a linked record
+ * (sales_order.paid_amount) or a computed field of their own. Those need the totals worked out before they run;
+ * otherwise "when a payment is verified and the order's paid total covers the deposit" sees the total from before
+ * this payment and never fires. Other saves skip the extra recompute.
+ */
+function rulesReadComputed(bp: Blueprint, entityId: string): boolean {
+  const entity = bp.entities.find((e) => e.id === entityId);
+  const computed = new Set(
+    entity?.fields.filter((f) => f.type === "formula" || f.type === "rollup").map((f) => f.id),
+  );
+  return bp.rules.some((rule) => {
+    if (!isOn(rule) || rule.trigger.entityId !== entityId) return false;
+    const text = [rule.when ?? "", ...rule.actions.map((a) => JSON.stringify(a))].join(" ");
+    if (/\b[a-z_][a-z0-9_]*\.[a-z_]/i.test(text.replace(/'[^']*'/g, ""))) return true;
+    return (text.match(/[a-z_][a-z0-9_]*/gi) ?? []).some((word) => computed.has(word));
+  });
+}
+
+/** The records with totals and formulas worked out, when the save automations about to run read them. */
+const withTotals = (bp: Blueprint, records: DataRecord[], entityId: string, now: Date) =>
+  rulesReadComputed(bp, entityId) ? computeAll(bp, records, now) : records;
+
 export function createRecord(
   ws: WorkspaceData,
   entityId: string,
@@ -196,7 +219,15 @@ export function createRecord(
     createdAt: stamp,
     updatedAt: stamp,
   };
-  const ruled = runSaveRules(bp, [...ws.records, record], record, "created", [], now);
+  const before = withTotals(bp, [...ws.records, record], entityId, now);
+  const ruled = runSaveRules(
+    bp,
+    before,
+    before.find((r) => r.id === record.id) ?? record,
+    "created",
+    [],
+    now,
+  );
   const records = computeAll(bp, ruled.records, now);
   const saved = records.find((r) => r.id === record.id) ?? record;
   return { ok: true, data: { ...ws, records }, record: saved, notices: ruled.notices };
@@ -220,8 +251,20 @@ export function updateRecord(
     (k) => JSON.stringify(existing.data[k]) !== JSON.stringify(patch[k]),
   );
   const record: DataRecord = { ...existing, data, updatedAt: now.toISOString() };
-  const replaced = ws.records.map((r) => (r.id === id ? record : r));
-  const ruled = runSaveRules(bp, replaced, record, "updated", changed, now);
+  const replaced = withTotals(
+    bp,
+    ws.records.map((r) => (r.id === id ? record : r)),
+    existing.entityId,
+    now,
+  );
+  const ruled = runSaveRules(
+    bp,
+    replaced,
+    replaced.find((r) => r.id === id) ?? record,
+    "updated",
+    changed,
+    now,
+  );
   let synced = settle(
     ruled.records,
     contributions(bp, ws.records, existing, now),

@@ -51,7 +51,7 @@ export const assistantRule = rule.extend({
         .string()
         .optional()
         .describe(
-          'set_field: formula for the new value. send_email: the email, its subject on the first line and the message after it. create_record: JSON of field id to formula on the trigger record, e.g. {"amount":"price"}. link_record: formula for what to match, e.g. date',
+          'set_field: formula for the new value. adjust_number: leave empty; the amount goes in delta (qty, -qty). send_email: the email, its subject on the first line and the message after it. create_record: JSON of field id to formula on the trigger record, e.g. {"amount":"price"}. link_record: formula for what to match, e.g. date',
         ),
     }),
   ),

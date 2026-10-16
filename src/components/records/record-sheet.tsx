@@ -78,6 +78,8 @@ function RecordSheetBody({
   const actions = useRecordActions();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<RecordData>(record.data);
+  // The record as it was when editing started; only fields that differ from it are saved.
+  const [base, setBase] = useState<RecordData>(record.data);
   const [errors, setErrors] = useState<FieldError[]>([]);
   const status = statusField(entity);
   const current = status ? optionOf(status, record.data[status.id]) : undefined;
@@ -85,8 +87,20 @@ function RecordSheetBody({
   const next = status?.options?.find((o) => o.tone === "success" && o.id !== current?.id);
   const children = blueprint.entities.filter((e) => e.parent?.entityId === entity.id);
 
+  const startEditing = () => {
+    setDraft(record.data);
+    setBase(record.data);
+    setEditing(true);
+  };
+
   const save = () => {
-    const result = actions.update(record.id, draft);
+    // Only what was edited. A status changed from the pill or "Mark as" while the panel was open isn't written
+    // back over: confirming a pre-order and then entering its deposit once put it back to Pending payment and
+    // returned its cake to stock.
+    const edited = Object.fromEntries(
+      Object.entries(draft).filter(([id, value]) => JSON.stringify(value) !== JSON.stringify(base[id])),
+    );
+    const result = actions.update(record.id, edited);
     if (result.ok) {
       setEditing(false);
       setErrors([]);
@@ -226,7 +240,7 @@ function RecordSheetBody({
               </Button>
             ) : null}
             {editableFields(entity).length ? (
-              <Button variant="outline" className={next ? "" : "flex-1"} onClick={() => setEditing(true)}>
+              <Button variant="outline" className={next ? "" : "flex-1"} onClick={startEditing}>
                 <PencilSimpleIcon data-icon="inline-start" />
                 Edit
               </Button>
