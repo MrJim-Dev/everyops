@@ -3,6 +3,7 @@
 import {
   ArrowLeftIcon,
   ClockCounterClockwiseIcon,
+  FoldersIcon,
   GearSixIcon,
   GlobeSimpleIcon,
   MagnifyingGlassIcon,
@@ -11,6 +12,7 @@ import {
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { type ReactNode, useState } from "react";
 import { UserMenu } from "@/components/auth/user-menu";
 import { UseSystemButton } from "@/components/community/use-system-dialog";
 import { isSitePage } from "@/components/setup/build-model";
@@ -21,12 +23,36 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useAssistant } from "@/lib/assistant/panel-store";
 import type { Blueprint, System } from "@/lib/blueprint/types";
 import { useBuildOf, useSetupSketch } from "@/lib/store/setup-build";
-import { useSidebar } from "@/lib/store/sidebar";
+import { usePageGroups, useSidebar } from "@/lib/store/sidebar";
+import { canManage } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 import { useCommandMenu } from "./command-menu";
+import { OrganizePagesDialog } from "./organize-pages";
 import { RailTip } from "./rail-tip";
-import { ACTIVE_ITEM, RAIL_ITEM, RAIL_LABEL, railWidth, SidebarLink, SidebarSection } from "./sidebar-link";
+import {
+  ACTIVE_ITEM,
+  PageGroup,
+  RAIL_ITEM,
+  RAIL_LABEL,
+  railWidth,
+  SidebarLink,
+  SidebarSection,
+} from "./sidebar-link";
 import { WorkspaceSwitcher } from "./workspace-switcher";
+
+/** More pages than this and groups without the current page start closed, and an ungrouped list offers grouping. */
+const LONG_LIST = 8;
+
+/** Pages in order, with each group listed in full where its first page is. */
+function sidebarEntries(systems: System[]) {
+  const entries: ({ page: System } | { group: string; pages: System[] })[] = [];
+  for (const s of systems) {
+    if (!s.group) entries.push({ page: s });
+    else if (!entries.some((e) => "group" in e && e.group === s.group))
+      entries.push({ group: s.group, pages: systems.filter((x) => x.group === s.group) });
+  }
+  return entries;
+}
 
 /** A page made only of public website pages: listed under Website, apart from the systems the team works in. */
 function isWebsite(bp: Blueprint, system: System) {
@@ -54,6 +80,10 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
   const website = ws.blueprint.systems.filter((s) => isWebsite(ws.blueprint, s));
   const systems = ws.blueprint.systems.filter((s) => !website.includes(s));
   const toggleSidebar = useSidebar((s) => s.toggle);
+  const openGroups = usePageGroups((s) => s.open);
+  const setGroupOpen = usePageGroups((s) => s.setOpen);
+  const [organizing, setOrganizing] = useState(false);
+  const organizer = ws.mode === "live" && canManage(ws.role);
   const collapsible = onNavigate === undefined;
   // A workspace being set up: its pages land here as Gemini designs them, and the draft's stay until it's created.
   const setupSketch = useSetupSketch(ws.id);
@@ -76,6 +106,26 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
       </SidebarLink>
     );
   };
+  const pageList = (): ReactNode =>
+    sidebarEntries(systems).map((entry) => {
+      if ("page" in entry) return systemLink(entry.page);
+      const key = `${ws.id}:${entry.group}`;
+      const current = entry.pages.some((s) => isActive(`${ws.basePath}/${s.id}`));
+      const open = openGroups[key] ?? (systems.length <= LONG_LIST || current);
+      return (
+        <PageGroup
+          key={`group:${entry.group}`}
+          name={entry.group}
+          open={open}
+          onToggle={() => setGroupOpen(key, !open)}
+          count={entry.pages.length}
+          current={current}
+          rail={rail}
+        >
+          {entry.pages.map((s) => systemLink(s))}
+        </PageGroup>
+      );
+    });
 
   return (
     <nav
@@ -169,26 +219,64 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
         ) : null}
       </div>
 
-      <SidebarSection label="Systems">
-        {setup ? (
-          <BuildPages workspaceId={ws.id} rail={rail} />
-        ) : systems.length === 0 ? (
-          <p className="px-2 py-1 text-[12px] leading-relaxed text-muted-foreground">
-            Your systems will appear here once EveryOps sets them up.
-          </p>
-        ) : (
-          systems.map((s) => systemLink(s))
-        )}
-      </SidebarSection>
-      {website.length ? (
-        <SidebarSection label="Website">{website.map((s) => systemLink(s, true))}</SidebarSection>
-      ) : setupSite ? (
-        <SidebarSection label="Website">
-          <BuildPages workspaceId={ws.id} rail={rail} site />
+      {/*
+        The pages scroll on their own when there are more than fit, so search above and the account below stay put.
+        It reaches the sidebar's edges (padding put back inside) so the scrollbar sits at the edge and focus rings aren't cut.
+      */}
+      <div className="-mx-2.5 flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-2.5 pb-px [scrollbar-width:thin]">
+        <SidebarSection
+          label="Systems"
+          action={
+            organizer && systems.length > 1 ? (
+              <button
+                type="button"
+                aria-label="Organize pages"
+                title="Organize pages"
+                onClick={() => setOrganizing(true)}
+                className="flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <FoldersIcon className="size-3.5" />
+              </button>
+            ) : undefined
+          }
+        >
+          {setup ? (
+            <BuildPages workspaceId={ws.id} rail={rail} />
+          ) : systems.length === 0 ? (
+            <p className="px-2 py-1 text-[12px] leading-relaxed text-muted-foreground">
+              Your systems will appear here once EveryOps sets them up.
+            </p>
+          ) : (
+            pageList()
+          )}
+          {organizer && !setup && systems.length > LONG_LIST && !systems.some((s) => s.group) ? (
+            <RailTip rail={rail} label="Group these pages">
+              <button
+                type="button"
+                aria-label={rail ? "Group these pages" : undefined}
+                onClick={() => setOrganizing(true)}
+                className={cn(
+                  "flex h-8 items-center gap-2.5 overflow-hidden rounded-md px-2 text-[12.5px] whitespace-nowrap text-muted-foreground outline-none hover:bg-sidebar-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+                  RAIL_ITEM,
+                  railWidth(rail),
+                )}
+              >
+                <FoldersIcon className="size-4 shrink-0" />
+                <span className={cn("flex-1 text-left", RAIL_LABEL)}>Group these pages</span>
+              </button>
+            </RailTip>
+          ) : null}
         </SidebarSection>
-      ) : null}
+        {website.length ? (
+          <SidebarSection label="Website">{website.map((s) => systemLink(s, true))}</SidebarSection>
+        ) : setupSite ? (
+          <SidebarSection label="Website">
+            <BuildPages workspaceId={ws.id} rail={rail} site />
+          </SidebarSection>
+        ) : null}
+      </div>
 
-      <div className={cn("mt-auto flex flex-col gap-2", rail ? "pt-[52px]" : "pt-4")}>
+      <div className={cn("flex shrink-0 flex-col gap-2", rail ? "pt-[52px]" : "pt-4")}>
         {ws.mode === "preview" ? (
           <div
             className={cn(
@@ -237,6 +325,9 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
           ) : null}
         </div>
       </div>
+      {organizer ? (
+        <OrganizePagesDialog open={organizing} onOpenChange={setOrganizing} pages={systems} />
+      ) : null}
     </nav>
   );
 }
