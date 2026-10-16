@@ -330,3 +330,69 @@ describe("gaps from the review", () => {
     });
   });
 });
+
+describe("record types with one sample that new lines must link to", () => {
+  it("get more samples in the same call", () => {
+    const bp = {
+      entities: [
+        {
+          id: "raw_material",
+          name: "Raw Material",
+          pluralName: "Raw Materials",
+          primaryFieldId: "name",
+          fields: [{ id: "name", name: "Name", type: "text" }],
+        },
+        {
+          id: "product",
+          name: "Product",
+          pluralName: "Products",
+          primaryFieldId: "name",
+          fields: [{ id: "name", name: "Name", type: "text" }],
+        },
+        {
+          id: "customer",
+          name: "Customer",
+          pluralName: "Customers",
+          primaryFieldId: "name",
+          fields: [{ id: "name", name: "Name", type: "text" }],
+        },
+        {
+          id: "bom_item",
+          name: "BOM Item",
+          pluralName: "BOM Items",
+          primaryFieldId: "title",
+          parent: { entityId: "product", fieldId: "product" },
+          fields: [
+            { id: "title", name: "Title", type: "text" },
+            {
+              id: "product",
+              name: "Product",
+              type: "relation",
+              relation: { entityId: "product" },
+              required: true,
+            },
+            {
+              id: "raw_material",
+              name: "Raw Material",
+              type: "relation",
+              relation: { entityId: "raw_material" },
+              required: true,
+            },
+          ],
+        },
+      ],
+    } as unknown as Blueprint;
+    // As a furniture ERP's design wrote them: one of each.
+    const samples = ["raw_material", "product", "customer"].map((entityId) => ({
+      ref: entityId,
+      entityId,
+      values: [{ fieldId: "name", value: entityId }],
+    }));
+    const types = emptyTypes(bp, samples);
+    // The BOM's parent (the product) has a sample to hang lines under; its material needs more than one.
+    expect(types.map((e) => e.id)).toEqual(["bom_item", "raw_material"]);
+    expect(samplesPrompt(bp, samples, types, new Date("2026-10-14T03:00:00Z"))).toMatch(
+      /2 more records, different from the one it has/,
+    );
+  });
+});

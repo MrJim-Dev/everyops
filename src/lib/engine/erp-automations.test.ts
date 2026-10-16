@@ -589,3 +589,80 @@ describe("an automation that moves a workflow backwards", () => {
     expect(backwardsRules(bpOf([booking], [back, forward]))).toEqual(["back"]);
   });
 });
+
+describe("movement types named any way", () => {
+  it("add stock on receiving and output, and take it off on issues and scrap", () => {
+    const material: Entity = {
+      id: "raw_material",
+      name: "Raw Material",
+      pluralName: "Raw Materials",
+      primaryFieldId: "name",
+      fields: [f.text("name", "Name"), f.number("stock_on_hand", "Stock on Hand")],
+    };
+    // A furniture ERP's movement types, which all moved nothing but scrap.
+    const movement: Entity = {
+      id: "stock_movement",
+      name: "Stock Movement",
+      pluralName: "Stock Movements",
+      primaryFieldId: "ref",
+      fields: [
+        f.text("ref", "Reference"),
+        f.select("movement_type", "Movement Type", [
+          ["po_received", "PO Received"],
+          ["production_issue", "Production Issue"],
+          ["production_output", "Production Output"],
+          ["manual_adjustment", "Manual Adjustment"],
+          ["scrap_defect", "Scrap / Defect"],
+        ]),
+        f.relation("raw_material", "Raw Material", "raw_material"),
+        f.number("quantity", "Quantity"),
+      ],
+    };
+    const rule = impliedRules(bpOf([], []), bpOf([material, movement], []))[0]?.rule;
+    expect(rule?.actions[0]).toMatchObject({
+      delta:
+        "movement_type == 'po_received' || movement_type == 'production_output' ? quantity : (movement_type == 'production_issue' || movement_type == 'scrap_defect' ? -quantity : (movement_type == 'manual_adjustment' ? quantity : 0))",
+    });
+  });
+});
+
+describe("a movement record with a material type before its movement type", () => {
+  it("reads the direction from the movement type", () => {
+    const goods: Entity = {
+      id: "finished_product",
+      name: "Finished Product",
+      pluralName: "Finished Products",
+      primaryFieldId: "name",
+      fields: [f.text("name", "Name"), f.number("stock_on_hand", "Stock on Hand")],
+    };
+    // A furniture ERP's movements, where every type added its quantity.
+    const movement: Entity = {
+      id: "stock_movement",
+      name: "Stock Movement",
+      pluralName: "Stock Movements",
+      primaryFieldId: "ref",
+      fields: [
+        f.text("ref", "Reference"),
+        f.select("material_type", "Material Type", [
+          ["raw_material", "Raw Material"],
+          ["finished_product", "Finished Product"],
+        ]),
+        f.relation("finished_product", "Finished Product", "finished_product"),
+        f.select("movement_type", "Movement Type", [
+          ["purchase_in", "Purchase In"],
+          ["production_in", "Production In"],
+          ["production_out", "Production Out"],
+          ["sales_delivery_out", "Sales Delivery Out"],
+          ["scrap_waste", "Scrap / Waste"],
+          ["inventory_adjustment", "Inventory Adjustment"],
+        ]),
+        f.number("quantity", "Quantity"),
+      ],
+    };
+    const rule = impliedRules(bpOf([], []), bpOf([goods, movement], []))[0]?.rule;
+    expect(rule?.actions[0]).toMatchObject({
+      delta:
+        "movement_type == 'purchase_in' || movement_type == 'production_in' ? quantity : (movement_type == 'production_out' || movement_type == 'sales_delivery_out' || movement_type == 'scrap_waste' ? -quantity : (movement_type == 'inventory_adjustment' ? quantity : 0))",
+    });
+  });
+});

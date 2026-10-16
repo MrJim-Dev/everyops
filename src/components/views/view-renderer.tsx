@@ -47,5 +47,8 @@ export function ViewRenderer({ view }: { view: View }) {
   }
 }
 
-/** Views where "New …" makes sense from the page header. */
-export const CREATABLE: View["type"][] = ["table", "kanban", "calendar", "slot_grid"];
+/**
+ * Views where "New …" makes sense from the page header. An approval queue counts: it's often the only screen for
+ * what it reviews, and a furniture ERP's customer payments could be verified there but never recorded.
+ */
+export const CREATABLE: View["type"][] = ["table", "kanban", "calendar", "slot_grid", "approval_queue"];

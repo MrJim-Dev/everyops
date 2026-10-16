@@ -48,6 +48,10 @@ describe("matchPlaybooks", () => {
     ["daily opening and closing checklists and incident reports for our branches", ["inspections"]],
     ["support ticket system for our software customers", ["helpdesk"]],
     ["pickleball courts with a small cafe", ["courts", "food"]],
+    // An ERP covers stock, purchasing, orders, invoicing and money; a maker or shop keeps its business playbook.
+    ["I need an ERP.", ["erp"]],
+    ["I need an ERP for my small furniture manufacturing shop.", ["production", "erp"]],
+    ["ERP for our hardware store with inventory, suppliers and purchase orders", ["retail", "erp"]],
     ["hello there", []],
   ])("%s", (text, expected) => {
     expect(ids(text)).toEqual(expected);
