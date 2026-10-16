@@ -52,6 +52,14 @@ const DESIGN =
   /\b(add|create|make|rename|remove|delete|hide|show|move|reorder|put|change|turn)\b[^.?!]*\b(fields?|columns?|pages?|tabs?|cards?|charts?|forms?|automations?|sections?|website|landing page|headline|button|steps?|layout|dashboard|record types?|sidebar|a way to (track|manage))\b/i;
 /** Telling the assistant something about the business ("heads up: we now close at 11"). */
 const STATEMENT = /^(heads up|fyi|just so you know|for your info|note)\b[^?]*$/i;
+/**
+ * Setting up an automation describes what happens later ("every Monday at 8 AM, email players with unpaid
+ * bookings"): its times, days and statuses are settings, not facts to check, so it needs no lookup unless it also
+ * asks for a number or ends as a question.
+ */
+const AUTOMATION =
+  /\b(automations?|automatically|every (day|morning|afternoon|evening|night|week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|each (morning|day|week|month)|daily|weekly|monthly|(the )?(day|days|week|hours?) (before|after)|send (an? )?(email|reminder)|email (each|every|all|them|the)|remind (each|every|all|them|the|players?|customers?|clients?|guests?|members?))\b/i;
+const ASKS = /how (many|much)|\btotal\b|revenue|collected|magkano|ilan|\?\s*$/i;
 /** Advice about the workspace ("what should I set up next?", "how do I share the booking page?"). */
 const ADVICE =
   /^(what should|what else should|what can|how (do|can|should) (i|we)|can you (explain|help)|what('s| is) the best way|any (ideas|suggestions)|explain|help me)\b/i;
@@ -68,6 +76,7 @@ export function needsLookup(message: string): boolean {
   const text = message.trim();
   if (!text) return false;
   if (GREETING.test(text) || NAVIGATE.test(text) || STATEMENT.test(text)) return false;
+  if (AUTOMATION.test(text) && !ASKS.test(text)) return false;
   if (ADVICE.test(text) && !DATA.test(text)) return false;
   if (DESIGN.test(text) && !DATA.test(text)) return false;
   return true;

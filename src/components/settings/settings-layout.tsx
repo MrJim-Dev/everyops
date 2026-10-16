@@ -1,6 +1,12 @@
 "use client";
 
-import { BrainIcon, GearSixIcon, GlobeHemisphereWestIcon, UsersThreeIcon } from "@phosphor-icons/react";
+import {
+  BrainIcon,
+  GearSixIcon,
+  GlobeHemisphereWestIcon,
+  LightningIcon,
+  UsersThreeIcon,
+} from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -17,6 +23,7 @@ export function SettingsLayout({ children }: { children: ReactNode }) {
     { id: "general", href: base, label: "General", icon: GearSixIcon },
     { id: "team", href: `${base}/team`, label: "Team", icon: UsersThreeIcon },
     { id: "assistant", href: `${base}/assistant`, label: "Assistant", icon: BrainIcon },
+    { id: "automations", href: `${base}/automations`, label: "Automations", icon: LightningIcon },
     ...(canManage(ws.role)
       ? [{ id: "publish", href: `${base}/publish`, label: "Publish", icon: GlobeHemisphereWestIcon }]
       : []),
