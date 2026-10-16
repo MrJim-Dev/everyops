@@ -19,7 +19,7 @@
     "storage:lifecycle": "bash scripts/storage-lifecycle.sh",
     "deploy:run": "bash scripts/deploy.sh",
     "eval:assistant": "tsx scripts/assistant-eval.mts",
-    "eval:design": "tsx scripts/design-quality-eval.mts"
+    "eval:design": "tsx --conditions=react-server --env-file=.env.local scripts/design-eval.mts"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
