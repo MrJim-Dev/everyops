@@ -3,6 +3,7 @@
 import { CaretRightIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { RailTip } from "./rail-tip";
 
@@ -109,8 +110,10 @@ export function SidebarSection({
 }
 
 /**
- * Pages the owner grouped, under a header that opens and closes them. The caret sits in the icon column, so the rail
- * keeps it (with the group's name in a tooltip) and nothing moves when the sidebar narrows.
+ * Pages the owner grouped, under a quiet label that opens and closes them (the whole row is the target). Its pages
+ * hang off a thin guide line, indented, and slide open in 180 ms; reduced motion snaps. In the rail the label gives way
+ * to a short rule in the icon column, still a button with the group's name in a tooltip, and the indent eases out with
+ * the frame so the icons line up with the rest.
  */
 export function PageGroup({
   name,
@@ -130,35 +133,60 @@ export function PageGroup({
   rail: boolean;
   children: ReactNode;
 }) {
+  const marked = current && !open;
   return (
-    <div className="flex flex-col gap-px">
+    <Collapsible open={open} onOpenChange={onToggle} className="flex flex-col">
       <RailTip rail={rail} label={name}>
-        <button
-          type="button"
-          aria-expanded={open}
+        <CollapsibleTrigger
           aria-label={rail ? name : undefined}
-          onClick={onToggle}
           className={cn(
-            "flex h-8 items-center gap-2.5 overflow-hidden rounded-md px-2 text-[12.5px] font-medium whitespace-nowrap text-muted-foreground outline-none hover:bg-sidebar-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+            "group/trigger relative mt-1.5 flex h-7 items-center gap-1 overflow-hidden rounded-md px-2 text-[12px] font-medium whitespace-nowrap text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
             RAIL_ITEM,
             railWidth(rail),
           )}
         >
-          <span className="flex size-4 shrink-0 items-center justify-center">
+          {/* The rail's stand-in for the label: a short rule centred on the icon column, teal like the caret. */}
+          <span
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute top-1/2 left-2 h-px w-4 -translate-y-1/2 rounded-full bg-sidebar-border opacity-0 transition-opacity duration-150 group-data-[rail=true]/sidebar:opacity-100",
+              marked && "bg-primary",
+            )}
+          />
+          <span className={cn("flex min-w-0 flex-1 items-center gap-1", RAIL_LABEL)}>
+            <span className="truncate">{name}</span>
             <CaretRightIcon
+              aria-hidden
               weight="bold"
               className={cn(
-                "size-3 transition-[rotate,color] duration-200 ease-(--ease-out-strong)",
+                "size-2.5 shrink-0 opacity-50 transition-[rotate,opacity,color] duration-[180ms] ease-(--ease-out-strong) group-hover/trigger:opacity-100 motion-reduce:transition-none",
                 open && "rotate-90",
-                current && !open && "text-primary",
+                marked && "text-primary opacity-100",
               )}
             />
+            {open ? null : (
+              <span className="ml-auto pl-2 text-[11px] font-normal tabular-nums text-muted-foreground/80">
+                {count}
+              </span>
+            )}
           </span>
-          <span className={cn("flex-1 truncate text-left", RAIL_LABEL)}>{name}</span>
-          {open ? null : <span className={cn("text-[11px] tabular-nums", RAIL_LABEL)}>{count}</span>}
-        </button>
+        </CollapsibleTrigger>
       </RailTip>
-      {open ? children : null}
-    </div>
+      <CollapsibleContent
+        className={cn(
+          "h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-[180ms] ease-(--ease-out-strong) data-[ending-style]:h-0 data-[starting-style]:h-0 motion-reduce:transition-none",
+        )}
+      >
+        <div
+          className={cn(
+            "ml-4 flex flex-col gap-px border-l border-sidebar-border pt-px pl-1.5",
+            "transition-[margin,padding,border-color] duration-[260ms] ease-(--ease-drawer) group-data-[instant=true]/shell:duration-0",
+            "group-data-[rail=true]/sidebar:ml-0 group-data-[rail=true]/sidebar:border-transparent group-data-[rail=true]/sidebar:pl-0",
+          )}
+        >
+          {children}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
