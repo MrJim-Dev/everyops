@@ -21,6 +21,33 @@ export function completeAction(bp: Blueprint, rule: Rule, action: Action): Actio
   if (action.type === "send_email") return action.to.trim() && action.subject.trim() ? action : undefined;
   if (action.type === "create_record")
     return bp.entities.some((e) => e.id === action.entityId) ? action : undefined;
+  if (action.type === "link_record") {
+    // The link may be named by its field or by the record type it points at ("daily_summary").
+    const relations = source.fields.filter((f) => f.type === "relation");
+    const link =
+      relations.find((f) => f.id === action.target?.fieldId) ??
+      relations.find((f) => f.relation?.entityId === action.target?.fieldId);
+    const linked = entity(link?.relation?.entityId);
+    if (!link || !linked || !action.value?.trim()) return undefined;
+    // Matching on a date with the field left blank means the linked type's only date.
+    const dates = linked.fields.filter((f) => f.type === "date");
+    const field =
+      linked.fields.find((f) => f.id === action.fieldId) ?? (dates.length === 1 ? dates[0] : undefined);
+    if (!field) return undefined;
+    // A value that names a field this record doesn't have (often the linked type's own: "date_str") is this
+    // record's date when the match is on a date and the record has one clear date.
+    let value = action.value.trim();
+    if (
+      /^[a-z_][a-z0-9_]*$/i.test(value) &&
+      !source.fields.some((f) => f.id === value) &&
+      field.type === "date"
+    ) {
+      const own = source.fields.filter((f) => ["date", "datetime", "time_range"].includes(f.type));
+      const pick = own.length === 1 ? own[0] : own.find((f) => /date|day/i.test(`${f.id} ${f.name}`));
+      if (pick) value = pick.id;
+    }
+    return { ...action, target: { kind: "relation", fieldId: link.id }, fieldId: field.id, value };
+  }
   let target = action.target;
   let targetEntity: Entity | undefined = source;
   if (target.kind === "relation") {

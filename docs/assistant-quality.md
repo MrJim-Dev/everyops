@@ -18,10 +18,9 @@ Use an isolated database and a running local server with Vertex ADC configured. 
 
 ```sh
 EVAL_BASE=http://localhost:3017 EVAL_REPEAT=2 EVAL_REPORT=/tmp/assistant-results.json pnpm eval:assistant
-EVAL_BASE=http://localhost:3017 EVAL_REPEAT=2 EVAL_REPORT=/tmp/setup-results.json pnpm eval:design
 ```
 
-`EVAL_EMAIL` and `EVAL_PASSWORD` override the demo account. `EVAL_ONLY` selects an assistant case by name. `EVAL_KEEP=1` keeps the temporary assistant workspace for browser inspection; otherwise the script deletes it. Setup evaluation returns a draft without saving a workspace.
+`EVAL_EMAIL` and `EVAL_PASSWORD` override the demo account. `EVAL_ONLY` selects an assistant case by name. `EVAL_KEEP=1` keeps the temporary assistant workspace for browser inspection; otherwise the script deletes it. Setup's design stage has its own eval, `pnpm eval:design` (docs/design-quality.md).
 
 The assistant fixture has 32 bookings, including data beyond the 25-record digest sample, plus courts and players. This month's paid total is ₱1,200; GCash is ₱400. Unpaid, cancelled and previous-month bookings are separate. Checks include Taglish, a follow-up filter, exact record ids, preservation of unrelated records and Bookings configuration, absent-record deletion, future dates, new areas, and persistent deduplicated memory. The absent-record case accepts an evidence-backed no-match answer or a clarification, and never a deletion plan.
 

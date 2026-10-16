@@ -15,6 +15,7 @@ Automations used to run only at the moment a record was saved, and could only se
 | `set_field`, `adjust_number`, `notify` | As before |
 | `send_email` | Emails `to` with `subject` and `body`. `{{field}}` and `{{link.field}}` placeholders are filled and formatted (₱400, Fri, Oct 16, 2026, option labels) |
 | `create_record` | Adds a record of another type with `values` (field id → formula on the triggering record). A link back to the triggering record's type is filled in by itself |
+| `link_record` | Files the record under the record of another type that matches it: `target` is the link on this record, `fieldId` the other type's field to match, `value` a formula reading this record (its date). The match is added when there's none (its name filled from the value), and its rollups count through the link. It runs on every save while `when` holds, whatever the trigger, so a log marked Logged later is filed then and one whose date changes moves. In the designer and assistant schemas it reuses `target`, `fieldId` and `value` |
 
 `enabled: false` pauses an automation without removing it. Automations that create records can set each other off up to `MAX_DEPTH` (3) levels; past that they stop with a notice.
 

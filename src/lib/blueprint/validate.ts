@@ -373,6 +373,38 @@ function checkRule(bp: Blueprint, source: Entity, rule: Rule, path: string, erro
       }
       continue;
     }
+    if (action.type === "link_record") {
+      const linkId = action.target?.fieldId;
+      const link = source.fields.find((f) => f.id === linkId);
+      const linked = bp.entities.find((e) => e.id === link?.relation?.entityId);
+      if (!link || link.type !== "relation" || !linked) {
+        say(
+          `link_record needs target.fieldId, a link on ${source.name} to the record type it files the record under (links: ${list(source.fields.filter((f) => f.type === "relation"))})`,
+        );
+        continue;
+      }
+      const field = linked.fields.find((f) => f.id === action.fieldId);
+      if (!field)
+        say(
+          `link_record's fieldId "${action.fieldId}" isn't a field of ${linked.name}; it's the field to match, such as its date (fields: ${list(linked.fields)})`,
+        );
+      else if (field.type === "formula" || field.type === "rollup" || field.type === "relation")
+        say(
+          `link_record can't match on ${linked.name}'s ${field.name}: use a field it can fill in, such as a date or a name`,
+        );
+      if (!action.value?.trim())
+        say("link_record needs value, a formula on this record for what to match, such as date");
+      else {
+        checkExpr(bp, source, action.value, path, errors);
+        // A value that reads nothing of the record would file every record under the same one.
+        const refs = action.value.replace(/'[^']*'|"[^"]*"/g, "").match(/[A-Za-z_][\w.]*/g) ?? [];
+        if (!refs.some((ref) => resolvesPath(bp, source, ref)))
+          say(
+            `link_record's value must read a field of ${source.name}, such as its date; a fixed value files every record under the same one`,
+          );
+      }
+      continue;
+    }
     let target = source;
     if (action.target.kind === "relation") {
       const linkId = action.target.fieldId;

@@ -188,6 +188,23 @@ function contactType(f: { id: string; name: string; type: Field["type"] }): Fiel
   return "text";
 }
 
+type ResultType = NonNullable<Field["formula"]>["resultType"];
+
+/**
+ * A formula's result type as written, mapped to one the app has: "percent", "integer" and "decimal" are numbers,
+ * "currency" money, "string" text, "boolean" a checkbox. Gemini writes these often (a commission %), and each cost a
+ * repair round. Anything else is left as written for validation to name.
+ */
+export function resultTypeOf(raw: string): ResultType {
+  const t = raw.trim().toLowerCase();
+  if (/^(percent(age)?|integer|int|decimal|float|double|count|duration)$/.test(t)) return "number";
+  if (/^(currency|peso|php|amount|price)$/.test(t)) return "money";
+  if (/^(string|str|varchar)$/.test(t)) return "text";
+  if (/^(boolean|bool)$/.test(t)) return "checkbox";
+  if (/^(datetime|timestamp)$/.test(t)) return "date";
+  return t as ResultType;
+}
+
 export function toEntity(e: Design["entities"][number]): Entity {
   const fields = e.fields.map((f) => {
     const out: Field = {
@@ -200,9 +217,7 @@ export function toEntity(e: Design["entities"][number]): Entity {
         ? {
             formula: {
               ...f.formula,
-              resultType: f.formula.resultType.trim().toLowerCase() as NonNullable<
-                Field["formula"]
-              >["resultType"],
+              resultType: resultTypeOf(f.formula.resultType),
             },
           }
         : {}),
@@ -244,20 +259,27 @@ export function toRule(r: Design["rules"][number]): Rule {
     actions: r.actions.map((a) =>
       a.type === "notify"
         ? { type: "notify" as const, message: a.message ?? "" }
-        : a.type === "set_field"
+        : a.type === "link_record"
           ? {
-              type: "set_field" as const,
-              target: target(a.target),
+              type: "link_record" as const,
+              target: { kind: "relation" as const, fieldId: a.target?.fieldId ?? "" },
               fieldId: a.fieldId ?? "",
-              value: a.value ?? "null",
+              value: a.value ?? "",
             }
-          : {
-              type: "adjust_number" as const,
-              target: target(a.target),
-              // Gemini sometimes names the field it changes in value ("value": "stock").
-              fieldId: a.fieldId ?? (a.value && /^[a-z_][a-z0-9_]*$/.test(a.value) ? a.value : ""),
-              delta: a.delta ?? "0",
-            },
+          : a.type === "set_field"
+            ? {
+                type: "set_field" as const,
+                target: target(a.target),
+                fieldId: a.fieldId ?? "",
+                value: a.value ?? "null",
+              }
+            : {
+                type: "adjust_number" as const,
+                target: target(a.target),
+                // Gemini sometimes names the field it changes in value ("value": "stock").
+                fieldId: a.fieldId ?? (a.value && /^[a-z_][a-z0-9_]*$/.test(a.value) ? a.value : ""),
+                delta: a.delta ?? "0",
+              },
     ),
   };
 }
@@ -468,6 +490,8 @@ export function tidy(bp: Blueprint): Blueprint {
           .map((f) => f.id);
     }
   }
+  // What each card was before tidying, to log the ones it drops (a dropped card the brief asked for costs a repair).
+  const asWritten = new Map(bp.widgets.map((w) => [w.id, JSON.stringify(w).slice(0, 400)]));
   bp.widgets = bp.widgets.filter((w) => {
     // A progress bar needs a target, which the designer isn't asked for: it shows as a total instead.
     if (w.type === "progress" && !w.target) w.type = "stat";
@@ -518,6 +542,9 @@ export function tidy(bp: Blueprint): Blueprint {
     } else delete w.heatmap;
     return true;
   });
+  const kept = new Set(bp.widgets.map((w) => w.id));
+  const dropped = [...asWritten].filter(([id]) => !kept.has(id)).map(([, json]) => json);
+  if (dropped.length) console.info(JSON.stringify({ event: "design_widgets_dropped", widgets: dropped }));
   const viewIds = new Set(bp.views.map((v) => v.id));
   const widgetIds = new Set(bp.widgets.map((w) => w.id));
   for (const w of bp.widgets) if (w.list?.viewId && !viewIds.has(w.list.viewId)) delete w.list.viewId;
@@ -1382,7 +1409,13 @@ export async function designWorkspace(
             JSON.stringify({
               event: "design_template_patched",
               from: route.base.id,
-              entities: (result.data.entities ?? []).map((e) => `${e.id}${e.resource ? "*" : ""}`),
+              // * resource hours, + booking settings: as the patch returned them, then as the merged design has them.
+              entities: (result.data.entities ?? []).map(
+                (e) => `${e.id}${e.resource ? "*" : ""}${e.booking ? "+" : ""}`,
+              ),
+              bookable: seeded.entities
+                .filter((e) => e.resource || e.booking)
+                .map((e) => `${e.id}${e.resource ? "*" : ""}${e.booking ? "+" : ""}`),
               views: result.data.views?.length ?? 0,
               samples: result.data.samples?.length ?? 0,
               config: config?.length ?? null,
@@ -1428,6 +1461,15 @@ export async function designWorkspace(
         if (!result.ok) return settle(result.error);
         stats.output += result.tokens.output;
         designed = result.data;
+        // Where the design's output goes, part by part (characters), to see what makes one design longer than another.
+        console.info(
+          JSON.stringify({
+            event: "design_output_parts",
+            parts: Object.fromEntries(
+              Object.entries(result.data).map(([k, v]) => [k, JSON.stringify(v ?? null).length]),
+            ),
+          }),
+        );
       }
     } else {
       stats.repairs++;
