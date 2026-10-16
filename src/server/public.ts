@@ -30,6 +30,7 @@ import {
 } from "@/lib/public/slots";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { dateKey } from "@/lib/time";
+import { logActivity, recordEntries } from "./activity";
 import { takeToken } from "./ai/rate-limit";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
@@ -416,6 +417,11 @@ export async function submitPublicForm(
     const saved = await putRecords(trx, slug, writes);
     if (saved.conflicts.length)
       throw new Error(`public submission conflicted on ${saved.conflicts.join(", ")}`);
+    await logActivity(
+      trx,
+      { type: "public_form", id: view.id, name: view.name },
+      recordEntries(slug, writes),
+    );
     if (fireOnSave(bp))
       emailRuns = await logSaveRuns(
         trx,

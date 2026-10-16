@@ -1,4 +1,4 @@
-import { apiCaller, workspaceAccess } from "@/server/api-auth";
+import { actorOf, apiCaller, workspaceAccess } from "@/server/api-auth";
 import { db } from "@/server/db";
 import { writePageText } from "@/server/record-writes";
 import { apiError, badRequest, jsonBody, restRoute } from "@/server/rest";
@@ -44,7 +44,7 @@ export async function PUT(request: Request, { params }: Ctx) {
       "forbidden",
       "Custom HTML pages are shown to the public: only owners and admins can change them.",
     );
-  const updatedAt = await writePageText(id, viewId, body.text);
+  const updatedAt = await writePageText(id, actorOf(caller), viewId, body.text);
   return Response.json({
     data: { id: viewId, name: view.name, type: view.type, characters: body.text.length, updatedAt },
   });

@@ -1,14 +1,16 @@
 import { z } from "zod";
 import { PERMISSIONS } from "@/lib/api-keys";
+import { keyUsage } from "@/server/activity";
 import { createKey, listKeys } from "@/server/api-keys";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { accessibleWorkspaces } from "@/server/workspaces";
 
-/** The signed-in account's API keys (never their secrets). */
+/** The signed-in account's API keys (never their secrets), with each one's use over the last 30 days. */
 export async function GET(request: Request) {
   const { user, error } = await apiUser(request);
   if (error) return error;
-  return Response.json({ ok: true, keys: await listKeys(user.id) });
+  const [keys, usage] = await Promise.all([listKeys(user.id), keyUsage(user.id)]);
+  return Response.json({ ok: true, keys, usage });
 }
 
 const body = z.object({

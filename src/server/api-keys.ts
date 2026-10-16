@@ -10,6 +10,7 @@ import {
   SECRET_PREFIX,
   visiblePrefix,
 } from "@/lib/api-keys";
+import { logActivity, personActor } from "./activity";
 import { db } from "./db";
 
 /** Most keys one account keeps (revoked ones included until they're cleaned up). */
@@ -87,15 +88,41 @@ export async function createKey(
     values (${id}, ${userId}, ${input.name}, ${visiblePrefix(id)}, ${hashOf(secret)},
       ${input.workspaces}::text[], ${input.permissions}::text[], ${expires})
     returning *`.execute(db);
+  await logActivity(
+    db,
+    { ...personActor(userId), keyId: id },
+    {
+      workspaceId: null,
+      action: "key.create",
+      target: input.name,
+      count: 1,
+      detail: [
+        input.workspaces
+          ? `${input.workspaces.length} workspace${input.workspaces.length === 1 ? "" : "s"}`
+          : "all workspaces",
+        input.permissions.join(", "),
+      ].join(" · "),
+    },
+  );
   return { ok: true, key: toInfo(rows[0]), secret };
 }
 
 export async function revokeKey(userId: string, id: string): Promise<boolean> {
-  const { numAffectedRows } = await sql`
-    update api_key set revoked_at = now() where id = ${id} and user_id = ${userId} and revoked_at is null`.execute(
-    db,
-  );
-  return Number(numAffectedRows ?? 0) > 0;
+  const { rows } = await sql<{ name: string }>`
+    update api_key set revoked_at = now() where id = ${id} and user_id = ${userId} and revoked_at is null
+    returning name`.execute(db);
+  if (rows[0])
+    await logActivity(
+      db,
+      { ...personActor(userId), keyId: id },
+      {
+        workspaceId: null,
+        action: "key.revoke",
+        target: rows[0].name,
+        count: 1,
+      },
+    );
+  return rows.length > 0;
 }
 
 export type VerifiedKey = { key: ApiKeyInfo; user: { id: string; name: string; email: string } };

@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ACTIONS, type Action } from "@/lib/activity";
 import { type ApiKeyInfo, keyStatus, PERMISSION_LABELS, PERMISSIONS, type Permission } from "@/lib/api-keys";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { useWorkspaces } from "@/lib/store/workspaces";
@@ -44,14 +45,20 @@ const DEFAULT_PERMISSIONS: Permission[] = ["records:read", "records:write", "pag
  */
 export function ApiKeysSection() {
   const [keys, setKeys] = useState<ApiKeyInfo[] | null>(null);
+  const [usage, setUsage] = useState<Record<string, KeyUsage>>({});
   const [open, setOpen] = useState(false);
   const workspaces = useWorkspaces((s) => s.workspaces);
   const names = Object.fromEntries(Object.values(workspaces).map((w) => [w.slug, w.name]));
 
   const load = useCallback(async () => {
     const res = await fetch("/api/keys").catch(() => null);
-    const body = (await res?.json().catch(() => null)) as { ok: boolean; keys?: ApiKeyInfo[] } | null;
+    const body = (await res?.json().catch(() => null)) as {
+      ok: boolean;
+      keys?: ApiKeyInfo[];
+      usage?: Record<string, KeyUsage>;
+    } | null;
     setKeys(body?.keys ?? []);
+    setUsage(body?.usage ?? {});
   }, []);
   useEffect(() => {
     void load();
@@ -122,6 +129,7 @@ export function ApiKeysSection() {
                       ? `Expires ${formatDate(k.expiresAt, { withYear: true })}`
                       : "Doesn't expire"}
                   </span>
+                  <KeyUse use={usage[k.id]} />
                 </div>
                 <ConfirmDeleteDialog
                   trigger={
@@ -377,5 +385,31 @@ function NewKeyDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+type KeyUsage = {
+  total: number;
+  denied: number;
+  lastAt: string | null;
+  lastAction: string | null;
+  workspaces: number;
+};
+
+/** What a key did in the last 30 days, from the activity log: requests that changed or read data, and refusals. */
+function KeyUse({ use }: { use?: KeyUsage }) {
+  if (!use?.total) return null;
+  return (
+    <span className="text-[12px] text-muted-foreground/80">
+      {use.total} logged action{use.total === 1 ? "" : "s"} in 30 days
+      {use.workspaces > 1 ? ` across ${use.workspaces} workspaces` : ""}
+      {use.lastAction ? ` · last: ${ACTIONS[use.lastAction as Action] ?? use.lastAction}` : ""}
+      {use.denied ? (
+        <span className="text-destructive">
+          {" · "}
+          {use.denied} refused
+        </span>
+      ) : null}
+    </span>
   );
 }

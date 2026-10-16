@@ -2,6 +2,7 @@
 
 import {
   BrainIcon,
+  ClockCounterClockwiseIcon,
   GearSixIcon,
   GlobeHemisphereWestIcon,
   LightningIcon,
@@ -25,7 +26,10 @@ export function SettingsLayout({ children }: { children: ReactNode }) {
     { id: "assistant", href: `${base}/assistant`, label: "Assistant", icon: BrainIcon },
     { id: "automations", href: `${base}/automations`, label: "Automations", icon: LightningIcon },
     ...(canManage(ws.role)
-      ? [{ id: "publish", href: `${base}/publish`, label: "Publish", icon: GlobeHemisphereWestIcon }]
+      ? [
+          { id: "publish", href: `${base}/publish`, label: "Publish", icon: GlobeHemisphereWestIcon },
+          { id: "activity", href: `${base}/activity`, label: "Activity", icon: ClockCounterClockwiseIcon },
+        ]
       : []),
   ];
   const active = items.find((t) => t.id !== "general" && pathname.startsWith(t.href))?.id ?? "general";

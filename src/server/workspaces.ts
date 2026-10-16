@@ -18,6 +18,7 @@ import {
   workspaceFrom,
 } from "@/lib/store/workspace-model";
 import type { PatchResult, WorkspaceMeta, WorkspacePatch } from "@/lib/store/workspace-sync";
+import { logActivity, personActor, recordEntries } from "./activity";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { inviteEmail } from "./emails";
@@ -351,6 +352,14 @@ export async function patchWorkspace(
             message: "That version of the workspace doesn't exist.",
           });
         currentVersion = patch.meta.currentVersion;
+        if (currentVersion !== stored.currentVersion)
+          await logActivity(trx, personActor(userId), {
+            workspaceId: slug,
+            action: "design.version",
+            target: `v${currentVersion}`,
+            count: 1,
+            detail: `Version ${stored.currentVersion} → ${currentVersion}`,
+          });
         await sql`update workspace set doc = ${JSON.stringify(metaFrom(patch.meta))}::jsonb where id = ${slug}`.execute(
           trx,
         );
@@ -405,6 +414,14 @@ export async function patchWorkspace(
               updatedAt: "",
             });
         }
+        const deleteIds = patch.records.delete.map((d) => d.id);
+        const deleting = deleteIds.length
+          ? (
+              await sql<{ id: string; entity_id: string }>`
+                select id, entity_id from workspace_record
+                where workspace_id = ${slug} and id = any(${deleteIds}::text[])`.execute(trx)
+            ).rows.map((r) => ({ id: r.id, entityId: r.entity_id }))
+          : [];
         const put = await putRecords(trx, slug, puts);
         const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, patch.records.delete))];
         if (conflicts.length)
@@ -415,6 +432,7 @@ export async function patchWorkspace(
             conflicts,
           });
         revs = put.revs;
+        await logActivity(trx, personActor(userId), recordEntries(slug, puts, deleting));
         if (watching && rulesBp && puts.length) {
           const changes = puts.map((p) => ({ before: beforeEdit.get(p.record.id), after: p.record }));
           const records = (await readRecords(trx, slug)).map((s) => s.record);
@@ -430,6 +448,17 @@ export async function patchWorkspace(
           for (const key of bp ? htmlDocKeys(bp) : []) delete pages[key];
         }
         await writePages(trx, slug, pages);
+        await logActivity(
+          trx,
+          personActor(userId),
+          Object.entries(pages).map(([key, d]) => ({
+            workspaceId: slug,
+            action: "page.update" as const,
+            target: key,
+            count: 1,
+            ...(d ? {} : { detail: "removed" }),
+          })),
+        );
       }
 
       if (patch.changes?.length) {

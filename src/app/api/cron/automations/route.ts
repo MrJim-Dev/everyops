@@ -1,9 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
+import { trimActivity } from "@/server/activity";
 import { deliverPending, runTimedAutomations } from "@/server/automations";
 
 /**
  * Called every 15 minutes by Cloud Scheduler with "Authorization: Bearer $CRON_SECRET": runs schedules and dates
- * that are due, sends their emails, then retries emails still pending from saves and bookings.
+ * that are due, sends their emails, retries emails still pending from saves and bookings, and drops activity
+ * log entries past their retention.
  */
 export async function POST(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -14,12 +16,14 @@ export async function POST(request: Request) {
   const timed = await runTimedAutomations();
   const fresh = await deliverPending(timed.pending);
   const retried = await deliverPending();
+  const trimmed = await trimActivity();
   const result = {
     ok: true,
     workspaces: timed.workspaces,
     runs: timed.runs,
     sent: fresh.sent + retried.sent,
     failed: fresh.failed + retried.failed,
+    activityTrimmed: trimmed,
   };
   console.info(JSON.stringify({ event: "automations", ...result }));
   return Response.json(result);

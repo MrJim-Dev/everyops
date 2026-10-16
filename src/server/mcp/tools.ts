@@ -4,8 +4,9 @@ import { allowedIn, type Permission } from "@/lib/api-keys";
 import { findEntity } from "@/lib/blueprint/lookup";
 import type { Blueprint, Entity } from "@/lib/blueprint/types";
 import { coerceValues } from "@/lib/engine/coerce";
+import { logActivity } from "../activity";
 import { recordTools } from "../ai/record-tools";
-import { type ApiCaller, workspaceAccess } from "../api-auth";
+import { type ApiCaller, actorOf, workspaceAccess } from "../api-auth";
 import { db } from "../db";
 import { readPage, writeRecord } from "../record-writes";
 import { currentBlueprint, readRecords } from "../workspace-data";
@@ -308,7 +309,13 @@ export const TOOLS: Tool[] = [
       const records = (await readRecords(db, ctx.workspaceId)).map((s) => s.record);
       const { data, errors } = coerceValues(ctx.bp, records, entity, (args.values ?? {}) as Args);
       if (errors.length) throw new ToolError(errors.join("\n"));
-      return writeResult(await writeRecord(ctx.workspaceId, { kind: "create", entityId: entity.id, data }));
+      return writeResult(
+        await writeRecord(ctx.workspaceId, actorOf(ctx.caller), {
+          kind: "create",
+          entityId: entity.id,
+          data,
+        }),
+      );
     },
   },
   {
@@ -333,7 +340,7 @@ export const TOOLS: Tool[] = [
       const { data, errors } = coerceValues(ctx.bp, records, entity, (args.values ?? {}) as Args);
       if (errors.length) throw new ToolError(errors.join("\n"));
       return writeResult(
-        await writeRecord(ctx.workspaceId, {
+        await writeRecord(ctx.workspaceId, actorOf(ctx.caller), {
           kind: "update",
           id,
           patch: data,
@@ -354,7 +361,7 @@ export const TOOLS: Tool[] = [
     required: ["id"],
     run: async (ctx, args) =>
       writeResult(
-        await writeRecord(ctx.workspaceId, {
+        await writeRecord(ctx.workspaceId, actorOf(ctx.caller), {
           kind: "delete",
           id: str(args.id, "id"),
           ...(typeof args.rev === "number" ? { rev: args.rev } : {}),
@@ -376,6 +383,12 @@ export const TOOLS: Tool[] = [
         insert into agent_request (workspace_id, user_id, key_id, key_name, request)
         values (${ctx.workspaceId}, ${ctx.caller.user.id}, ${ctx.caller.key?.id ?? null}, ${ctx.caller.key?.name ?? null}, ${request})
         returning id`.execute(db);
+      await logActivity(db, actorOf(ctx.caller), {
+        workspaceId: ctx.workspaceId,
+        action: "change.propose",
+        ids: [String(rows[0]?.id)],
+        detail: request,
+      });
       return {
         ok: true,
         requestId: Number(rows[0]?.id),
@@ -449,5 +462,26 @@ export async function runTool(
   if (allowed.error) throw await accessError(allowed.error);
   const bp = await currentBlueprint(db, workspaceId);
   if (!bp) throw new ToolError("Workspace not found.", 404);
-  return tool.run({ caller, scope, workspaceId, bp }, args);
+  if (!(tool.readOnly && caller.client === "mcp")) return tool.run({ caller, scope, workspaceId, bp }, args);
+  // An AI agent's reads are logged too (writes log themselves), so owners can see what it looked at.
+  const log = (result: "ok" | "error", detail: string | null) =>
+    logActivity(db, actorOf(caller), {
+      workspaceId,
+      action: "mcp.tool_call",
+      target: name,
+      count: 1,
+      result,
+      detail,
+    });
+  try {
+    const out = await tool.run({ caller, scope, workspaceId, bp }, args);
+    await log(
+      "ok",
+      typeof args.entityId === "string" ? args.entityId : typeof args.id === "string" ? args.id : null,
+    );
+    return out;
+  } catch (e) {
+    await log("error", e instanceof Error ? e.message : String(e));
+    throw e;
+  }
 }
