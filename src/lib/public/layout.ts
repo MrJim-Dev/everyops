@@ -15,6 +15,8 @@ import {
 } from "@/lib/components/compute";
 import { publicProblems } from "@/lib/components/public-safety";
 import { componentDef } from "@/lib/components/registry";
+import { widgetValue } from "@/lib/engine/aggregate";
+import { compareStat } from "@/lib/engine/dashboard";
 import { applyFilter, sortRecords } from "@/lib/engine/query";
 import { isImagePath } from "@/lib/engine/records";
 import {
@@ -64,6 +66,11 @@ export function resolveLayout(
   slug: string,
   view: LayoutView,
   now = new Date(),
+  /**
+   * For the workspace's own team (an AI agent over MCP): every part is worked out, including the team's views, cards
+   * and lists of people, and rows keep their record ids. Never pass it for a visitor.
+   */
+  team = false,
 ): PublicLayout {
   const entityOf = (id: string) => bp.entities.find((e) => e.id === id);
   const rowsOf = (entityId: string, filter?: string, sort?: Sort[]) => {
@@ -77,14 +84,16 @@ export function resolveLayout(
       return field ? [formatCell(bp, records, field, row.data[id])] : [];
     });
   };
+  const rowId = (r: DataRecord, i: number) => (team ? r.id : `row_${i + 1}`);
   const numbered = (entityId: string, rows: DataRecord[], fieldIds: string[]): PublicItem[] =>
-    rows.slice(0, MAX_ROWS).map((r, i) => ({ id: `row_${i + 1}`, cells: cells(entityId, r, fieldIds) }));
+    rows.slice(0, MAX_ROWS).map((r, i) => ({ id: rowId(r, i), cells: cells(entityId, r, fieldIds) }));
+  const points = (chart: ChartData) => (team ? chart : anonymous(chart));
 
   const part = (item: LayoutItem): PublicLayoutItem | null => {
     const d = componentDef(item.component);
     if (!d) return null;
     const parsed = d.props.safeParse(item.props);
-    if (!parsed.success || publicProblems(bp, d, parsed.data).length) return null;
+    if (!parsed.success || (!team && publicProblems(bp, d, parsed.data).length)) return null;
     // biome-ignore lint/suspicious/noExplicitAny: each component's settings were just parsed by its own schema
     const p = parsed.data as any;
     const out = (data: Record<string, unknown>): PublicLayoutItem => ({
@@ -94,6 +103,38 @@ export function resolveLayout(
       data,
     });
     switch (item.component) {
+      case "view": {
+        // The team's own tab shown in place: named here, read with read_view.
+        const target = bp.views.find((v) => v.id === p.viewId);
+        return target ? out({ viewId: target.id, name: target.name, type: target.type }) : null;
+      }
+      case "widget": {
+        const widget = bp.widgets.find((w) => w.id === p.widgetId);
+        if (!widget) return null;
+        // As the card shows it: with a comparison, the current period's value.
+        const compare = widget.type === "stat" ? compareStat(bp, widget, records, now) : null;
+        return out({
+          widgetId: widget.id,
+          title: widget.title,
+          type: widget.type,
+          ...(widget.type === "stat" || widget.type === "progress"
+            ? {
+                value: compare ? compare.current : widgetValue(bp, widget, records, now),
+                ...(widget.target ? { target: widget.target } : {}),
+              }
+            : {}),
+        });
+      }
+      case "avatars": {
+        const entity = entityOf(p.entityId);
+        if (!entity) return null;
+        const rows = rowsOf(p.entityId, p.filter);
+        return out({
+          title: p.title ?? entity.pluralName,
+          total: rows.length,
+          items: rows.slice(0, p.limit).map((r) => ({ id: r.id, title: recordTitle(entity, r) })),
+        });
+      }
       case "heading":
       case "text":
       case "card":
@@ -135,7 +176,7 @@ export function resolveLayout(
       case "chart_line":
         return out({
           head: { title: p.title, description: p.description },
-          chart: anonymous(
+          chart: points(
             chartOf(
               bp,
               records,
@@ -149,13 +190,13 @@ export function resolveLayout(
       case "chart_pie":
         return out({
           head: { title: p.title, description: p.description },
-          chart: anonymous(chartOf(bp, records, p, "donut", now)),
+          chart: points(chartOf(bp, records, p, "donut", now)),
           donut: p.donut,
         });
       case "chart_radar":
         return out({
           head: { title: p.title, description: p.description },
-          chart: anonymous(chartOf(bp, records, p, "bar", now)),
+          chart: points(chartOf(bp, records, p, "bar", now)),
         });
       case "chart_interactive":
         return out({ title: p.title, description: p.description, chart: dailyOf(bp, records, p, now) });
@@ -200,7 +241,7 @@ export function resolveLayout(
             const [badge] = p.badgeFieldId ? cells(p.entityId, r, [p.badgeFieldId]) : [];
             const image = p.imageFieldId ? r.data[p.imageFieldId] : undefined;
             return {
-              id: `row_${i + 1}`,
+              id: rowId(r, i),
               title: recordTitle(entity, r),
               ...(description ? { description: description.text } : {}),
               ...(badge ? { badge } : {}),
@@ -218,7 +259,7 @@ export function resolveLayout(
             .filter((r) => isImagePath(r.data[p.imageFieldId]))
             .slice(0, p.limit)
             .map((r, i) => ({
-              id: `row_${i + 1}`,
+              id: rowId(r, i),
               title: recordTitle(entity, r),
               image: String(r.data[p.imageFieldId]),
             })),

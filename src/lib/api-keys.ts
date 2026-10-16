@@ -11,6 +11,8 @@ export const PERMISSIONS = [
   "pages:read",
   "pages:write",
   "design:propose",
+  "design:apply",
+  "manage",
   "mcp",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
@@ -18,11 +20,19 @@ export type Permission = (typeof PERMISSIONS)[number];
 export const PERMISSION_LABELS: Record<Permission, { label: string; detail: string }> = {
   "records:read": { label: "Read records", detail: "List, search and open records" },
   "records:write": { label: "Write records", detail: "Add, change and delete records (staff and up)" },
-  "pages:read": { label: "Read pages", detail: "Document and custom page text" },
-  "pages:write": { label: "Write pages", detail: "Change document pages (staff and up)" },
+  "pages:read": { label: "Read pages", detail: "How tabs, layouts and cards are set up, and page text" },
+  "pages:write": { label: "Write pages", detail: "Change document pages and drawings (staff and up)" },
   "design:propose": {
     label: "Propose design changes",
     detail: "Plans an owner or admin applies (admins and up)",
+  },
+  "design:apply": {
+    label: "Apply design changes",
+    detail: "Apply Ask EveryOps plans for pages, fields and automations, undoable in History (admins and up)",
+  },
+  manage: {
+    label: "Manage the workspace",
+    detail: "Activity log, team, assistant memory and running automations (admins and up)",
   },
   mcp: { label: "Use with AI agents (MCP)", detail: "Claude, ChatGPT and other MCP clients" },
 };
@@ -35,6 +45,8 @@ const NEEDS: Record<Permission, Role[]> = {
   "records:write": ["owner", "admin", "staff"],
   "pages:write": ["owner", "admin", "staff"],
   "design:propose": ["owner", "admin"],
+  "design:apply": ["owner", "admin"],
+  manage: ["owner", "admin"],
 };
 
 export const SECRET_PREFIX = "eo_live_";

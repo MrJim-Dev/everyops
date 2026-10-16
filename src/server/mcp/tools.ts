@@ -1,6 +1,6 @@
 import "server-only";
 import { sql } from "kysely";
-import { allowedIn, type Permission } from "@/lib/api-keys";
+import { allowedIn } from "@/lib/api-keys";
 import { findEntity } from "@/lib/blueprint/lookup";
 import type { Blueprint, Entity } from "@/lib/blueprint/types";
 import { coerceValues } from "@/lib/engine/coerce";
@@ -9,49 +9,19 @@ import { recordTools } from "../ai/record-tools";
 import { type ApiCaller, actorOf, workspaceAccess } from "../api-auth";
 import { db } from "../db";
 import { readPage, writeRecord } from "../record-writes";
-import { currentBlueprint, readRecords } from "../workspace-data";
+import { currentBlueprint, readCurrent, readRecords } from "../workspace-data";
 import { accessibleWorkspaces } from "../workspaces";
+import { type Args, type Ctx, type McpScope, str, type Tool, ToolError } from "./kit";
+import { MORE_TOOLS } from "./more-tools";
+import { readView, viewSummary } from "./views";
+
+export { type McpScope, ToolError };
 
 /**
  * The EveryOps MCP tools. On the account endpoint (/mcp) every tool but list_workspaces takes a workspace; on a
  * workspace's endpoint (/mcp/w/<id>) it's fixed and can't be changed. Every call is checked again here: the key
  * must reach the workspace and have the tool's permission, capped by its owner's current role there.
  */
-
-export type McpScope = { kind: "account" } | { kind: "workspace"; workspaceId: string };
-
-/** A tool call that can't be done; status is what the REST API answers with (400 unless set). */
-export class ToolError extends Error {
-  constructor(
-    message: string,
-    readonly status: 400 | 403 | 404 | 409 = 400,
-    readonly details?: unknown,
-  ) {
-    super(message);
-  }
-}
-
-type Args = Record<string, unknown>;
-type Ctx = { caller: ApiCaller; scope: McpScope; workspaceId: string; bp: Blueprint };
-
-type Tool = {
-  name: string;
-  title: string;
-  description: string;
-  permission: Permission;
-  /** Tools that work without a workspace (list_workspaces). */
-  accountOnly?: boolean;
-  readOnly: boolean;
-  destructive?: boolean;
-  properties: Record<string, unknown>;
-  required: string[];
-  run: (ctx: Ctx, args: Args) => Promise<unknown>;
-};
-
-const str = (v: unknown, name: string) => {
-  if (typeof v !== "string" || !v.trim()) throw new ToolError(`"${name}" is required.`);
-  return v.trim();
-};
 
 const entityOf = (bp: Blueprint, idOrName: unknown) => {
   const key = str(idOrName, "entityId");
@@ -131,7 +101,7 @@ const writeResult = (r: Awaited<ReturnType<typeof writeRecord>>) => {
   };
 };
 
-export const TOOLS: Tool[] = [
+const CORE_TOOLS: Tool[] = [
   {
     name: "list_workspaces",
     title: "List workspaces",
@@ -158,7 +128,7 @@ export const TOOLS: Tool[] = [
     name: "describe_workspace",
     title: "Describe a workspace",
     description:
-      "A workspace's record types (with every field: id, type, choices, links), how many records each has, and its pages and tabs. Call this first: the other tools take these ids.",
+      "A workspace's record types (with every field: id, type, choices, links), how many records each has, its pages with their tabs and dashboard cards, and its automations (trigger, conditions, actions). Call this first: the other tools take these ids. describe_view and read_view show a tab's settings and contents.",
     permission: "records:read",
     readOnly: true,
     properties: {},
@@ -195,18 +165,27 @@ export const TOOLS: Tool[] = [
         pages: ctx.bp.systems.map((s) => ({
           id: s.id,
           name: s.name,
+          ...(s.group ? { group: s.group } : {}),
           tabs: s.viewIds.flatMap((id) => {
             const v = ctx.bp.views.find((x) => x.id === id);
-            return v
-              ? [{ id: v.id, name: v.name, type: v.type, ...(v.entityId ? { recordType: v.entityId } : {}) }]
-              : [];
+            if (!v) return [];
+            const { pageId: _p, page: _n, ...tab } = viewSummary(ctx.bp, v);
+            return [tab];
+          }),
+          cards: s.widgetIds.flatMap((id) => {
+            const w = ctx.bp.widgets.find((x) => x.id === id);
+            return w ? [{ id: w.id, title: w.title, type: w.type, recordType: w.entityId }] : [];
           }),
         })),
         automations: ctx.bp.rules.map((r) => ({
+          id: r.id,
           name: r.name,
           on: r.trigger.event,
           recordType: r.trigger.entityId,
           enabled: r.enabled !== false,
+          trigger: r.trigger,
+          ...(r.when ? { when: r.when } : {}),
+          actions: r.actions,
         })),
       };
     },
@@ -215,7 +194,7 @@ export const TOOLS: Tool[] = [
     name: "search_records",
     title: "Search records",
     description:
-      "Records of one type by text and filters, sorted, with how many match. Linked records come with their names.",
+      "Records of one type by text and filters, sorted, with how many match; nextOffset fetches the next page. Linked records come with their names.",
     permission: "records:read",
     readOnly: true,
     properties: {
@@ -225,10 +204,22 @@ export const TOOLS: Tool[] = [
       sortBy: { type: "string", description: 'A field id, or "createdAt"' },
       sortDir: { type: "string", enum: ["asc", "desc"] },
       limit: { type: "integer", minimum: 1, maximum: 50 },
+      offset: { type: "integer", minimum: 0, description: "nextOffset from the previous call" },
     },
     required: ["entityId"],
-    run: (ctx, args) =>
-      lookup(ctx, "search_records", { ...args, entityId: entityOf(ctx.bp, args.entityId).id }),
+    run: async (ctx, args) => {
+      const offset = typeof args.offset === "number" && args.offset > 0 ? Math.trunc(args.offset) : 0;
+      const page = (await lookup(ctx, "search_records", {
+        ...args,
+        offset,
+        entityId: entityOf(ctx.bp, args.entityId).id,
+      })) as { total?: number; shown?: number };
+      const seen = offset + (page.shown ?? 0);
+      return {
+        ...page,
+        nextOffset: page.shown && typeof page.total === "number" && seen < page.total ? seen : null,
+      };
+    },
   },
   {
     name: "get_record",
@@ -270,7 +261,7 @@ export const TOOLS: Tool[] = [
     name: "read_page",
     title: "Read a page",
     description:
-      "The text of a document page (markdown) or a custom page (HTML), by its tab id from describe_workspace.",
+      "The text of a document page (markdown) or a custom page (HTML), or a drawing's shapes, by its tab id from describe_workspace. For other tabs use read_view.",
     permission: "pages:read",
     readOnly: true,
     properties: { viewId: { type: "string" } },
@@ -279,10 +270,19 @@ export const TOOLS: Tool[] = [
       const viewId = str(args.viewId, "viewId");
       const view = ctx.bp.views.find((v) => v.id === viewId);
       if (!view) throw new ToolError(`No tab "${viewId}".`, 404);
+      if (view.type === "canvas") {
+        const doc = await readCurrent(db, ctx.workspaceId);
+        return doc ? readView(doc.blueprint, doc.records, doc.docs, ctx.workspaceId, view) : null;
+      }
+      // Until someone saves a page it shows what the design started it with, as in the app.
       const body =
-        (await readPage(ctx.workspaceId, viewId)) ?? (view.type === "html" ? (view.html ?? null) : null);
+        (await readPage(ctx.workspaceId, viewId)) ??
+        (view.type === "html" ? (view.html ?? null) : view.type === "document" ? (view.starter ?? "") : null);
       if (body === null)
-        throw new ToolError(`"${view.name}" has no page text (it's a ${view.type} view).`, 404);
+        throw new ToolError(
+          `"${view.name}" has no page text (it's a ${view.type} view): read_view shows what it holds.`,
+          404,
+        );
       return {
         id: viewId,
         name: view.name,
@@ -398,6 +398,8 @@ export const TOOLS: Tool[] = [
   },
 ];
 
+export const TOOLS: Tool[] = [...CORE_TOOLS, ...MORE_TOOLS];
+
 /** The tools offered on an endpoint, with their JSON Schemas. */
 export function toolList(scope: McpScope) {
   return TOOLS.filter((t) => scope.kind === "account" || !t.accountOnly).map((t) => {
@@ -431,7 +433,10 @@ export async function callTool(
   const tool = TOOLS.find((t) => t.name === name && (scope.kind === "account" || !t.accountOnly));
   if (!tool) throw new ToolError(`Unknown tool "${name}".`);
   if (tool.accountOnly)
-    return tool.run({ caller, scope, workspaceId: "", bp: undefined as unknown as Blueprint }, args);
+    return tool.run(
+      { caller, scope, workspaceId: "", bp: undefined as unknown as Blueprint, role: "viewer" },
+      args,
+    );
   const workspaceId = scope.kind === "workspace" ? scope.workspaceId : str(args.workspace, "workspace");
   const access = await workspaceAccess(caller, workspaceId, "mcp");
   if (access.error) throw await accessError(access.error);
@@ -462,7 +467,8 @@ export async function runTool(
   if (allowed.error) throw await accessError(allowed.error);
   const bp = await currentBlueprint(db, workspaceId);
   if (!bp) throw new ToolError("Workspace not found.", 404);
-  if (!(tool.readOnly && caller.client === "mcp")) return tool.run({ caller, scope, workspaceId, bp }, args);
+  if (!(tool.readOnly && caller.client === "mcp"))
+    return tool.run({ caller, scope, workspaceId, bp, role: allowed.role }, args);
   // An AI agent's reads are logged too (writes log themselves), so owners can see what it looked at.
   const log = (result: "ok" | "error", detail: string | null) =>
     logActivity(db, actorOf(caller), {
@@ -474,7 +480,7 @@ export async function runTool(
       detail,
     });
   try {
-    const out = await tool.run({ caller, scope, workspaceId, bp }, args);
+    const out = await tool.run({ caller, scope, workspaceId, bp, role: allowed.role }, args);
     await log(
       "ok",
       typeof args.entityId === "string" ? args.entityId : typeof args.id === "string" ? args.id : null,
