@@ -97,6 +97,10 @@ export type ChangeEntry = {
   /** Who applied it (their name), and whether Ask EveryOps applied it on its own, as the permissions allow. */
   appliedBy?: string;
   auto?: boolean;
+  /** "import": a spreadsheet import. Its records were added without running the save automations. */
+  source?: "import";
+  /** With source "import": the owner chose to run the save automations on the imported rows. */
+  ranAutomations?: boolean;
 };
 
 export type Workspace = {
@@ -280,4 +284,15 @@ export function toDoc(ws: Workspace): WorkspaceDoc {
     ...doc
   } = ws;
   return doc;
+}
+
+/** The records spreadsheet imports in a save added or changed (their History entries say source "import"). */
+export function importedIds(changes: ChangeEntry[] | undefined): Set<string> {
+  const ids = new Set<string>();
+  for (const c of changes ?? [])
+    if (c.source === "import" && !c.ranAutomations && !c.undoneAt) {
+      for (const id of c.createdRecordIds ?? []) ids.add(id);
+      for (const r of c.replacedRecords ?? []) ids.add(r.id);
+    }
+  return ids;
 }
