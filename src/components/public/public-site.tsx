@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { publicHref } from "@/lib/domains";
 import type { PublicPageData, PublicSite } from "@/lib/public/resolve";
-import { sitePath } from "@/lib/public/resolve";
 import { cn } from "@/lib/utils";
 import { HtmlPageFrame } from "./html-page-frame";
 import { PublicBlocks } from "./public-blocks";
@@ -16,12 +16,15 @@ export function PublicSiteView({
   page,
   preview,
   recordId,
+  customDomain = false,
 }: {
   site: PublicSite;
   page: PublicPageData;
   preview?: boolean;
   /** A custom HTML page's detail address (/s/site/page/RECORD): the record its bindings show. */
   recordId?: string;
+  /** Served on the workspace's own domain: links drop the /s/<workspace> prefix. */
+  customDomain?: boolean;
 }) {
   // A custom HTML page is the whole page: the owner's design, without the site's header and footer.
   if (page.type === "html")
@@ -29,6 +32,7 @@ export function PublicSiteView({
       <HtmlPageFrame
         html={page.html ?? ""}
         slug={site.slug}
+        customDomain={customDomain}
         forms={page.forms ?? []}
         preview={preview}
         live={page.live}
@@ -49,7 +53,7 @@ export function PublicSiteView({
       <header className="sticky top-0 z-20 border-b bg-shell/80 backdrop-blur-xl">
         <div className="mx-auto flex h-16 w-full max-w-[1120px] items-center gap-4 px-5">
           <Link
-            href={sitePath(site.slug)}
+            href={publicHref(site.slug, undefined, customDomain)}
             className="flex min-w-0 items-center gap-2.5 text-[15px] font-semibold tracking-[-0.01em]"
           >
             <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-[13px] font-bold text-primary-foreground">
@@ -62,7 +66,7 @@ export function PublicSiteView({
               {menu.map((p) => (
                 <Link
                   key={p.id}
-                  href={sitePath(site.slug, p.id)}
+                  href={publicHref(site.slug, p.id, customDomain)}
                   aria-current={p.id === page.id ? "page" : undefined}
                   className="whitespace-nowrap rounded-md px-3 py-1.5 text-[13.5px] text-muted-foreground transition-colors hover:text-foreground aria-[current=page]:text-foreground"
                 >
@@ -76,7 +80,7 @@ export function PublicSiteView({
               size="sm"
               className={cn("ml-auto h-8 rounded-full px-4", menu.length > 1 && "sm:ml-2")}
               nativeButton={false}
-              render={<Link href={sitePath(site.slug, book.id)} />}
+              render={<Link href={publicHref(site.slug, book.id, customDomain)} />}
             >
               {book.label}
             </Button>

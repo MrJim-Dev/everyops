@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { trimActivity } from "@/server/activity";
 import { deliverPending, runTimedAutomations } from "@/server/automations";
+import { checkPendingDomains } from "@/server/domains";
+import { runDueSyncs } from "@/server/sheet-sync";
 import { deliverWebhooks, trimDeliveries } from "@/server/webhooks";
 
 /**
@@ -21,6 +23,10 @@ export async function POST(request: Request) {
   // Webhook retries that are due (fresh deliveries go right after the change that caused them).
   const hooks = await deliverWebhooks(200);
   await trimDeliveries();
+  // Custom domains on their way to live: DNS and certificates checked again.
+  const domains = await checkPendingDomains();
+  // Record types kept in sync with a Google Sheet.
+  const sheets = await runDueSyncs();
   const result = {
     ok: true,
     workspaces: timed.workspaces,
@@ -30,6 +36,8 @@ export async function POST(request: Request) {
     activityTrimmed: trimmed,
     webhooksSent: hooks.sent,
     webhooksFailed: hooks.failed,
+    domainsChecked: domains,
+    sheetsSynced: sheets,
   };
   console.info(JSON.stringify({ event: "automations", ...result }));
   return Response.json(result);
