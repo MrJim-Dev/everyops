@@ -6,6 +6,45 @@ export const lookupAnswer = z.object({
   note: z.string().describe("One short line: what you looked up, or why nothing was needed"),
 });
 
+/** The answer when outside servers are connected: their writes can only be proposed, never called. */
+export const lookupAnswerWithActions = lookupAnswer.extend({
+  actions: z
+    .array(
+      z.object({
+        tool: z.string().describe("A proposable outside write tool name, e.g. calendar__create_event"),
+        arguments: z.string().describe("The tool's arguments as a JSON object string"),
+        summary: z
+          .string()
+          .describe(
+            "One line the person reads before approving, e.g. 'Add Court 3 hold to your calendar, Fri 6-7 PM'",
+          ),
+      }),
+    )
+    .max(3)
+    .optional()
+    .describe(
+      "Outside changes the person asked for, for them to approve; leave out unless they asked for one",
+    ),
+});
+
+/** What the lookup is told about connected outside services. */
+export function outsideSystem(providers: string[], proposable: string[], notes: string[]): string {
+  return `
+
+Connected outside services: ${providers.join(", ") || "none reachable"}.${notes.length ? ` ${notes.join(" ")}` : ""}
+- Their read tools (named like calendar__list_events) are yours to call when the message needs outside facts, e.g.
+  checking bookings against the calendar: fetch the bookings (search_records) and the calendar events for the same
+  dates in the same round. EveryOps times are Manila (UTC+8); pass RFC 3339 times with +08:00.
+- You never change anything outside EveryOps. When the person asks for an outside change (add an event, draft an
+  email), put it in actions with the tool's name, its arguments as a JSON object string and a one-line summary; the
+  person approves it before it runs. Proposable tools:
+${proposable.join("\n") || "- none"}`;
+}
+
+/** Messages that point at a connected outside service; with one connected, they always get a lookup. */
+export const OUTSIDE_WORDS =
+  /\b(calendar|gcal|gmail|e-?mails?|inbox|mail|events?|meetings?|appointments?|free time|busy|clash(es)?|conflicts?|drafts?)\b/i;
+
 export const LOOKUP_SYSTEM = `You fetch data for the EveryOps assistant, which runs a small business's records (bookings, sales,
 staff and more). You get the record types, a digest of the data (counts and totals per record type, plus some
 records), what the person is looking at, and the conversation. Another step writes the reply; your job is only to

@@ -37,6 +37,7 @@ import { FREE_PAGE_TYPES } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { requestGuide } from "@/lib/catalog/playbooks";
 import { parseLayout } from "@/lib/components/registry";
+import type { OutsideAction } from "@/lib/connections";
 import { widgetValue } from "@/lib/engine/aggregate";
 import {
   applyOps,
@@ -64,6 +65,8 @@ import {
 import { copyFromBlocks, mainForm, standardBlocks } from "@/lib/public/site-template";
 import { type Invite, type Member, randomToken } from "@/lib/store/workspace-model";
 import { todayKey } from "@/lib/time";
+import { personActor } from "../activity";
+import { type OutsideTools, outsideTools, proposeActions } from "../connections";
 import {
   ASSISTANT_RETRY_NOTE,
   ASSISTANT_SYSTEM,
@@ -80,6 +83,7 @@ import { view } from "./design-prompt";
 import { dataDigest } from "./digest";
 import { generateJsonHedged } from "./gemini";
 import { lookupData } from "./lookup";
+import { OUTSIDE_WORDS } from "./lookup-prompt";
 import { lookupProblem } from "./lookup-result";
 
 export type AssistantMessage = { role: "user" | "assistant"; text: string; attachments?: AttachmentRef[] };
@@ -95,6 +99,8 @@ export type AssistantResult =
       /** What the reply is based on, as links that open the record or page. */
       sources?: Navigation[];
       evidence?: DataEvidence;
+      /** Outside writes (calendar events, email drafts) waiting for the person's approval. */
+      actions?: OutsideAction[];
     }
   | { ok: false; message: string };
 
@@ -1105,6 +1111,13 @@ export async function assistantTurn(input: {
   });
   // A digest of the records instead of every record, plus exact lookups (SQL) for what this message needs.
   const digest = dataDigest(bp, records, { ids: screen.focusIds, entityId: screen.entityId });
+  // Connected outside services (Google Calendar, Gmail) are the connecting owner's own data: owners and admins only.
+  let outside: OutsideTools | null = null;
+  if (input.canDesign)
+    outside = await outsideTools(input.workspaceId, personActor(input.userId)).catch((e) => {
+      console.warn(JSON.stringify({ event: "outside_tools_failed", error: String(e) }));
+      return null;
+    });
   const looked = await lookupData({
     workspaceId: input.workspaceId,
     blueprint: bp,
@@ -1114,10 +1127,16 @@ export async function assistantTurn(input: {
     messages: input.messages,
     onStatus: status,
     signal: input.signal,
+    outside,
   });
   const problem = lookupProblem(looked);
   if (problem)
     return { ok: true, kind: "clarify", reply: problem, suggestions: [], evidence: looked.evidence };
+  // Proposed outside writes are saved only for a lookup that worked, so each one has a reply showing it.
+  const actions =
+    outside && looked.proposals?.length
+      ? await proposeActions(input.workspaceId, input.userId, looked.proposals, outside.providers)
+      : [];
   const about = input.memory ? memoryContext(input.memory, input.summary) : (input.summary ?? "");
   const usage = fieldUsage(bp);
   const written = pageExcerpts(bp, input.docs);
@@ -1202,7 +1221,20 @@ Data (a digest: counts and totals per record type, then records on screen and sm
 ${digest}
 
 Lookup evidence for this message:
-${looked.text}${requestGuide(input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")}
+${looked.text}${
+  !outside && OUTSIDE_WORDS.test(input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")
+    ? `
+
+${input.canDesign ? "No outside calendar or email is connected to this workspace. If the person asks about their own calendar, meetings or email, say that isn't connected yet (an owner or admin can connect Google Calendar or Gmail in Settings → Connections)" : "Connected calendars and email are used only for owners and admins. If the person asks about their own calendar, meetings or email, say an owner or admin can check that"} and don't answer it from EveryOps records.`
+    : ""
+}${
+  actions.length
+    ? `
+
+Outside actions waiting for the person's approval (shown under your reply with Apply buttons; say they're ready to approve, never that they're done):
+${actions.map((x) => `- ${x.summary}`).join("\n")}`
+    : ""
+}${requestGuide(input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "")}
 
 Conversation:
 ${input.messages
@@ -1281,6 +1313,7 @@ ${input.messages
     });
     const withNav = {
       ...(looked.evidence ? { evidence: looked.evidence } : {}),
+      ...(actions.length ? { actions } : {}),
       ...(navigate ? { navigate } : {}),
       ...(sources.length ? { sources } : {}),
     };

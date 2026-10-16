@@ -61,6 +61,7 @@ export function HtmlPageFrame({
   recordId,
   title,
   className,
+  customDomain = false,
 }: {
   html: string;
   slug: string;
@@ -78,12 +79,41 @@ export function HtmlPageFrame({
   recordId?: string;
   title: string;
   className?: string;
+  /** Served on the workspace's own domain: its links drop the /s/<workspace> prefix. */
+  customDomain?: boolean;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   // Links the page was created with ("/s/<site>/book") point at this workspace's real pages.
-  const doc = useMemo(() => frameDocument(withSiteLinks(html, slug)), [html, slug]);
-  const latest = useRef({ forms, preview, slug, readData, title, pickable, live, site, pageId, recordId });
-  latest.current = { forms, preview, slug, readData, title, pickable, live, site, pageId, recordId };
+  const doc = useMemo(
+    () => frameDocument(withSiteLinks(html, slug, customDomain)),
+    [html, slug, customDomain],
+  );
+  const latest = useRef({
+    forms,
+    preview,
+    slug,
+    readData,
+    title,
+    pickable,
+    live,
+    site,
+    pageId,
+    recordId,
+    customDomain,
+  });
+  latest.current = {
+    forms,
+    preview,
+    slug,
+    readData,
+    title,
+    pickable,
+    live,
+    site,
+    pageId,
+    recordId,
+    customDomain,
+  };
   const picking = useScreen((s) => !!pickable && s.picking);
   const tellPicking = () => frame.current?.contentWindow?.postMessage({ everyops: "pick", on: picking }, "*");
   useEffect(tellPicking, [picking]);
@@ -115,7 +145,7 @@ export function HtmlPageFrame({
       }
       if ((data?.everyops !== "submit" && data?.everyops !== "call") || typeof data.id !== "number") return;
       const reply = (result: unknown) => target.postMessage({ everyops: "result", id: data.id, result }, "*");
-      const { forms, preview, slug, readData, live, site, pageId, recordId } = latest.current;
+      const { forms, preview, slug, readData, live, site, pageId, recordId, customDomain } = latest.current;
       // A data source's current results: the page's own sections, what the workspace has in hand, else the server.
       const read = async (viewId: string): Promise<unknown> => {
         if (!viewId) return { ok: false, message: "Choose a data source." };
@@ -137,7 +167,7 @@ export function HtmlPageFrame({
           case "site":
             return reply(
               site
-                ? { ok: true, site: siteValues(site, slug) }
+                ? { ok: true, site: siteValues(site, slug, customDomain) }
                 : { ok: false, message: "This page isn't part of a site." },
             );
           case "route": {
@@ -149,7 +179,9 @@ export function HtmlPageFrame({
           case "items":
             if (source === "site.pages")
               return reply(
-                site ? sitePageItems(site, slug, pageId) : { ok: false, message: "No site pages." },
+                site
+                  ? sitePageItems(site, slug, pageId, customDomain)
+                  : { ok: false, message: "No site pages." },
               );
             return reply(itemsOf(await read(source), str(a.block)));
           case "record": {

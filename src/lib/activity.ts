@@ -10,6 +10,7 @@ export const ACTOR_TYPES = [
   "automation",
   "public_form",
   "booking_link",
+  "sheet_sync",
 ] as const;
 export type ActorType = (typeof ACTOR_TYPES)[number];
 
@@ -20,6 +21,7 @@ export const ACTOR_LABELS: Record<ActorType, string> = {
   automation: "Automation",
   public_form: "Public form",
   booking_link: "Booking link",
+  sheet_sync: "Google Sheets",
 };
 
 export const RESULTS = ["ok", "denied", "conflict", "error"] as const;
@@ -38,6 +40,12 @@ export const ACTIONS = {
   "api.denied": "Was refused",
   "key.create": "Created API key",
   "key.revoke": "Revoked API key",
+  "domain.add": "Added domain",
+  "domain.remove": "Removed domain",
+  "connection.create": "Connected",
+  "connection.revoke": "Disconnected",
+  "outside.read": "Looked up",
+  "outside.action": "Ran outside action",
 } as const;
 export type Action = keyof typeof ACTIONS;
 
