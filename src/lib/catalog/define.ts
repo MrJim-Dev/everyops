@@ -17,6 +17,10 @@ export const f = {
   datetime: make("datetime"),
   timeRange: make("time_range"),
   checkbox: make("checkbox"),
+  email: make("email"),
+  phone: make("phone"),
+  url: make("url"),
+  file: make("file"),
   person: make("person"),
   select: (id: string, name: string, options: [string, string, Tone?][], extra: Extra = {}): Field => ({
     id,

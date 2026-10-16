@@ -575,6 +575,37 @@ describe("withoutInventedContacts", () => {
     const given = withoutInventedContacts(samples, design, "GCash 0917-123-4567 (Smash Pickleball).");
     expect(given[0].values.map((v) => v.fieldId)).toEqual(["name", "account_number", "instructions"]);
   });
+  it("treats phone and email fields as contact details whatever their name", () => {
+    const design = {
+      entities: [
+        {
+          id: "supplier",
+          name: "Supplier",
+          pluralName: "Suppliers",
+          primaryFieldId: "name",
+          fields: [
+            { id: "name", name: "Name", type: "text" as const },
+            { id: "main", name: "Main", type: "phone" as const },
+            { id: "inbox", name: "Inbox", type: "email" as const },
+          ],
+        },
+      ],
+    };
+    const samples = [
+      {
+        ref: "s1",
+        entityId: "supplier",
+        values: [
+          { fieldId: "name", value: "Cebu Paddles" },
+          { fieldId: "main", value: "0917 555 0101" },
+          { fieldId: "inbox", value: "orders@cebupaddles.ph" },
+        ],
+      },
+    ];
+    expect(withoutInventedContacts(samples, design, "Our supplier is Cebu Paddles.")[0].values).toHaveLength(
+      1,
+    );
+  });
 });
 
 describe("ensurePublicForm", () => {

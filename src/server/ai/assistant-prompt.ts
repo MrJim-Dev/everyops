@@ -451,6 +451,11 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
 - Redefining: add_field with an existing field's id replaces that field (to change its type, e.g. text into a select
   with options), and add_rule with an existing rule's id replaces that rule. Views and records keep using the id.
   To merge two duplicate fields, redefine the one views already use and remove the other.
+- Field types for contact details and documents: email, phone, url (a website or link) and file (a document the
+  team uploads: a PDF receipt, a contract, an ID scan; pictures shown on pages stay image). "Make the email field
+  clickable" or "check phone numbers" is redefining that text field as email or phone. Email, phone and file
+  fields never show on public pages or shared tables. A rollup can count only some children with rollup.filter
+  (paid payments: status == 'paid'), e.g. "only count paid lines in the total".
 - Options: keep every existing option id when you change a select or status field's options (rename labels freely).
   To retire an option that records use, also update_record each of those records to the option that replaces it.
 - Columns: to reorder, show or hide a table's columns (or a board's card fields), use update_view with fieldIds:

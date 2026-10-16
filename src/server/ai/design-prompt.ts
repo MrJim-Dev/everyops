@@ -38,6 +38,10 @@ const FIELD_TYPES = [
   "relation",
   "checkbox",
   "image",
+  "email",
+  "phone",
+  "url",
+  "file",
   "formula",
   "rollup",
 ] as const;
@@ -60,7 +64,8 @@ export const field = z.object({
   formula: z
     .object({
       expr: z.string(),
-      resultType: z.enum(["number", "money", "text", "checkbox", "date"]),
+      // Plain strings with the choices described: the schema sits near Gemini's limit (validation checks them).
+      resultType: z.string().describe("number, money, text, checkbox or date"),
       freezeWhen: z.string().optional(),
     })
     .optional()
@@ -69,8 +74,9 @@ export const field = z.object({
     .object({
       childEntityId: z.string(),
       viaFieldId: z.string().describe("the relation field on the child that points back here"),
-      op: z.enum(["sum", "count", "min", "max", "avg"]),
+      op: z.string().describe("sum, count, min, max or avg"),
       fieldId: z.string().optional(),
+      filter: z.string().optional().describe("Only children this formula is true for, e.g. status == 'paid'"),
     })
     .optional()
     .describe("rollup only"),
@@ -435,7 +441,7 @@ export const design = z.object({
             value: z
               .string()
               .describe(
-                "number/money as digits; checkbox true/false; select/status the option id; multi_select ids joined by commas; relation the ref of the linked sample; date YYYY-MM-DD; datetime YYYY-MM-DDTHH:MM; time_range start/end with the same formats",
+                "number/money as digits; checkbox true/false; select/status the option id; multi_select ids joined by commas; relation the ref of the linked sample; date YYYY-MM-DD; datetime YYYY-MM-DDTHH:MM; time_range start/end with the same formats; email, phone and url as plain text; image and file left empty",
               ),
           }),
         ),
@@ -598,7 +604,11 @@ Rules for a valid blueprint:
 - Every id referenced (fields, entities, views, widgets, options) must exist. Ids are snake_case.
 - Each record type has a primary field (a text field) and only the fields it needs.
 - select, multi_select and status fields need options. Use status for workflows (kanban boards, approvals).
-- relation fields set relation.entityId. rollup fields sum/count child records through the child's relation field.
+- relation fields set relation.entityId. rollup fields sum/count child records through the child's relation field;
+  rollup.filter counts only some of them (paid payments: status == 'paid'; open tasks: done == false).
+- Contact details and documents have their own types: email (an email address), phone (a phone number), url (a
+  website or link) and file (a document such as a PDF receipt, contract or ID scan; the team uploads it). Use
+  them instead of text for those, and keep names plain (Email, Phone, Website, Contract).
 - Kanban boards use a status field. Calendars use a date, datetime or time_range field.
 - Bookings of courts, rooms, tables or similar: always a resource record type (courts) with resource hours, and a
   booking record type with booking settings: resourceFieldId (a required relation to the resource), timeFieldId (a

@@ -16,7 +16,11 @@ export type DisplayKind =
   | "person"
   | "relation"
   | "checkbox"
-  | "image";
+  | "image"
+  | "email"
+  | "phone"
+  | "url"
+  | "file";
 
 export function displayKind(bp: Blueprint, field: Field): DisplayKind {
   switch (field.type) {

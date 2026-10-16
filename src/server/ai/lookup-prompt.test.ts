@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { needsLookup } from "./lookup-prompt";
+import { needsLookup, requiresLookupEvidence } from "./lookup-prompt";
 
 describe("needsLookup", () => {
   it("skips greetings, navigation, statements and design changes that name no records", () => {
@@ -32,6 +32,13 @@ describe("needsLookup", () => {
       expect(needsLookup(text), text).toBe(true);
   });
 
+  it("doesn't insist on looked-up records for design changes that mention statuses or numbers", () => {
+    const change = "Add an emergency contact phone to players and a count of only their paid bookings";
+    expect(needsLookup(change)).toBe(true);
+    expect(requiresLookupEvidence(change)).toBe(false);
+    expect(requiresLookupEvidence("How many paid bookings did we have this month?")).toBe(true);
+    expect(requiresLookupEvidence("Show me unpaid bookings")).toBe(true);
+  });
   it("treats setting up an automation as a design change, even with times and statuses in it", () => {
     for (const text of [
       "Every Monday at 8 AM, email each player with an unpaid booking a reminder to pay.",

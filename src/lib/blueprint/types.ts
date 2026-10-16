@@ -41,6 +41,12 @@ export type FieldType =
   | "checkbox"
   /** An uploaded picture (a QR code, a logo). The value is the app path that serves it. */
   | "image"
+  /** An email address, a phone number, a web address: text that's checked and opens as a link. */
+  | "email"
+  | "phone"
+  | "url"
+  /** An uploaded document (a PDF receipt, a contract): the app path, with its name, served only to the team. */
+  | "file"
   | "formula"
   | "rollup";
 
@@ -67,6 +73,8 @@ export type Field = {
     viaFieldId: string;
     op: "sum" | "count" | "min" | "max" | "avg";
     fieldId?: string;
+    /** Only the child records this formula is true for, e.g. status == "paid". */
+    filter?: string;
   };
 };
 

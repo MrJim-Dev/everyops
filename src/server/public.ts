@@ -1,5 +1,6 @@
 import "server-only";
 import { sql } from "kysely";
+import { normalizeUrl } from "@/lib/blueprint/contact";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, FieldValue, FormView, RecordData } from "@/lib/blueprint/types";
 import { createRecord, isImagePath } from "@/lib/engine/records";
@@ -155,6 +156,16 @@ function draftFromVisitor(
         break;
       case "long_text":
         value = text(v, 4000);
+        break;
+      // Kept as typed (trimmed) so the engine refuses a wrong one with a message, instead of dropping it.
+      case "email":
+        value = text(v, 254);
+        break;
+      case "phone":
+        value = text(v, 40);
+        break;
+      case "url":
+        value = typeof v === "string" ? (normalizeUrl(v.slice(0, 2000)) ?? text(v, 300)) : undefined;
         break;
       case "number":
       case "money":

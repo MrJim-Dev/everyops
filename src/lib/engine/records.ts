@@ -1,3 +1,4 @@
+import { isEmail, isFilePath, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
 import { findRecord, getEntity, optionOf } from "@/lib/blueprint/lookup";
 import type {
   Blueprint,
@@ -66,6 +67,28 @@ export function validateRecord(
         break;
       case "image":
         if (!isImagePath(value))
+          errors.push({ fieldId: field.id, message: `Upload ${field.name.toLowerCase()} again` });
+        break;
+      case "email":
+        if (typeof value !== "string" || !isEmail(value))
+          errors.push({
+            fieldId: field.id,
+            message: `${field.name} needs an email address like name@example.com`,
+          });
+        break;
+      case "phone":
+        if (typeof value !== "string" || !isPhone(value))
+          errors.push({
+            fieldId: field.id,
+            message: `${field.name} needs a phone number like 0917 555 0123`,
+          });
+        break;
+      case "url":
+        if (typeof value !== "string" || !normalizeUrl(value))
+          errors.push({ fieldId: field.id, message: `${field.name} needs a web address like example.com` });
+        break;
+      case "file":
+        if (!isFilePath(value))
           errors.push({ fieldId: field.id, message: `Upload ${field.name.toLowerCase()} again` });
         break;
     }

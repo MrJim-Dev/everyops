@@ -27,13 +27,23 @@ export function aboutPeople(entity: Entity): boolean {
   return (
     PEOPLE.test(words(entity)) ||
     PEOPLE.test(entity.pluralName) ||
-    entity.fields.some((f) => (f.type === "text" || f.type === "long_text") && CONTACT.test(words(f)))
+    entity.fields.some(
+      (f) =>
+        f.type === "email" ||
+        f.type === "phone" ||
+        ((f.type === "text" || f.type === "long_text") && CONTACT.test(words(f))),
+    )
   );
 }
 
-/** A field that names or reaches a person: a person field, contact details, a person's name, or a link to people. */
+/**
+ * A field that names or reaches a person: a person field, contact details (email and phone fields, or anything
+ * named like them), a person's name, or a link to people. File fields are the team's documents and count too.
+ */
 export function personalField(bp: Blueprint, field: Field): boolean {
-  if (field.type === "person" || CONTACT.test(words(field)) || PEOPLE.test(words(field))) return true;
+  if (field.type === "person" || field.type === "email" || field.type === "phone" || field.type === "file")
+    return true;
+  if (CONTACT.test(words(field)) || PEOPLE.test(words(field))) return true;
   if (field.type === "relation") {
     const target = bp.entities.find((e) => e.id === field.relation?.entityId);
     return !!target && aboutPeople(target);
