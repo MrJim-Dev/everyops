@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { FieldValue } from "@/lib/blueprint/types";
-import { formatDate, formatRange, isTimeRange } from "@/lib/format";
+import { formatDate, formatDateTime, formatRange, isTimeRange } from "@/lib/format";
 import { isHeic, MAX_SOURCE_BYTES, prepareImage } from "@/lib/prepare-image";
 import type { PublicField, PublicForm, ResolvedBlock } from "@/lib/public/resolve";
 import { at, dateKey } from "@/lib/time";
@@ -416,6 +416,9 @@ function summaryText(
     return value.map((v) => field.options?.find((o) => o.id === v)?.label ?? v).join(", ");
   if (typeof value === "boolean") return value ? "Yes" : "No";
   const text = String(value);
+  // A pickup time reads "Tue, Oct 20, 10:00 AM", never 2026-10-20T02:00:00.000Z.
+  if (field.type === "datetime") return formatDateTime(text);
+  if (field.type === "date") return formatDate(text, { withYear: true });
   return (
     field.options?.find((o) => o.id === text)?.label ?? choices?.find((c) => c.id === text)?.title ?? text
   );

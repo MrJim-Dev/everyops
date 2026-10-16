@@ -39,6 +39,24 @@ describe("needsLookup", () => {
     expect(requiresLookupEvidence("How many paid bookings did we have this month?")).toBe(true);
     expect(requiresLookupEvidence("Show me unpaid bookings")).toBe(true);
   });
+
+  it("doesn't insist on records for reports of how the workspace behaves, which name numbers and records", () => {
+    // Both were refused on production with "I couldn't verify the records for this request".
+    for (const text of [
+      "Receiving stock (a Stock In / PO Delivery movement) is changing the Job Order's qty to produce. Stock movements must never change a job order's quantity. Remove that.",
+      "When I press 'Mark as fully received & stocked' on a purchase order, the raw materials' current stock doesn't go up and the lines' received qty stays 0. Make receiving a purchase order add each line's ordered qty to its raw material's current stock.",
+      "Verifying a ₱49,000 down payment should move the order to In Production",
+    ])
+      expect(requiresLookupEvidence(text), text).toBe(false);
+    // Questions and record edits still need the records.
+    for (const text of [
+      "Why doesn't the total for this month match what we collected?",
+      "Mark Miguel Santos's booking today as paid",
+      "Delete Kevin Sy's Friday 8 PM booking",
+      "How much should Ana still pay?",
+    ])
+      expect(requiresLookupEvidence(text), text).toBe(true);
+  });
   it("treats setting up an automation as a design change, even with times and statuses in it", () => {
     for (const text of [
       "Every Monday at 8 AM, email each player with an unpaid booking a reminder to pay.",

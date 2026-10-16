@@ -209,7 +209,7 @@ describe("plans Gemini half got right", () => {
     });
   });
 
-  it("replaces an automation that names the quantity where the stock field belongs", () => {
+  it("corrects an automation that names the quantity where the stock field belongs", () => {
     // What Gemini sent for "Add a stock management": fieldId qty on the product, which has no qty.
     const before = bp([menu]);
     const after = applyOps(before, [
@@ -232,7 +232,12 @@ describe("plans Gemini half got right", () => {
         },
       },
     ]);
-    expect(replaceableRules(before, after, ["adjust_stock"])).toEqual(["adjust_stock"]);
+    // The product has no qty, so the change goes to its stock; the rule runs and nothing needs replacing.
+    expect(after.rules.find((r) => r.id === "adjust_stock")?.actions[0]).toMatchObject({
+      fieldId: "stock",
+      delta: "quantity",
+    });
+    expect(replaceableRules(before, after, ["adjust_stock"])).toEqual([]);
   });
 });
 
