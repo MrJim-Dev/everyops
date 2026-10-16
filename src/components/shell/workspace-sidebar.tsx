@@ -169,26 +169,32 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
         ) : null}
       </div>
 
-      <SidebarSection label="Systems">
-        {setup ? (
-          <BuildPages workspaceId={ws.id} rail={rail} />
-        ) : systems.length === 0 ? (
-          <p className="px-2 py-1 text-[12px] leading-relaxed text-muted-foreground">
-            Your systems will appear here once EveryOps sets them up.
-          </p>
-        ) : (
-          systems.map((s) => systemLink(s))
-        )}
-      </SidebarSection>
-      {website.length ? (
-        <SidebarSection label="Website">{website.map((s) => systemLink(s, true))}</SidebarSection>
-      ) : setupSite ? (
-        <SidebarSection label="Website">
-          <BuildPages workspaceId={ws.id} rail={rail} site />
+      {/*
+        The pages scroll on their own when there are more than fit, so search above and the account below stay put.
+        It reaches the sidebar's edges (padding put back inside) so the scrollbar sits at the edge and focus rings aren't cut.
+      */}
+      <div className="-mx-2.5 flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-2.5 pb-px [scrollbar-width:thin]">
+        <SidebarSection label="Systems">
+          {setup ? (
+            <BuildPages workspaceId={ws.id} rail={rail} />
+          ) : systems.length === 0 ? (
+            <p className="px-2 py-1 text-[12px] leading-relaxed text-muted-foreground">
+              Your systems will appear here once EveryOps sets them up.
+            </p>
+          ) : (
+            systems.map((s) => systemLink(s))
+          )}
         </SidebarSection>
-      ) : null}
+        {website.length ? (
+          <SidebarSection label="Website">{website.map((s) => systemLink(s, true))}</SidebarSection>
+        ) : setupSite ? (
+          <SidebarSection label="Website">
+            <BuildPages workspaceId={ws.id} rail={rail} site />
+          </SidebarSection>
+        ) : null}
+      </div>
 
-      <div className={cn("mt-auto flex flex-col gap-2", rail ? "pt-[52px]" : "pt-4")}>
+      <div className={cn("flex shrink-0 flex-col gap-2", rail ? "pt-[52px]" : "pt-4")}>
         {ws.mode === "preview" ? (
           <div
             className={cn(
