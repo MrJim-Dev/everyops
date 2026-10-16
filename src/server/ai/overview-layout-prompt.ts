@@ -48,8 +48,8 @@ What makes a good Overview:
   dates use date, datetime or time range fields; status_overview uses a status field; groupBy uses select, status or
   link fields.
 - Filters use EveryOps formulas: field ids, 'strings', == != < > && || !, option ids for status and select values
-  (status == 'paid'), and functions: ${Object.keys(FUNCTIONS).join(", ")}. is_today(slot), is_this_month(date),
-  is_upcoming(start) test dates.
+  (status == 'paid'), and functions: ${Object.keys(FUNCTIONS).join(", ")}. is_today(slot), is_this_week(date),
+  is_this_month(date), is_upcoming(start) test dates.
 - props is the component's settings as JSON text, e.g. {"title":"Revenue","entityId":"booking","op":"sum",
   "fieldId":"amount","filter":"status == 'paid'","dateFieldId":"slot"}.
 

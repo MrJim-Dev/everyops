@@ -53,6 +53,14 @@ const DESIGN =
 /** Telling the assistant something about the business ("heads up: we now close at 11"). */
 const STATEMENT = /^(heads up|fyi|just so you know|for your info|note)\b[^?]*$/i;
 /**
+ * How the workspace should behave, often as a bug report: "the stock doesn't go up and the received qty stays 0, make
+ * it add…", "stock movements must never change a job order's quantity". Its numbers and names describe the behavior,
+ * not records to check, so a lookup that rightly finds nothing to fetch isn't a failure. Two such reports on
+ * production were refused with "I couldn't verify the records" before anything was planned.
+ */
+const BEHAVIOR =
+  /\b(fix|should(n't| not)?|must( not)?|never|always|instead|automatically|doesn'?t|does not|don'?t|do not|isn'?t|is not|aren'?t|won'?t|wrong|broken|not working|stays|keeps)\b/i;
+/**
  * Setting up an automation describes what happens later ("every Monday at 8 AM, email players with unpaid
  * bookings"): its times, days and statuses are settings, not facts to check, so it needs no lookup unless it also
  * asks for a number or ends as a question.
@@ -89,6 +97,7 @@ export function needsLookup(message: string): boolean {
  */
 export function requiresLookupEvidence(message: string): boolean {
   if (DESIGN.test(message) && !/how (many|much)|\?\s*$/i.test(message)) return false;
+  if (BEHAVIOR.test(message) && !/how (many|much)|\?\s*$/i.test(message)) return false;
   return (
     needsLookup(message) &&
     (DATA.test(message) || /how (many|much)|total|revenue|collected|magkano|ilan|gcash|maya/i.test(message))

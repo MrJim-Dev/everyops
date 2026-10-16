@@ -26,9 +26,11 @@ const OUT =
   /sale|sold|order.?line|order.?item|line.?item|usage|used|consum|spoil|wast|damage|expir|issue|stock.?out|pull.?out|loss|lost|redeem|withdraw|payment|repay|leave.?request|leave\b|absence|deduct/i;
 const MOVEMENT = /movement|adjust|transaction|ledger|stock.?log|inventory.?log/i;
 const IN_OPTION =
-  /^(in|stock.?in|receiv|deliver|restock|purchase|return|add|incoming|found|top.?up|deposit)/i;
+  /^(in|stock.?in|receiv|deliver|restock|purchase|return|add|incoming|found|top.?up|deposit)|[_\s-]in$/i;
+// "Production Out", "Scrap" and "Consumed" take stock off too; a garment ERP's fabric never went down when it was
+// issued to production.
 const OUT_OPTION =
-  /^(out|stock.?out|sale|sold|used|usage|spoil|waste|damage|expire|issue|pull.?out|loss|lost|remove|deduct|withdraw)/i;
+  /^(out|stock.?out|sale|sold|used|usage|spoil|waste|damage|expire|issue|pull.?out|loss|lost|remove|deduct|withdraw|scrap|consum|reject|defect)|[_\s-]out$/i;
 const ADJUST_OPTION = /^(adjust|correction|count|recount|manual)/i;
 const DONE = /^(received|delivered|completed?|approved|paid|confirmed|posted|done|closed)$/i;
 const CANCELLED = /cancel|void|declin|reject|refund|return/i;
@@ -255,4 +257,126 @@ export function misplacedStock(before: Blueprint, after: Blueprint, request: str
   if (!added) return undefined;
   const items = [...sold.values()].map((e) => e.pluralName).join(" and ");
   return `Stock here belongs on ${items}: that's what this business sells (its order lines link to them), so "${request.trim().slice(0, 60)}" means stock on them, taken off by sales. Add the stock fields (stock on hand, reorder level) to ${[...sold.keys()].join(", ")} and link deliveries, purchase lines and stock movements to it instead of the new ${added.name}. A separate inventory of ingredients or supplies is only for when the person asks for one.`;
+}
+
+const PRICE_WORD = /price|rate|cost/i;
+
+/**
+ * A stock movement automation written for one direction only: "when type is spoilage or out, take qty off" leaves
+ * every Purchase and In movement adding nothing, so a bakery that logs a fresh batch as a movement never sees its
+ * stock go up (and impliedRules counts the one-way rule as covering the movements). A rule whose condition only
+ * picks movement types on one side, when the type also has the other side, becomes the full movement: ins add,
+ * outs take off, adjustments count as entered, for every type.
+ */
+export function widenMovements(bp: Blueprint): Rule[] {
+  return bp.rules.map((rule) => {
+    const source = bp.entities.find((e) => e.id === rule.trigger.entityId);
+    if (!source || rule.trigger.event !== "created" || rule.actions.length !== 1) return rule;
+    const [action] = rule.actions;
+    if (action.type !== "adjust_number" || action.target.kind !== "relation") return rule;
+    const amount = /^\s*-?\s*([a-z_][a-z0-9_]*)\s*$/i.exec(action.delta)?.[1];
+    const amountField = source.fields.find((f) => f.id === amount);
+    if (!amountField) return rule;
+    const kind = source.fields.find(
+      (f) =>
+        (f.type === "select" || f.type === "status") &&
+        /type|kind|direction|movement/i.test(text(f.id, f.name)),
+    );
+    const options = kind?.options ?? [];
+    if (!kind || !rule.when) return rule;
+    const picked = [...rule.when.matchAll(new RegExp(`\\b${kind.id}\\s*==\\s*'([^']+)'`, "g"))].map(
+      (m) => m[1],
+    );
+    // Only a condition that is nothing but a choice of types: "type == 'spoilage' || type == 'out'".
+    const rest = rule.when
+      .replace(new RegExp(`\\b${kind.id}\\s*==\\s*'[^']+'`, "g"), "")
+      .replace(/[()|\s]/g, "");
+    if (!picked.length || rest) return rule;
+    const side = (re: RegExp) => options.filter((o) => re.test(o.id) || re.test(o.label)).map((o) => o.id);
+    const ins = side(IN_OPTION);
+    const outs = side(OUT_OPTION);
+    const oneSide = picked.every((p) => outs.includes(p))
+      ? ins
+      : picked.every((p) => ins.includes(p))
+        ? outs
+        : [];
+    if (!oneSide.length || oneSide.some((o) => picked.includes(o))) return rule;
+    const move = deltaOf(source, amountField);
+    if (!move?.says) return rule;
+    const linkId = action.target.fieldId;
+    const link = source.fields.find((f) => f.id === linkId);
+    const target = bp.entities.find((e) => e.id === link?.relation?.entityId);
+    const total = target?.fields.find((f) => f.id === action.fieldId);
+    const widened: Rule = {
+      ...rule,
+      ...(target && total
+        ? { name: `${source.pluralName} move ${target.name} ${total.name.toLowerCase()}` }
+        : {}),
+      actions: [{ ...action, delta: move.delta }],
+    };
+    delete widened.when;
+    return widened;
+  });
+}
+const NOT_UNIT = /total|amount|subtotal|line|sum|discount|tax/i;
+
+/**
+ * A line item's unit price (or unit cost on a purchase line) comes from what it links to: an order line for a
+ * Dining Table starts at the table's price. Without it the owner types every price by hand; a production ERP's
+ * order lines saved at ₱0. For each line-item type with a price field nobody fills, an automation copies the linked
+ * product's matching price when the line is added with the price left blank, so a price typed in stays.
+ */
+export function linePriceRules(bp: Blueprint): Rule[] {
+  const out: Rule[] = [];
+  const ids = new Set(bp.rules.map((r) => r.id));
+  for (const line of bp.entities) {
+    if (!line.parent) continue;
+    const prices = line.fields.filter(
+      (f) =>
+        (f.type === "money" || f.type === "number") &&
+        !computed(f) &&
+        PRICE_WORD.test(text(f.id, f.name)) &&
+        !NOT_UNIT.test(text(f.id, f.name)),
+    );
+    for (const price of prices) {
+      const filled = bp.rules.some(
+        (r) =>
+          r.trigger.entityId === line.id &&
+          r.actions.some((a) => a.type === "set_field" && a.target.kind === "self" && a.fieldId === price.id),
+      );
+      if (filled) continue;
+      const word = (PRICE_WORD.exec(text(price.id, price.name))?.[0] ?? "price").toLowerCase();
+      const source = line.fields
+        .filter((f) => f.type === "relation" && !computed(f) && f.id !== line.parent?.fieldId)
+        .flatMap((link) => {
+          const item = bp.entities.find((e) => e.id === link.relation?.entityId);
+          const money = (item?.fields ?? []).filter((f) => f.type === "money" || f.type === "number");
+          const match =
+            money.find((f) => f.id === price.id) ??
+            money.find(
+              (f) => new RegExp(word, "i").test(text(f.id, f.name)) && !NOT_UNIT.test(text(f.id, f.name)),
+            );
+          return match ? [{ link, match }] : [];
+        })[0];
+      if (!source) continue;
+      let id = slug(`fill_${line.id}_${price.id}`);
+      while (ids.has(id)) id = `${id}_2`;
+      ids.add(id);
+      out.push({
+        id,
+        name: `${line.name} ${price.name.toLowerCase()} from ${source.link.name.toLowerCase()}`,
+        trigger: { entityId: line.id, event: "created" },
+        when: `!${price.id}`,
+        actions: [
+          {
+            type: "set_field",
+            target: { kind: "self" },
+            fieldId: price.id,
+            value: `${source.link.id}.${source.match.id}`,
+          },
+        ],
+      });
+    }
+  }
+  return out;
 }

@@ -439,7 +439,14 @@ export type Action =
    * Adds a record of another type, e.g. an invoice when a booking is confirmed. values maps its field ids to
    * formulas read on the triggering record; a link back to the triggering record's type is filled in by itself.
    */
-  | { type: "create_record"; entityId: string; values: Record<string, string> };
+  | { type: "create_record"; entityId: string; values: Record<string, string> }
+  /**
+   * Files the record under the record of another type that matches it, adding that record when there's none yet:
+   * an activity log under the daily summary for its date, a meter reading under its month's bill. target is the link
+   * on this record to fill, fieldId the field of the linked type to match, and value a formula on this record for
+   * what it must equal (date). The linked type's rollups then count through that link.
+   */
+  | { type: "link_record"; target: { kind: "relation"; fieldId: string }; fieldId: string; value: string };
 
 /** When a timed automation runs, in Manila time. */
 export type RuleSchedule = {
@@ -482,6 +489,8 @@ export type System = {
   icon: IconName;
   viewIds: string[];
   widgetIds: string[];
+  /** The sidebar group it's listed under ("Front desk", "Money"), named by the owner. Without one it's listed on its own. */
+  group?: string;
   /** How the dashboard arranges its widgets. Without one, charts go left and lists right. */
   layout?: DashboardLayout;
 };

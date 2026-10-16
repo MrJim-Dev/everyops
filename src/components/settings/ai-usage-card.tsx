@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
+import { buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatNumber } from "@/lib/format";
@@ -26,7 +28,7 @@ const MONTHS = [
 ];
 
 /** What Ask EveryOps used this month in this workspace, against the monthly budget when there is one. */
-export function AiUsageCard({ workspaceId }: { workspaceId: string }) {
+export function AiUsageCard({ workspaceId, breakdownHref }: { workspaceId: string; breakdownHref?: string }) {
   const [data, setData] = useState<{ usage: Usage; mine: Mine } | null>(null);
 
   useEffect(() => {
@@ -54,6 +56,13 @@ export function AiUsageCard({ workspaceId }: { workspaceId: string }) {
         data
           ? `Your requests: ${data.mine.used} of ${data.mine.max} in the last 10 minutes. The limit frees up as they age.`
           : undefined
+      }
+      action={
+        breakdownHref ? (
+          <Link href={breakdownHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
+            See where it came from
+          </Link>
+        ) : undefined
       }
     >
       {!usage ? (

@@ -39,9 +39,14 @@ function find(
   );
 }
 
-/** Any field (computed ones too) that holds a product's stock on hand; thresholds don't count. */
+/**
+ * Any field (computed ones too) that holds a product's stock on hand; thresholds and planned or ordered amounts
+ * ("Qty to Produce" on a job order, "Qty Ordered") don't count. A job order's quantity to produce once read as its
+ * stock, and receiving lumber raised it from 1 to 21.
+ */
 export function stockFieldOf(product: Entity): Field | undefined {
-  const not = /low|threshold|reorder|min|alert|max/i;
+  const not =
+    /low|threshold|reorder|min|alert|max|to.?produce|to.?make|ordered|required|needed|planned|target|per.?batch|yield/i;
   const numbers = product.fields.filter((f) => f.type === "number" && !not.test(f.name) && !not.test(f.id));
   return (
     numbers.find((f) => f.id === "stock") ??

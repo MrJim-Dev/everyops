@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import type { Blueprint } from "@/lib/blueprint/types";
-import { toRecords } from "./design";
+import { asGap, awaitingSamples, toRecords } from "./design";
 import { emptyTypes, mergeSamples, samplesPrompt } from "./samples";
 
 const bp = {
@@ -180,5 +180,153 @@ describe("line items without a name of their own", () => {
     const lines = records.filter((r) => r.entityId === "order_line");
     expect(lines.map((r) => r.data.title)).toEqual(["Wintermelon milk tea", "Order line 2"]);
     expect(lines[0].data).toMatchObject({ order: "order_2", product: "product_1", qty: 2 });
+  });
+});
+
+describe("samples automations would misread", () => {
+  it("leave out lines with no material and turn subtracted quantities positive", () => {
+    const erp = {
+      entities: [
+        {
+          id: "material",
+          name: "Material",
+          pluralName: "Materials",
+          primaryFieldId: "name",
+          fields: [
+            { id: "name", name: "Name", type: "text" },
+            { id: "stock", name: "Stock", type: "number" },
+          ],
+        },
+        {
+          id: "product",
+          name: "Product",
+          pluralName: "Products",
+          primaryFieldId: "name",
+          fields: [{ id: "name", name: "Name", type: "text" }],
+        },
+        {
+          id: "bom_line",
+          name: "BOM line",
+          pluralName: "BOM lines",
+          primaryFieldId: "title",
+          parent: { entityId: "product", fieldId: "product" },
+          fields: [
+            { id: "title", name: "Title", type: "text" },
+            { id: "product", name: "Product", type: "relation", relation: { entityId: "product" } },
+            {
+              id: "material",
+              name: "Material",
+              type: "relation",
+              relation: { entityId: "material" },
+              required: true,
+            },
+            { id: "qty", name: "Qty", type: "number" },
+          ],
+        },
+        {
+          id: "usage",
+          name: "Usage",
+          pluralName: "Usage",
+          primaryFieldId: "title",
+          fields: [
+            { id: "title", name: "Title", type: "text" },
+            { id: "material", name: "Material", type: "relation", relation: { entityId: "material" } },
+            { id: "qty", name: "Qty", type: "number" },
+          ],
+        },
+      ],
+      rules: [
+        {
+          id: "use",
+          name: "Usage takes stock",
+          trigger: { entityId: "usage", event: "created" },
+          actions: [
+            {
+              type: "adjust_number",
+              target: { kind: "relation", fieldId: "material" },
+              fieldId: "stock",
+              delta: "-qty",
+            },
+          ],
+        },
+      ],
+    } as unknown as Blueprint;
+    const records = toRecords(
+      erp,
+      [
+        { ref: "m1", entityId: "material", values: [{ fieldId: "name", value: "Narra plank" }] },
+        { ref: "p1", entityId: "product", values: [{ fieldId: "name", value: "Dining table" }] },
+        {
+          ref: "b1",
+          entityId: "bom_line",
+          values: [
+            { fieldId: "product", value: "p1" },
+            { fieldId: "material", value: "m1" },
+            { fieldId: "qty", value: "4" },
+          ],
+        },
+        {
+          ref: "b2",
+          entityId: "bom_line",
+          values: [
+            { fieldId: "product", value: "p1" },
+            { fieldId: "qty", value: "2" },
+          ],
+        },
+        {
+          ref: "b3",
+          entityId: "bom_line",
+          values: [
+            { fieldId: "material", value: "m1" },
+            { fieldId: "qty", value: "1" },
+          ],
+        },
+        {
+          ref: "u1",
+          entityId: "usage",
+          values: [
+            { fieldId: "title", value: "Cut legs" },
+            { fieldId: "material", value: "m1" },
+            { fieldId: "qty", value: "-12" },
+          ],
+        },
+      ],
+      new Date("2026-10-14T03:00:00Z"),
+    );
+    expect(records.filter((r) => r.entityId === "bom_line").map((r) => r.data.qty)).toEqual([4]);
+    expect(records.find((r) => r.entityId === "usage")?.data.qty).toBe(12);
+  });
+});
+
+describe("review findings about samples still to come", () => {
+  it("are set aside until the record type gets its samples", () => {
+    const bp = {
+      entities: [
+        { id: "product", name: "Product", pluralName: "Products", primaryFieldId: "name", fields: [] },
+        { id: "pre_order", name: "Pre-Order", pluralName: "Pre-Orders", primaryFieldId: "ref", fields: [] },
+      ],
+    } as unknown as Blueprint;
+    const findings = [
+      "Make 3 sample pre-orders matching requirements: No sample records for Pre-Orders are defined in the plan.",
+      "Sample products with prices: Pandesal is missing.",
+      "Pre-Orders page: a calendar of pickups.",
+    ];
+    const samples = [{ ref: "p1", entityId: "product", values: [] }];
+    expect(awaitingSamples(bp, samples, findings)).toEqual(findings.slice(1));
+  });
+});
+
+describe("gaps from the review", () => {
+  it("keep a requirement's own colon", () => {
+    const request =
+      "Implement automatic rule: when a Piece-Rate Log is Approved, consume materials per the BOM";
+    expect(asGap(`${request}: No rule creates the stock movements.`, [request])).toEqual({
+      request,
+      detail: "No rule creates the stock movements.",
+    });
+    expect(asGap("Pickup calendar: no calendar view.")).toEqual({
+      request: "Pickup calendar",
+      detail: "no calendar view.",
+    });
   });
 });

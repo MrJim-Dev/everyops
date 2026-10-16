@@ -21,7 +21,29 @@ import {
   restoreDropped,
   shrunk,
   tidy,
+  withoutBases,
 } from "./design";
+
+describe("the systems a brief starts from", () => {
+  it("aren't asks", () => {
+    const brief =
+      "Catering and event management workspace adapted from Canteen POS and Rental Operations for Salo-Salo.";
+    expect(asksFor(withoutBases(brief), /\bpos\b|point[- ]of[- ]sale/gi)).toBe(false);
+    expect(
+      asksFor(withoutBases("A bakery with a POS for the counter, based on Canteen POS."), /\bpos\b/gi),
+    ).toBe(true);
+    // However the interview words it, a matched community system's name isn't an ask.
+    expect(
+      asksFor(
+        withoutBases("Base system: Canteen POS (canteen-pos), reshaped for print jobs.", [
+          "Canteen POS",
+          "canteen-pos",
+        ]),
+        /\bpos\b/gi,
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("ensurePages", () => {
   it("gives a record type without any screen its own page", () => {
@@ -537,6 +559,28 @@ describe("tidy add-ons on forms", () => {
       filter: "active == true",
       fieldIds: ["label", "account_number", "qr_code"],
     });
+  });
+
+  it("doesn't ask for a phone again when the form has a Phone field", () => {
+    const { blueprint } = courtBookingsSample(new Date("2026-10-13T09:30:00+08:00"));
+    const bp = structuredClone(blueprint);
+    const booking = bp.entities.find((e) => e.id === "booking");
+    if (!booking) throw new Error("no booking");
+    booking.fields.push(
+      { id: "customer_name", name: "Customer Name", type: "text", required: true },
+      { id: "customer_phone", name: "Customer Phone", type: "phone", required: true },
+    );
+    bp.views.push({
+      id: "book",
+      entityId: "booking",
+      name: "Book",
+      type: "form",
+      public: true,
+      fieldIds: ["court", "slot", "customer_name", "customer_phone"],
+    } as never);
+    const form = tidy(bp).views.find((v) => v.id === "book");
+    if (form?.type !== "form") throw new Error("no form");
+    expect(form.fieldIds).toEqual(["court", "slot", "customer_name", "customer_phone"]);
   });
 });
 

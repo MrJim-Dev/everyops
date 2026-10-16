@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     );
   const overBudget = await startAiUsage(`account:${session.user.id}`);
   if (overBudget) return overBudget;
-  enterAiUsage(`account:${session.user.id}`);
+  enterAiUsage(`account:${session.user.id}`, { feature: "plan-change" });
 
   const result = await planChangeWithGemini(
     parsed.data.blueprint as unknown as Blueprint,

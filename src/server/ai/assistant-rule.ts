@@ -53,6 +53,13 @@ export function toAssistantRule(r: AssistantRule): Rule {
         }
         return { type: "create_record", entityId: a.fieldId ?? "", values };
       }
+      if (a.type === "link_record")
+        return {
+          type: "link_record",
+          target: { kind: "relation", fieldId: a.target?.fieldId ?? "" },
+          fieldId: a.fieldId ?? "",
+          value: a.value ?? "",
+        };
       if (a.type !== "set_field" && a.type !== "adjust_number" && a.type !== "notify")
         return { type: "notify", message: "" };
       return base.actions[i];

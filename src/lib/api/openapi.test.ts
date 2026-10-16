@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { EveryOps } from "./client";
 import { openapi, operations } from "./openapi";
@@ -15,7 +15,10 @@ function handlers() {
       const full = join(dir, name);
       if (statSync(full).isDirectory()) walk(full);
       else if (name === "route.ts") {
-        const path = `/${relative(ROOT, dir)}`.replace(/\[(\w+)\]/g, "{$1}").replace(/\/$/, "");
+        // URL paths use "/" whatever the OS separates folders with.
+        const path = `/${relative(ROOT, dir).split(sep).join("/")}`
+          .replace(/\[(\w+)\]/g, "{$1}")
+          .replace(/\/$/, "");
         const methods = [
           ...readFileSync(full, "utf8").matchAll(/export (?:async )?function (GET|POST|PATCH|PUT|DELETE)\b/g),
         ];

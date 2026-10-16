@@ -368,10 +368,13 @@ export const rule = z.object({
   when: z.string().optional(),
   actions: z.array(
     z.object({
-      type: z.enum(["set_field", "adjust_number", "notify"]),
+      type: z.enum(["set_field", "adjust_number", "notify", "link_record"]),
       target: target.optional(),
       fieldId: z.string().optional(),
-      value: z.string().optional().describe("set_field: formula for the new value"),
+      value: z
+        .string()
+        .optional()
+        .describe("set_field: formula for the new value. link_record: formula for what to match, e.g. date"),
       delta: z.string().optional().describe("adjust_number: formula, e.g. -qty"),
       message: z.string().optional().describe("notify"),
     }),
@@ -588,7 +591,8 @@ Formula language (formula.expr, freezeWhen, filters, rule conditions and values)
   a relation field.
 - Numbers, 'strings', true, false, null. Operators: + - * / % == != < <= > >= && || ! and cond ? a : b.
 - Functions: ${Object.keys(FUNCTIONS).join(", ")}. hour/weekday read Asia/Manila time (weekday 0 = Sunday);
-  duration_hours(range) and days(range) measure time ranges; is_today, is_this_month, is_upcoming test dates.
+  duration_hours(range) and days(range) measure time ranges; is_today, is_this_week (Monday to Sunday),
+  is_this_month, is_upcoming test dates.
 - Status and select values compare against option ids: status == 'done'.
 
 Rules for a valid blueprint:
@@ -601,6 +605,11 @@ Rules for a valid blueprint:
   quantity * product.pack_size); a sale line is delta -qty. Use trigger created for these: the app keeps them in
   step when the record is edited or deleted, and a when condition (status == 'received') makes it count only
   while true. Never adjust_number on updated (it would count again on every edit).
+- link_record, only when the brief asks to link or attach each record to the record for its date (an Activity Log
+  to the Daily Summary for that date): it finds the record of the other type whose field equals a field of this one,
+  adding it when there's none, and fills the link. target is relation with the link on this record, fieldId the
+  other type's field to match, value this record's field (date), never a fixed value. It runs on every save while
+  when holds, so "when saved as Logged" is trigger created with when status == 'logged'. Never notify for it.
 - Every id referenced (fields, entities, views, widgets, options) must exist. Ids are snake_case.
 - Each record type has a primary field (a text field) and only the fields it needs.
 - select, multi_select and status fields need options. Use status for workflows (kanban boards, approvals).

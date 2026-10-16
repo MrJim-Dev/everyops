@@ -48,7 +48,12 @@ describe("Gemini calls judged by their streaming", () => {
     ];
     const result = generateJson(schema, input);
     await vi.advanceTimersByTimeAsync(36_000);
-    expect(await result).toEqual({ ok: false, error: "Gemini took too long to answer.", retryable: true });
+    expect(await result).toEqual({
+      ok: false,
+      error: "Gemini took too long to answer.",
+      retryable: true,
+      reason: "stalled",
+    });
   });
 
   it("finish when slow, as long as parts keep coming", async () => {

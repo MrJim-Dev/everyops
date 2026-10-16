@@ -7,7 +7,7 @@
  */
 import type { FieldValue, TimeRange } from "@/lib/blueprint/types";
 import { isTimeRange } from "@/lib/format";
-import { dateKey, daysBetween, hoursBetween, manilaParts, todayKey } from "@/lib/time";
+import { addDays, dateKey, daysBetween, hoursBetween, manilaParts, todayKey } from "@/lib/time";
 
 export type Value = FieldValue;
 
@@ -245,6 +245,14 @@ export const FUNCTIONS: Record<string, Fn> = {
   is_this_month: ([v], ctx) => {
     const s = startOf(v);
     return s ? dateKey(s).slice(0, 7) === todayKey(ctx.now).slice(0, 7) : false;
+  },
+  /** is_this_week(date): the record's date (Manila) is in this Monday-to-Sunday week, as the weekly charts count it. */
+  is_this_week: ([v], ctx) => {
+    const s = startOf(v);
+    if (!s) return false;
+    const monday = addDays(todayKey(ctx.now), -((manilaParts(ctx.now).weekday + 6) % 7));
+    const day = dateKey(s);
+    return day >= monday && day <= addDays(monday, 6);
   },
   is_upcoming: ([v], ctx) => {
     const s = startOf(v);

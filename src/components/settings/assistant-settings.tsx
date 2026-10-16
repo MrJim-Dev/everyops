@@ -133,7 +133,7 @@ export function AssistantSettings() {
 
   return (
     <SettingsPage>
-      <AiUsageCard workspaceId={ws.id} />
+      <AiUsageCard workspaceId={ws.id} breakdownHref={`${ws.basePath}/settings/ai-usage`} />
       <SettingsSection
         title="Permissions"
         description="How much Ask EveryOps may do on its own. People's roles still apply, and anything it applies is saved to History so it can be undone."

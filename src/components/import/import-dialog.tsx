@@ -171,6 +171,7 @@ export function ImportDialog({
             .slice(0, 5),
         })),
         taken: byName.filter(Boolean),
+        workspaceId: ws.id,
       }),
     })
       .then((r) => r.json())
@@ -191,7 +192,7 @@ export function ImportDialog({
       live = false;
       setMatching(false);
     };
-  }, [sheet, into, fresh, ws.mode]);
+  }, [sheet, into, fresh, ws.mode, ws.id]);
 
   const preview: (ImportPreview & { systemId?: string }) | null = useMemo(() => {
     if (!sheet || !mapping.length) return null;

@@ -7,7 +7,7 @@ import {
   ThinkingLevel,
 } from "@google/genai";
 import { z } from "zod";
-import { countTokens } from "./usage";
+import { countTokens, recordAiCall } from "./usage";
 
 /**
  * Gemini on Vertex AI. On Cloud Run the client signs in as the service account (everyops-run);
@@ -48,7 +48,19 @@ export type GenerateResult<T> =
       ms: number;
       tokens: { input: number; output: number; thinking: number };
     }
-  | { ok: false; error: string; retryable: boolean; rateLimited?: boolean };
+  | { ok: false; error: string; retryable: boolean; rateLimited?: boolean; reason?: FailReason };
+
+/** Why a call didn't produce an answer, as logged in ai_call (see AI_OUTCOMES). */
+type FailReason =
+  | "cancelled"
+  | "runaway"
+  | "stalled"
+  | "timeout"
+  | "schema"
+  | "malformed"
+  | "empty"
+  | "rate-limited"
+  | "error";
 
 /**
  * Read-only functions Gemini may call while it answers (the assistant's record lookups). Each round's calls run, their
@@ -87,6 +99,8 @@ type Input = {
   task: string;
   /** Cancels the call (a hedged twin already answered). */
   signal?: AbortSignal;
+  /** Which hedged attempt this is (0 for the first), for the usage log. */
+  attempt?: number;
   /** Caps the answer. A looping answer then fails fast (and is retried) instead of running for a minute. */
   maxOutputTokens?: number;
   /** Longest text value the answer may hold before it counts as a runaway (default 3,000 characters). */
@@ -246,8 +260,86 @@ export function runawayWatcher(maxStringChars = 3000, textLimits: Record<string,
   };
 }
 
-/** Asks Gemini for JSON that matches `schema`, then parses it with the same schema. */
+type Usage = { input: number; output: number; thinking: number; cached: number };
+type RoundUsage = {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  thoughtsTokenCount?: number;
+  cachedContentTokenCount?: number;
+};
+/** What one call has used so far, kept outside the call so a call that throws midway is still counted. */
+type Meter = {
+  usage: Usage;
+  rounds: number;
+  /** The round being streamed, until it completes. */
+  round?: { promptChars: number; text: string; usage?: RoundUsage; started: boolean };
+};
+
+/** Characters of text sent in a round (the system instruction and every text part), for estimating its tokens. */
+function promptChars(system: string, contents: Content[]): number {
+  let n = system.length;
+  for (const c of contents)
+    for (const p of c.parts ?? [])
+      n += p.text?.length ?? (p.functionResponse ? JSON.stringify(p.functionResponse).length : 0);
+  return n;
+}
+
+/** About four characters a token, for text Gemini never reported usage for. */
+const roughTokens = (chars: number) => Math.ceil(chars / 4);
+
+/**
+ * Asks Gemini for JSON that matches `schema`, then parses it with the same schema. Every call is logged to ai_call,
+ * whatever its outcome: a twin cancelled because another answered, a loop that was stopped and a failure all used
+ * tokens, and those are counted too (estimated from the text when Gemini didn't get to report them).
+ */
 export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promise<GenerateResult<T>> {
+  const started = Date.now();
+  const { model, location } = modelFor(input.task);
+  const meter: Meter = { usage: { input: 0, output: 0, thinking: 0, cached: 0 }, rounds: 0 };
+  const result = await generateJsonOnce(schema, input, meter);
+  const reason = result.ok ? "ok" : (result.reason ?? "error");
+  let estimated = false;
+  const round = meter.round;
+  if (round) {
+    // The call stopped midway through a round (cancelled, stalled, timed out, failed). Gemini bills what it read and
+    // wrote; when it didn't report the numbers, estimate them, but only if it had started on the request.
+    const reported = round.usage;
+    const stoppedByUs = ["cancelled", "stalled", "timeout", "runaway"].includes(reason);
+    if (reported?.promptTokenCount) {
+      meter.usage.input += reported.promptTokenCount;
+      meter.usage.cached += reported.cachedContentTokenCount ?? 0;
+      meter.usage.thinking += reported.thoughtsTokenCount ?? 0;
+      const written = roughTokens(round.text.length);
+      meter.usage.output += Math.max(reported.candidatesTokenCount ?? 0, written);
+      estimated = !reported.candidatesTokenCount && written > 0;
+    } else if (round.started || stoppedByUs) {
+      meter.usage.input += roughTokens(round.promptChars);
+      meter.usage.output += roughTokens(round.text.length);
+      estimated = true;
+    }
+    meter.rounds++;
+  }
+  const u = meter.usage;
+  countTokens(u.input + u.output + u.thinking);
+  recordAiCall({
+    task: input.task,
+    model,
+    location,
+    attempt: input.attempt ?? 0,
+    rounds: Math.max(1, meter.rounds),
+    outcome: reason,
+    tokens: u,
+    estimated,
+    ms: Date.now() - started,
+  });
+  return result;
+}
+
+async function generateJsonOnce<T>(
+  schema: z.ZodType<T>,
+  input: Input,
+  meter: Meter,
+): Promise<GenerateResult<T>> {
   const started = Date.now();
   const { model: MODEL, location } = modelFor(input.task);
   // Our own controller stops a runaway; the caller's signal (a hedged twin answered) and the timeout stop it too.
@@ -273,13 +365,19 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
     { role: "user", parts: typeof input.prompt === "string" ? [{ text: input.prompt }] : input.prompt },
   ];
   // cached: input tokens Gemini reused from an identical prompt start (implicit caching), billed and read for less.
-  const usage = { input: 0, output: 0, thinking: 0, cached: 0 };
+  const usage = meter.usage;
   let calls = 0;
   try {
     const rounds = input.tools ? (input.tools.maxRounds ?? 3) + 1 : 1;
     for (let round = 0; round < rounds; round++) {
       const last = round === rounds - 1;
       quietFor(input.firstPartMs ?? input.idleMs);
+      const streaming: NonNullable<Meter["round"]> = {
+        promptChars: promptChars(input.system, contents),
+        text: "",
+        started: false,
+      };
+      meter.round = streaming;
       const stream = await gemini(location).models.generateContentStream({
         model: MODEL,
         contents,
@@ -304,14 +402,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       const watch = runawayWatcher(input.maxStringChars, input.textLimits);
       // Parts are kept as Gemini sent them: calls carry thought signatures it needs back on the next round.
       const parts: Part[] = [];
-      let roundUsage:
-        | {
-            promptTokenCount?: number;
-            candidatesTokenCount?: number;
-            thoughtsTokenCount?: number;
-            cachedContentTokenCount?: number;
-          }
-        | undefined;
+      let roundUsage: RoundUsage | undefined;
       text = "";
       for await (const chunk of stream) {
         firstMs ??= Date.now() - started;
@@ -324,6 +415,9 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           .join("");
         text += part;
         if (chunk.usageMetadata) roundUsage = chunk.usageMetadata;
+        streaming.started = true;
+        streaming.usage = roundUsage;
+        streaming.text = text;
         if (part) input.onText?.(text, 0);
         runaway = watch(part);
         if (runaway) {
@@ -336,11 +430,10 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
       usage.output += roundUsage?.candidatesTokenCount ?? 0;
       usage.thinking += roundUsage?.thoughtsTokenCount ?? 0;
       usage.cached += roundUsage?.cachedContentTokenCount ?? 0;
-      countTokens(
-        (roundUsage?.promptTokenCount ?? 0) +
-          (roundUsage?.candidatesTokenCount ?? 0) +
-          (roundUsage?.thoughtsTokenCount ?? 0),
-      );
+      // A runaway's answer was cut short: count what it wrote if Gemini hadn't reported it yet.
+      if (runaway && !roundUsage?.candidatesTokenCount) usage.output += roughTokens(text.length);
+      meter.rounds++;
+      meter.round = undefined;
       const wanted = parts.filter((p) => p.functionCall);
       if (runaway || !wanted.length || !input.tools) break;
       calls += wanted.length;
@@ -374,7 +467,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           tail: text.slice(-160),
         }),
       );
-      return { ok: false, error: "Gemini got stuck repeating itself.", retryable: true };
+      return { ok: false, error: "Gemini got stuck repeating itself.", retryable: true, reason: "runaway" };
     }
     const tokens = usage;
     console.info(
@@ -388,12 +481,13 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
         ...(input.tools ? { calls } : {}),
       }),
     );
-    if (!text) return { ok: false, error: "Gemini returned an empty answer.", retryable: true };
+    if (!text)
+      return { ok: false, error: "Gemini returned an empty answer.", retryable: true, reason: "empty" };
     let json: unknown;
     try {
       json = JSON.parse(text);
     } catch {
-      return { ok: false, error: "Gemini returned malformed JSON.", retryable: true };
+      return { ok: false, error: "Gemini returned malformed JSON.", retryable: true, reason: "malformed" };
     }
     const cleaned = withoutNulls(json);
     const parsed = schema.safeParse(input.repair ? input.repair(cleaned) : cleaned);
@@ -412,13 +506,16 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
         // The details are in the log above; people only need to know it didn't come together.
         error: "Gemini's answer came back incomplete. Try again.",
         retryable: true,
+        reason: "schema",
       };
     }
     return { ok: true, data: parsed.data, model: MODEL, ms, tokens };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (input.signal?.aborted) return { ok: false, error: "Cancelled.", retryable: false };
-    if (runaway) return { ok: false, error: "Gemini got stuck repeating itself.", retryable: true };
+    if (input.signal?.aborted)
+      return { ok: false, error: "Cancelled.", retryable: false, reason: "cancelled" };
+    if (runaway)
+      return { ok: false, error: "Gemini got stuck repeating itself.", retryable: true, reason: "runaway" };
     if (stalled) {
       console.warn(
         JSON.stringify({
@@ -430,7 +527,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           chars: text.length,
         }),
       );
-      return { ok: false, error: "Gemini took too long to answer.", retryable: true };
+      return { ok: false, error: "Gemini took too long to answer.", retryable: true, reason: "stalled" };
     }
     console.error(JSON.stringify({ event: "gemini_error", task: input.task, model: MODEL, message }));
     const timedOut = /abort|timeout/i.test(message);
@@ -450,6 +547,7 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
           ? "Gemini is busy right now. Try again in a minute."
           : "Gemini is unavailable right now.",
       retryable: timedOut || transient || rateLimited,
+      reason: timedOut ? "timeout" : rateLimited ? "rate-limited" : "error",
       ...(rateLimited ? { rateLimited: true } : {}),
     };
   } finally {
@@ -533,6 +631,7 @@ export function generateJsonHedged<T>(
       generateJson(schema, {
         ...input,
         prompt: promptFor(attempt),
+        attempt,
         // The caller's signal (the owner left, or setup ran out of time) stops every twin as well.
         signal: input.signal ? AbortSignal.any([signal, input.signal]) : signal,
         onProgress: progress,

@@ -29,6 +29,18 @@ export const useSidebar = create<State>()((set) => ({
 
 const SavedPreference = createContext<boolean | null>(null);
 
+/**
+ * Sidebar page groups someone opened or closed, by workspace and group name, for this tab only. Groups nobody has
+ * touched follow the default (see WorkspaceSidebar).
+ */
+export const usePageGroups = create<{
+  open: Record<string, boolean>;
+  setOpen: (key: string, open: boolean) => void;
+}>()((set) => ({
+  open: {},
+  setOpen: (key, open) => set((s) => ({ open: { ...s.open, [key]: open } })),
+}));
+
 /** Seeds the sidebar with the preference the server read from the cookie. */
 export function SidebarPreferenceProvider({
   collapsed,

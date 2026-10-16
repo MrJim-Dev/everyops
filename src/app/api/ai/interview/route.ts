@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     );
   const overBudget = await startAiUsage(`account:${user.id}`);
   if (overBudget) return overBudget;
-  enterAiUsage(`account:${user.id}`);
+  enterAiUsage(`account:${user.id}`, { feature: "setup-interview" });
   // JSON lines: the reply as Gemini writes it ({ type: "partial" }, or partial: null when a rejected answer is being
   // written again), a ping every 10 s, then { type: "done", result }. The owner reads the reply seconds in, while
   // the rest of the turn (questions, plan, the brief) is still being written.

@@ -21,7 +21,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { computeAll } from "./compute";
 import { recordContext } from "./context";
 import { parseExpr, run, truthy } from "./expr";
-import { completeRule } from "./rule-repair";
+import { completeRule, unrequireFilled } from "./rule-repair";
 
 /**
  * The only edits a change plan may make to the design. Every one is reversible: a change saves a whole new
@@ -87,6 +87,8 @@ export type ChangeOp =
   | { op: "remove_block"; viewId: string; blockId: string }
   /** Moves a sidebar page to a position (0 is the top). */
   | { op: "move_system"; systemId: string; index: number }
+  /** Lists a page under a sidebar group, or on its own when group is "". */
+  | { op: "group_system"; systemId: string; group: string }
   /** Changes the words of one block on a form or landing page. Fields that don't apply to its type are ignored. */
   | { op: "update_block"; viewId: string; blockId: string; patch: BlockPatch }
   /** Replaces a landing page's blocks, e.g. with the standard site layout. */
@@ -407,6 +409,8 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         const at = next.rules.findIndex((r) => r.id === rule.id);
         if (at >= 0) next.rules[at] = rule;
         else next.rules.push(rule);
+        // The field it fills in on add stops being required, so the form saves and the automation runs.
+        next.entities = unrequireFilled(next).entities;
         break;
       }
       case "move_view": {
@@ -481,6 +485,13 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "rename_system": {
         const system = next.systems.find((s) => s.id === op.systemId);
         if (system) system.name = op.name;
+        break;
+      }
+      case "group_system": {
+        const system = next.systems.find((s) => s.id === op.systemId);
+        const group = op.group.trim();
+        if (system && group) system.group = group;
+        else if (system) delete system.group;
         break;
       }
       case "rename_view": {
