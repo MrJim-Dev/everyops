@@ -36,7 +36,7 @@ export type RuleOutcome = {
   records: DataRecord[];
   notices: string[];
   emails: Email[];
-  /** Ids of records added by create_record actions. */
+  /** Ids of records added by create_record and link_record actions. */
   created: string[];
 };
 
@@ -144,6 +144,15 @@ export function applyActions(
       });
       continue;
     }
+    if (action.type === "link_record") {
+      const linked = linkFromRule(bp, out.records, action, entity, current, now, depth);
+      if (!linked) continue;
+      out.records = linked.records;
+      out.notices.push(...linked.notices);
+      out.emails.push(...linked.emails);
+      out.created.push(...linked.created);
+      continue;
+    }
     if (action.type === "create_record") {
       if (depth >= MAX_DEPTH) {
         out.notices.push(`${rule.name} stopped: automations were creating records from each other.`);
@@ -201,6 +210,75 @@ function createFromRule(
   return { id: newId(target.id), entityId: target.id, data, createdAt: stamp, updatedAt: stamp };
 }
 
+/** A value as a date field keeps it: dates stay, date-times and time ranges become their Manila day. */
+function asDate(value: unknown): string | undefined {
+  if (isTimeRange(value as FieldValue)) return asDate((value as { start: string }).start);
+  if (typeof value !== "string" || !value.trim() || Number.isNaN(Date.parse(value))) return undefined;
+  return dateKey(value);
+}
+
+/** The value a link_record looks for, as the matched field stores it, or undefined when there's nothing to match. */
+function matchValue(field: Field, value: unknown): FieldValue | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  if (field.type === "date") return asDate(value);
+  if (field.type === "number" || field.type === "money" || field.type === "percent") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  if (typeof value === "object") return undefined;
+  return String(value).trim() || undefined;
+}
+
+const sameValue = (a: FieldValue | undefined, b: FieldValue) =>
+  typeof a === "string" && typeof b === "string"
+    ? a.trim().toLowerCase() === b.trim().toLowerCase()
+    : a === b;
+
+/**
+ * Files a record under the matching record of another type (link_record): the first record whose field equals the
+ * value, else a new one holding it (its name filled from the value when it has none), whose own "when created"
+ * automations run one level deeper. Then the record's link points at it. Nothing changes when there's no value.
+ */
+function linkFromRule(
+  bp: Blueprint,
+  rows: DataRecord[],
+  action: Extract<Rule["actions"][number], { type: "link_record" }>,
+  source: Entity,
+  record: DataRecord,
+  now: Date,
+  depth: number,
+): RuleOutcome | undefined {
+  const link = source.fields.find((f) => f.id === action.target.fieldId && f.type === "relation");
+  const target = entityOf(bp, link?.relation?.entityId ?? "");
+  const field = target?.fields.find((f) => f.id === action.fieldId);
+  if (!link || !target || !field) return undefined;
+  const value = matchValue(field, run(action.value, recordContext(bp, source, record.data, rows, now)));
+  if (value === undefined) return undefined;
+  const out: RuleOutcome = { records: rows, notices: [], emails: [], created: [] };
+  let match = rows.find((r) => r.entityId === target.id && sameValue(r.data[field.id], value));
+  if (!match) {
+    if (depth >= MAX_DEPTH) return undefined;
+    const stamp = now.toISOString();
+    const data: RecordData = { [field.id]: value };
+    if (target.primaryFieldId !== field.id) data[target.primaryFieldId] = readable(bp, field, value, rows);
+    match = { id: newId(target.id), entityId: target.id, data, createdAt: stamp, updatedAt: stamp };
+    out.records = [...out.records, match];
+    out.created.push(match.id);
+    const next = runSaveRules(bp, out.records, match, "created", [], now, depth + 1);
+    out.records = next.records;
+    out.notices.push(...next.notices);
+    out.emails.push(...next.emails);
+    out.created.push(...next.created);
+  }
+  const id = match.id;
+  out.records = out.records.map((r) =>
+    r.id === record.id && r.data[link.id] !== id
+      ? { ...r, data: { ...r.data, [link.id]: id }, updatedAt: now.toISOString() }
+      : r,
+  );
+  return out;
+}
+
 /** The automations a save sets off for one record, in order, each seeing what the ones before it changed. */
 export function runSaveRules(
   bp: Blueprint,
@@ -215,11 +293,23 @@ export function runSaveRules(
   const entity = entityOf(bp, record.entityId);
   if (!entity) return out;
   for (const rule of bp.rules) {
-    if (!matchesSave(rule, record, event, changed)) continue;
+    const fires = matchesSave(rule, record, event, changed);
+    // Filing a record under its match (link_record) is kept up to date on every save while the rule's when holds,
+    // whatever its trigger: a log logged after it was created is filed then, and one whose date changes moves.
+    const keepsFiled =
+      !fires &&
+      isOn(rule) &&
+      rule.trigger.entityId === record.entityId &&
+      SAVE_EVENTS.has(rule.trigger.event) &&
+      rule.actions.some((a) => a.type === "link_record");
+    if (!fires && !keepsFiled) continue;
     const current = out.records.find((r) => r.id === record.id) ?? record;
     const ctx = recordContext(bp, entity, current.data, out.records, now);
     if (rule.when && !truthy(run(rule.when, ctx))) continue;
-    const done = applyActions(bp, out.records, rule, current, now, depth);
+    const only = keepsFiled
+      ? { ...rule, actions: rule.actions.filter((a) => a.type === "link_record") }
+      : rule;
+    const done = applyActions(bp, out.records, only, current, now, depth);
     out.records = done.records;
     out.notices.push(...done.notices);
     out.emails.push(...done.emails);
@@ -426,6 +516,14 @@ export function describeActions(bp: Blueprint, rule: Rule): string[] {
         return `Email ${a.to}: ${a.subject}`;
       case "create_record":
         return `Add a ${(entityOf(bp, a.entityId)?.name ?? a.entityId).toLowerCase()}`;
+      case "link_record": {
+        const linked = entityOf(
+          bp,
+          source?.fields.find((f) => f.id === a.target.fieldId)?.relation?.entityId ?? "",
+        );
+        const name = (linked?.name ?? "record").toLowerCase();
+        return `File it under the ${name} with the same ${nameOf(linked, a.fieldId).toLowerCase()}, on every save (adding one if there's none)`;
+      }
       default: {
         const linked =
           a.target.kind === "relation"

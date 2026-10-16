@@ -40,18 +40,18 @@ export const assistantRule = rule.extend({
   }),
   actions: z.array(
     rule.shape.actions.element.extend({
-      type: z.string().describe("set_field, adjust_number, notify, send_email or create_record"),
+      type: z.string().describe("set_field, adjust_number, notify, send_email, create_record or link_record"),
       fieldId: z
         .string()
         .optional()
         .describe(
-          "set_field/adjust_number: the field it changes. send_email: who to email, {{email_field}} or an address. create_record: the record type it adds",
+          "set_field/adjust_number: the field it changes. send_email: who to email, {{email_field}} or an address. create_record: the record type it adds. link_record: the field of the linked type to match",
         ),
       value: z
         .string()
         .optional()
         .describe(
-          'set_field: formula for the new value. send_email: the email, its subject on the first line and the message after it. create_record: JSON of field id to formula on the trigger record, e.g. {"amount":"price"}',
+          'set_field: formula for the new value. send_email: the email, its subject on the first line and the message after it. create_record: JSON of field id to formula on the trigger record, e.g. {"amount":"price"}. link_record: formula for what to match, e.g. date',
         ),
     }),
   ),
@@ -503,7 +503,11 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   placeholders such as {{name}}, {{date}}, {{court.name}}. Only email addresses the records or the person
   provide; if the record type has no email field, add one first. create_record adds a record of another type:
   fieldId is that record type and value is JSON of its field ids to formulas on the trigger record, e.g.
-  {"amount":"price"}; its link back to the trigger record is filled in by itself. Owners turn automations on
+  {"amount":"price"}; its link back to the trigger record is filled in by itself. link_record files the record
+  under the matching record of another type, adding it when there's none (a log under the Daily Summary for its
+  date): target is relation with the link on this record, fieldId the linked type's field to match, value a
+  formula on this record (date). Use it for "link each X to the Y for that day/month", never notify; it re-files on
+  every save while when holds, so "when saved as Logged" is when status == 'logged'. Owners turn automations on
   and off in Settings → Automations; when asked to turn one off, tell them to switch it off there (don't
   remove it unless they ask to delete it).
 - Pages: each sidebar page is a system; its views are the tabs on that page. A new page for something that already
