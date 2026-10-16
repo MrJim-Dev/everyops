@@ -22,6 +22,8 @@
     "eval:design": "tsx --conditions=react-server --env-file=.env.local scripts/design-eval.mts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
+    "@anthropic-ai/vertex-sdk": "^0.21.0",
     "@base-ui/react": "^1.9.0",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-html": "^6.4.12",

@@ -76,7 +76,8 @@ const shortHost = (host: string) => host.replace(/\.local$/, "");
 /**
  * US dollars per million tokens, from the billing account's Vertex AI SKU rates (October 2026). Thinking is billed
  * as output, and cached input (Gemini reusing an identical prompt start) at a tenth of input. Regional endpoints
- * (e.g. asia-southeast1) cost 10% more than global. These are estimates; Google's invoice is the bill.
+ * (e.g. asia-southeast1) cost 10% more than global; "anthropic" is Anthropic's own API, at list rates. These are
+ * estimates; the provider's invoice is the bill.
  */
 type Rate = { input: number; cached: number; output: number };
 const RATES: Record<string, Rate> = {
@@ -84,6 +85,9 @@ const RATES: Record<string, Rate> = {
   "gemini-3.7-flash": { input: 1.5, cached: 0.15, output: 7.5 },
   "gemini-3.8-flash": { input: 1.5, cached: 0.15, output: 7.5 },
   "gemini-2.5-flash": { input: 0.3, cached: 0.03, output: 2.5 },
+  // Claude, for the test router: Anthropic's list rates (Vertex's global endpoint matches them).
+  "claude-haiku-4-5": { input: 1, cached: 0.1, output: 5 },
+  "claude-sonnet-4-5": { input: 3, cached: 0.3, output: 15 },
 };
 const FALLBACK = RATES["gemini-3.7-flash"];
 const REGIONAL = 1.1;
@@ -93,7 +97,7 @@ export type CallTokens = { input: number; cached: number; output: number; thinki
 /** Estimated cost of one call in micro-dollars (millionths of a dollar), so sums stay exact integers. */
 export function costMicros(model: string, location: string, t: CallTokens): number {
   const rate = RATES[model] ?? FALLBACK;
-  const factor = location === "global" ? 1 : REGIONAL;
+  const factor = location === "global" || location === "anthropic" ? 1 : REGIONAL;
   const cached = Math.min(t.cached, t.input);
   // Dollars per million tokens is the same number as micro-dollars per token.
   return Math.round(

@@ -178,7 +178,15 @@ export async function usageReport(
     byFeature: features.map((r) => toGroup(r, featureLabel(r.key ?? ""))),
     byStep: steps.map((r) => toGroup(r, stepLabel(r.b ?? ""), featureLabel(r.a ?? ""))),
     byModel: models.map((r) =>
-      toGroup(r, r.a ?? "", r.b === "global" ? "Global endpoint" : `Regional endpoint · ${r.b}`),
+      toGroup(
+        r,
+        r.a ?? "",
+        r.b === "global"
+          ? "Global endpoint"
+          : r.b === "anthropic"
+            ? "Anthropic API"
+            : `Regional endpoint · ${r.b}`,
+      ),
     ),
     byOrigin: origins.map((r) => toGroup(r, originLabel(r.key ?? ""))),
     ...(persons

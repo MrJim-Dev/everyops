@@ -7,6 +7,7 @@ import {
   ThinkingLevel,
 } from "@google/genai";
 import { z } from "zod";
+import { claudeCanTake, claudeLocation, claudeModelFor, providerFor } from "./route";
 import { countTokens, recordAiCall } from "./usage";
 
 /**
@@ -51,7 +52,7 @@ export type GenerateResult<T> =
   | { ok: false; error: string; retryable: boolean; rateLimited?: boolean; reason?: FailReason };
 
 /** Why a call didn't produce an answer, as logged in ai_call (see AI_OUTCOMES). */
-type FailReason =
+export type FailReason =
   | "cancelled"
   | "runaway"
   | "stalled"
@@ -73,6 +74,7 @@ export type ToolSet = {
   maxRounds?: number;
 };
 
+export type GenerateInput = Input;
 type Input = {
   system: string;
   /** The user turn: plain text, or text plus inline images (e.g. a photographed menu). */
@@ -124,7 +126,7 @@ type Input = {
  * enums: Vertex enforces enum but not const, and without it Gemini wrote view types that don't exist
  * ("approval" for approval_queue) and lost the shape of the answer from there.
  */
-function responseSchema(schema: z.ZodType, enumLiterals = false, textLimits?: Record<string, number>) {
+export function responseSchema(schema: z.ZodType, enumLiterals = false, textLimits?: Record<string, number>) {
   const { $schema: _drop, ...rest } = z.toJSONSchema(schema, {
     target: "draft-2020-12",
     io: "output",
@@ -268,7 +270,7 @@ type RoundUsage = {
   cachedContentTokenCount?: number;
 };
 /** What one call has used so far, kept outside the call so a call that throws midway is still counted. */
-type Meter = {
+export type Meter = {
   usage: Usage;
   rounds: number;
   /** The round being streamed, until it completes. */
@@ -285,7 +287,7 @@ function promptChars(system: string, contents: Content[]): number {
 }
 
 /** About four characters a token, for text Gemini never reported usage for. */
-const roughTokens = (chars: number) => Math.ceil(chars / 4);
+export const roughTokens = (chars: number) => Math.ceil(chars / 4);
 
 /**
  * Asks Gemini for JSON that matches `schema`, then parses it with the same schema. Every call is logged to ai_call,
@@ -294,9 +296,15 @@ const roughTokens = (chars: number) => Math.ceil(chars / 4);
  */
 export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promise<GenerateResult<T>> {
   const started = Date.now();
-  const { model, location } = modelFor(input.task);
+  // The test router (route.ts) can send the task to Claude; a prompt Claude can't read (audio) stays here.
+  const useClaude = providerFor(input.task) === "claude" && claudeCanTake(input.prompt);
+  const { model, location } = useClaude
+    ? { model: claudeModelFor(input.task), location: claudeLocation() }
+    : modelFor(input.task);
   const meter: Meter = { usage: { input: 0, output: 0, thinking: 0, cached: 0 }, rounds: 0 };
-  const result = await generateJsonOnce(schema, input, meter);
+  const result = useClaude
+    ? await (await import("./claude")).generateClaudeOnce(schema, input, meter, model, location)
+    : await generateJsonOnce(schema, input, meter);
   const reason = result.ok ? "ok" : (result.reason ?? "error");
   let estimated = false;
   const round = meter.round;
@@ -323,7 +331,8 @@ export async function generateJson<T>(schema: z.ZodType<T>, input: Input): Promi
   countTokens(u.input + u.output + u.thinking);
   recordAiCall({
     task: input.task,
-    model,
+    // Vertex pins Claude versions ("claude-haiku-4-5@20251001"); the log keeps the model's name.
+    model: model.split("@")[0],
     location,
     attempt: input.attempt ?? 0,
     rounds: Math.max(1, meter.rounds),
@@ -591,7 +600,7 @@ export function fitToolOutput(output: unknown, max: number): string {
 }
 
 /** Gemini sometimes writes null for an optional field it means to leave out; drop those keys before validating. */
-function withoutNulls(value: unknown): unknown {
+export function withoutNulls(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(withoutNulls);
   if (value && typeof value === "object")
     return Object.fromEntries(
@@ -724,7 +733,7 @@ export function hedged<R extends Outcome>(
   });
 }
 
-function valueAt(value: unknown, path: PropertyKey[]): unknown {
+export function valueAt(value: unknown, path: PropertyKey[]): unknown {
   let at = value;
   for (const key of path) at = (at as Record<PropertyKey, unknown> | undefined)?.[key];
   return at;
