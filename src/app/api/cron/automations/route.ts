@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { trimActivity } from "@/server/activity";
 import { deliverPending, runTimedAutomations } from "@/server/automations";
+import { checkPendingDomains } from "@/server/domains";
 import { deliverWebhooks, trimDeliveries } from "@/server/webhooks";
 
 /**
@@ -21,6 +22,8 @@ export async function POST(request: Request) {
   // Webhook retries that are due (fresh deliveries go right after the change that caused them).
   const hooks = await deliverWebhooks(200);
   await trimDeliveries();
+  // Custom domains on their way to live: DNS and certificates checked again.
+  const domains = await checkPendingDomains();
   const result = {
     ok: true,
     workspaces: timed.workspaces,
@@ -30,6 +33,7 @@ export async function POST(request: Request) {
     activityTrimmed: trimmed,
     webhooksSent: hooks.sent,
     webhooksFailed: hooks.failed,
+    domainsChecked: domains,
   };
   console.info(JSON.stringify({ event: "automations", ...result }));
   return Response.json(result);
