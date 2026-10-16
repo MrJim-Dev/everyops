@@ -7,7 +7,7 @@ import { autoReferenceFields, nextReference } from "@/lib/engine/references";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
-import { currentBlueprint, deleteRecords, putRecords, readRecords } from "./workspace-data";
+import { currentBlueprint, deleteRecords, putRecords, readRecords, writePages } from "./workspace-data";
 
 /**
  * Record writes from outside the app (MCP tools, the REST API): one record at a time, through the same engine as
@@ -110,4 +110,18 @@ export async function readPage(slug: string, key: string): Promise<string | null
   const { rows } = await sql<{ body: string }>`
     select body from workspace_page where workspace_id = ${slug} and key = ${key}`.execute(db);
   return rows[0]?.body ?? null;
+}
+
+/**
+ * Replaces a page's text inside the workspace lock, keeping the text it replaces as a version (writePages), and
+ * answers when it was saved. Open tabs pick it up on their next sync.
+ */
+export async function writePageText(slug: string, key: string, body: string): Promise<string> {
+  const updatedAt = new Date().toISOString();
+  await db.transaction().execute(async (trx) => {
+    await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
+    await writePages(trx, slug, { [key]: { body, updatedAt } });
+    await sql`update workspace set updated_at = now() where id = ${slug}`.execute(trx);
+  });
+  return updatedAt;
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { CheckIcon, CopyIcon, KeyIcon, PlusIcon } from "@phosphor-icons/react";
+import { BookOpenIcon, CheckIcon, CopyIcon, KeyIcon, PlusIcon } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -70,10 +71,16 @@ export function ApiKeysSection() {
       title="API keys"
       description="For scripts, integrations and AI agents such as Claude or ChatGPT. A key never does more than you can in a workspace."
       action={
-        <Button variant="outline" onClick={() => setOpen(true)}>
-          <PlusIcon data-icon="inline-start" />
-          New API key
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" render={<Link href="/developers" />} nativeButton={false}>
+            <BookOpenIcon data-icon="inline-start" />
+            API docs
+          </Button>
+          <Button variant="outline" onClick={() => setOpen(true)}>
+            <PlusIcon data-icon="inline-start" />
+            New API key
+          </Button>
+        </div>
       }
       footer={keys ? `${active.length} active` : undefined}
     >
