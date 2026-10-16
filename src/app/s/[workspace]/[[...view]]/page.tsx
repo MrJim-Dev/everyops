@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { PublicSiteView } from "@/components/public/public-site";
+import { publicHref } from "@/lib/domains";
 import { pageMeta } from "@/lib/public/bindings";
-import { type PublicPageData, sitePath } from "@/lib/public/resolve";
+import type { PublicPageData } from "@/lib/public/resolve";
 import { publicPage } from "@/server/public";
 
 type Props = PageProps<"/s/[workspace]/[[...view]]">;
@@ -48,14 +50,16 @@ async function PublicRoute({ params }: { params: Props["params"] }) {
   if (view && view.length > 2) notFound();
   const found = await publicPage(workspace, view?.[0]);
   if (!found) notFound();
+  // Rewritten here from the workspace's own domain (src/proxy.ts): links and redirects stay on that domain.
+  const customDomain = (await headers()).has("x-everyops-domain");
   // A booking form with its own custom page: visitors always land on that page.
-  if ("redirect" in found) redirect(sitePath(workspace, found.redirect));
+  if ("redirect" in found) redirect(publicHref(workspace, found.redirect, customDomain));
   // /s/site/page/RECORD: a custom HTML page showing one record (data-everyops-record). Other pages have no details.
   const recordId = view?.[1] ? decodeURIComponent(view[1]).slice(0, 120) : undefined;
   if (recordId && found.page.type !== "html") notFound();
   return (
     <>
-      <PublicSiteView site={found.site} page={found.page} recordId={recordId} />
+      <PublicSiteView site={found.site} page={found.page} recordId={recordId} customDomain={customDomain} />
       {found.page.type === "html" ? <PageText page={found.page} /> : null}
     </>
   );
