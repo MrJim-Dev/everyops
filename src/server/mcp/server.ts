@@ -47,7 +47,7 @@ export async function handleMcp(request: Request, scope: McpScope): Promise<Resp
     return new Response(null, { status: 405, headers: { allow: "POST" } });
   if (!originOk(request)) return Response.json(rpcError(null, -32600, "Forbidden origin"), { status: 403 });
 
-  const { caller, error } = await apiCaller(request);
+  const { caller, error } = await apiCaller(request, "mcp");
   if (error) return error;
   if (!caller.key)
     return Response.json(

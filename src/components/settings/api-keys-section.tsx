@@ -1,6 +1,7 @@
 "use client";
 
-import { CheckIcon, CopyIcon, KeyIcon, PlusIcon } from "@phosphor-icons/react";
+import { BookOpenIcon, CheckIcon, CopyIcon, KeyIcon, PlusIcon } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ACTIONS, type Action } from "@/lib/activity";
 import { type ApiKeyInfo, keyStatus, PERMISSION_LABELS, PERMISSIONS, type Permission } from "@/lib/api-keys";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { useWorkspaces } from "@/lib/store/workspaces";
@@ -43,14 +45,20 @@ const DEFAULT_PERMISSIONS: Permission[] = ["records:read", "records:write", "pag
  */
 export function ApiKeysSection() {
   const [keys, setKeys] = useState<ApiKeyInfo[] | null>(null);
+  const [usage, setUsage] = useState<Record<string, KeyUsage>>({});
   const [open, setOpen] = useState(false);
   const workspaces = useWorkspaces((s) => s.workspaces);
   const names = Object.fromEntries(Object.values(workspaces).map((w) => [w.slug, w.name]));
 
   const load = useCallback(async () => {
     const res = await fetch("/api/keys").catch(() => null);
-    const body = (await res?.json().catch(() => null)) as { ok: boolean; keys?: ApiKeyInfo[] } | null;
+    const body = (await res?.json().catch(() => null)) as {
+      ok: boolean;
+      keys?: ApiKeyInfo[];
+      usage?: Record<string, KeyUsage>;
+    } | null;
     setKeys(body?.keys ?? []);
+    setUsage(body?.usage ?? {});
   }, []);
   useEffect(() => {
     void load();
@@ -70,10 +78,16 @@ export function ApiKeysSection() {
       title="API keys"
       description="For scripts, integrations and AI agents such as Claude or ChatGPT. A key never does more than you can in a workspace."
       action={
-        <Button variant="outline" onClick={() => setOpen(true)}>
-          <PlusIcon data-icon="inline-start" />
-          New API key
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" render={<Link href="/developers" />} nativeButton={false}>
+            <BookOpenIcon data-icon="inline-start" />
+            API docs
+          </Button>
+          <Button variant="outline" onClick={() => setOpen(true)}>
+            <PlusIcon data-icon="inline-start" />
+            New API key
+          </Button>
+        </div>
       }
       footer={keys ? `${active.length} active` : undefined}
     >
@@ -115,6 +129,7 @@ export function ApiKeysSection() {
                       ? `Expires ${formatDate(k.expiresAt, { withYear: true })}`
                       : "Doesn't expire"}
                   </span>
+                  <KeyUse use={usage[k.id]} />
                 </div>
                 <ConfirmDeleteDialog
                   trigger={
@@ -370,5 +385,31 @@ function NewKeyDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+type KeyUsage = {
+  total: number;
+  denied: number;
+  lastAt: string | null;
+  lastAction: string | null;
+  workspaces: number;
+};
+
+/** What a key did in the last 30 days, from the activity log: requests that changed or read data, and refusals. */
+function KeyUse({ use }: { use?: KeyUsage }) {
+  if (!use?.total) return null;
+  return (
+    <span className="text-[12px] text-muted-foreground/80">
+      {use.total} logged action{use.total === 1 ? "" : "s"} in 30 days
+      {use.workspaces > 1 ? ` across ${use.workspaces} workspaces` : ""}
+      {use.lastAction ? ` · last: ${ACTIONS[use.lastAction as Action] ?? use.lastAction}` : ""}
+      {use.denied ? (
+        <span className="text-destructive">
+          {" · "}
+          {use.denied} refused
+        </span>
+      ) : null}
+    </span>
   );
 }

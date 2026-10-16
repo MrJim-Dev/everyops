@@ -6,6 +6,7 @@ import type { DataRecord, Entity, FormView, Tone } from "@/lib/blueprint/types";
 import { isImagePath } from "@/lib/engine/records";
 import { autoReferenceFields } from "@/lib/engine/references";
 import { formatCell, publicFieldsOf, siteOf } from "@/lib/public/resolve";
+import { logActivity } from "./activity";
 import { db } from "./db";
 import { saveImage } from "./storage";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
@@ -181,6 +182,17 @@ export async function attachToBooking(
     };
     const put = await putRecords(trx, claim.workspace, [{ record, rev: stored.rev }]);
     if (put.conflicts.length) return false;
+    await logActivity(
+      trx,
+      { type: "booking_link", name: "Booking link" },
+      {
+        workspaceId: claim.workspace,
+        action: "record.update",
+        target: record.entityId,
+        ids: [record.id],
+        detail: `Added a picture (${fieldId})`,
+      },
+    );
     await sql`update workspace set updated_at = now() where id = ${claim.workspace}`.execute(trx);
     return true;
   });
