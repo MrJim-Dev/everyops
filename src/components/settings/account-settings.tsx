@@ -16,6 +16,7 @@ import { isDemoEmail } from "@/lib/auth/demo";
 import { changePasswordSchema, type FormErrors, fieldErrors, profileSchema } from "@/lib/auth/schemas";
 import { formatDate, initials } from "@/lib/format";
 import { useWorkspaces } from "@/lib/store/workspaces";
+import { AiUsageReport } from "./ai-usage-report";
 import { ApiKeysSection } from "./api-keys-section";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
 import { SettingsPage, SettingsSection } from "./settings-section";
@@ -166,6 +167,13 @@ export function AccountSettings() {
           </form>
         </SettingsSection>
       </fieldset>
+      <SettingsSection
+        title="AI use"
+        description="Every Gemini call your account started: in each workspace, while setting one up, and through voice input. Duplicates that lost the race, stopped loops and failures count as wasted: they were paid for but their answer was thrown away."
+        footer="Costs are estimates at Vertex AI's rates for each model; Google's invoice is the bill."
+      >
+        <AiUsageReport endpoint="/api/account/ai-usage" view="account" />
+      </SettingsSection>
       <ApiKeysSection />
       <fieldset disabled={demo} className="contents">
         <SettingsSection

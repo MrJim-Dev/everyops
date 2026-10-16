@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     );
   const overBudget = await startAiUsage(parsed.data.workspaceId);
   if (overBudget) return overBudget;
-  enterAiUsage(parsed.data.workspaceId);
+  enterAiUsage(parsed.data.workspaceId, { userId: user.id, feature: "assistant" });
   const manager = canManage(found.role);
   const workspaceId = parsed.data.workspaceId;
   const [team, memory] = await Promise.all([

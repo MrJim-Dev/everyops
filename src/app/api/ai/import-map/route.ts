@@ -9,6 +9,7 @@ import {
 import { takeAiToken } from "@/server/ai/rate-limit";
 import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { apiUser, sameOrigin } from "@/server/session-api";
+import { roleIn } from "@/server/workspaces";
 
 const body = z.object({
   entityName: z.string().max(120),
@@ -33,6 +34,8 @@ const body = z.object({
     .min(1)
     .max(60),
   taken: z.array(z.string().max(80)).max(80).default([]),
+  /** The workspace being imported into, so its AI use shows there (the call counts to the account either way). */
+  workspaceId: z.string().max(80).optional(),
 });
 
 /**
@@ -49,7 +52,9 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, message: "Wait a few minutes and try again." }, { status: 429 });
   const overBudget = await startAiUsage(`account:${user.id}`);
   if (overBudget) return overBudget;
-  enterAiUsage(`account:${user.id}`);
+  const into = parsed.data.workspaceId;
+  const workspaceId = into && (await roleIn(into, user.id)) ? into : undefined;
+  enterAiUsage(`account:${user.id}`, { feature: "import", workspaceId });
   const { entityName, fields, columns, taken } = parsed.data;
   const result = await generateJsonHedged(
     importMapAnswer,

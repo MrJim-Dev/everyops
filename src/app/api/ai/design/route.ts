@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, message: "Wait a few minutes and try again." }, { status: 429 });
   const overBudget = await startAiUsage(`account:${user.id}`);
   if (overBudget) return overBudget;
-  enterAiUsage(`account:${user.id}`);
+  enterAiUsage(`account:${user.id}`, { feature: "setup-design" });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

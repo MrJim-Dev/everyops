@@ -35,7 +35,7 @@ export async function GET(request: Request) {
     );
   const overBudget = await startAiUsage(workspaceId);
   if (overBudget) return overBudget;
-  enterAiUsage(workspaceId);
+  enterAiUsage(workspaceId, { userId: user.id, feature: "checkup" });
   try {
     const started = Date.now();
     const findings = await runCheckup({

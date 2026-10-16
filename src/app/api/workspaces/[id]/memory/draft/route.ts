@@ -23,7 +23,7 @@ export async function POST(request: Request, { params }: RouteContext<"/api/work
   if (!limit.ok) return Response.json({ ok: false, message: "Try again in a few minutes." }, { status: 429 });
   const overBudget = await startAiUsage(id);
   if (overBudget) return overBudget;
-  enterAiUsage(id);
+  enterAiUsage(id, { userId: user.id, feature: "memory" });
   try {
     const notes = await draftMemory({
       blueprint: blueprintOf(found.workspace),

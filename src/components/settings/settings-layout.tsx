@@ -2,6 +2,7 @@
 
 import {
   BrainIcon,
+  ChartBarIcon,
   ClockCounterClockwiseIcon,
   GearSixIcon,
   GlobeHemisphereWestIcon,
@@ -25,6 +26,7 @@ export function SettingsLayout({ children }: { children: ReactNode }) {
     { id: "general", href: base, label: "General", icon: GearSixIcon },
     { id: "team", href: `${base}/team`, label: "Team", icon: UsersThreeIcon },
     { id: "assistant", href: `${base}/assistant`, label: "Assistant", icon: BrainIcon },
+    { id: "ai-usage", href: `${base}/ai-usage`, label: "AI use", icon: ChartBarIcon },
     { id: "automations", href: `${base}/automations`, label: "Automations", icon: LightningIcon },
     ...(canManage(ws.role)
       ? [
