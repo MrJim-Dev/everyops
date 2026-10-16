@@ -87,6 +87,8 @@ export type ChangeOp =
   | { op: "remove_block"; viewId: string; blockId: string }
   /** Moves a sidebar page to a position (0 is the top). */
   | { op: "move_system"; systemId: string; index: number }
+  /** Lists a page under a sidebar group, or on its own when group is "". */
+  | { op: "group_system"; systemId: string; group: string }
   /** Changes the words of one block on a form or landing page. Fields that don't apply to its type are ignored. */
   | { op: "update_block"; viewId: string; blockId: string; patch: BlockPatch }
   /** Replaces a landing page's blocks, e.g. with the standard site layout. */
@@ -481,6 +483,13 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "rename_system": {
         const system = next.systems.find((s) => s.id === op.systemId);
         if (system) system.name = op.name;
+        break;
+      }
+      case "group_system": {
+        const system = next.systems.find((s) => s.id === op.systemId);
+        const group = op.group.trim();
+        if (system && group) system.group = group;
+        else if (system) delete system.group;
         break;
       }
       case "rename_view": {

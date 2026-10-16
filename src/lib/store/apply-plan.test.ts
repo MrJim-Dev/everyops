@@ -157,6 +157,31 @@ describe("every assistant change can be undone", () => {
     sameData(undoPlan(workspace, entry.id, NOW) as Workspace, before);
   });
 
+  it("groups pages in the sidebar, and undo lists them on their own again", () => {
+    const before = court();
+    const { workspace, entry } = applyPlan(
+      before,
+      plan({
+        ops: [
+          { op: "group_system", systemId: "players", group: " Front desk " },
+          { op: "group_system", systemId: "courts", group: "Front desk" },
+          { op: "group_system", systemId: "bookings", group: "" },
+        ],
+      }),
+      { now: NOW },
+    );
+    const bp = blueprintOf(workspace);
+    expect(bp.systems.map((s) => [s.id, s.group])).toEqual([
+      ["overview", undefined],
+      ["bookings", undefined],
+      ["courts", "Front desk"],
+      ["players", "Front desk"],
+    ]);
+    expect(validateBlueprint(bp)).toEqual([]);
+    const undone = blueprintOf(undoPlan(workspace, entry.id, NOW) as Workspace);
+    expect(undone.systems.every((s) => s.group === undefined)).toBe(true);
+  });
+
   it("restores page text and the team on undo", () => {
     const before = court();
     const { workspace, entry } = applyPlan(

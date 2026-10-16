@@ -482,6 +482,8 @@ export type System = {
   icon: IconName;
   viewIds: string[];
   widgetIds: string[];
+  /** The sidebar group it's listed under ("Front desk", "Money"), named by the owner. Without one it's listed on its own. */
+  group?: string;
   /** How the dashboard arranges its widgets. Without one, charts go left and lists right. */
   layout?: DashboardLayout;
 };

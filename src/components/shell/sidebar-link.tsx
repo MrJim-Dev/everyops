@@ -1,5 +1,6 @@
 "use client";
 
+import { CaretRightIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -75,18 +76,89 @@ export function SidebarLink({
   );
 }
 
-export function SidebarSection({ label, children }: { label: string; children: ReactNode }) {
+export function SidebarSection({
+  label,
+  action,
+  children,
+}: {
+  label: string;
+  /** A small button beside the label, shown on hover (always on touch screens) and hidden in the rail. */
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex flex-col gap-px">
-      <div
-        className={cn(
-          "px-2 pt-4 pb-1 text-[11px] font-medium whitespace-nowrap text-muted-foreground",
-          RAIL_LABEL,
-        )}
-      >
-        {label}
+    <div className="group/section flex flex-col gap-px">
+      <div className="flex items-center justify-between gap-2 px-2 pt-4 pb-1">
+        <span className={cn("text-[11px] font-medium whitespace-nowrap text-muted-foreground", RAIL_LABEL)}>
+          {label}
+        </span>
+        {action ? (
+          <span
+            className={cn(
+              "-my-1 flex transition-opacity group-data-[rail=true]/sidebar:pointer-events-none md:opacity-0 md:group-hover/section:opacity-100 md:has-focus-visible:opacity-100",
+              RAIL_LABEL,
+            )}
+          >
+            {action}
+          </span>
+        ) : null}
       </div>
       {children}
+    </div>
+  );
+}
+
+/**
+ * Pages the owner grouped, under a header that opens and closes them. The caret sits in the icon column, so the rail
+ * keeps it (with the group's name in a tooltip) and nothing moves when the sidebar narrows.
+ */
+export function PageGroup({
+  name,
+  open,
+  onToggle,
+  count,
+  current,
+  rail,
+  children,
+}: {
+  name: string;
+  open: boolean;
+  onToggle: () => void;
+  count: number;
+  /** The current page is inside; a closed group shows it with a teal caret. */
+  current: boolean;
+  rail: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-px">
+      <RailTip rail={rail} label={name}>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={rail ? name : undefined}
+          onClick={onToggle}
+          className={cn(
+            "flex h-8 items-center gap-2.5 overflow-hidden rounded-md px-2 text-[12.5px] font-medium whitespace-nowrap text-muted-foreground outline-none hover:bg-sidebar-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+            RAIL_ITEM,
+            railWidth(rail),
+          )}
+        >
+          <span className="flex size-4 shrink-0 items-center justify-center">
+            <CaretRightIcon
+              weight="bold"
+              className={cn(
+                "size-3 transition-[rotate,color] duration-200 ease-(--ease-out-strong)",
+                open && "rotate-90",
+                current && !open && "text-primary",
+              )}
+            />
+          </span>
+          <span className={cn("flex-1 truncate text-left", RAIL_LABEL)}>{name}</span>
+          {open ? null : <span className={cn("text-[11px] tabular-nums", RAIL_LABEL)}>{count}</span>}
+        </button>
+      </RailTip>
+      {open ? children : null}
     </div>
   );
 }

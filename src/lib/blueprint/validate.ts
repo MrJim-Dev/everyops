@@ -185,6 +185,8 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
     const path = `systems.${si}`;
     if (system.viewIds.length + system.widgetIds.length === 0)
       errors.push({ path, message: `${system.name} is empty` });
+    if (system.group !== undefined && (!system.group.trim() || system.group.length > 40))
+      errors.push({ path, message: `${system.name}: its sidebar group needs a name of up to 40 characters` });
     for (const id of system.viewIds)
       if (!viewIds.has(id)) errors.push({ path, message: `${system.name} lists a missing view "${id}"` });
     for (const id of system.widgetIds)
