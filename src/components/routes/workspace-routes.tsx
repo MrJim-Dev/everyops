@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, use, useEffect } from "react";
 import { AskChat } from "@/components/assistant/ask-chat";
 import { RequireAuth } from "@/components/auth/auth-guards";
+import { AgentRequests } from "@/components/changes/agent-requests";
 import { HistoryList } from "@/components/changes/history-list";
 import { SetupInterview } from "@/components/setup/setup-interview";
 import { PageHeader } from "@/components/shell/page-header";
@@ -105,6 +106,7 @@ export function HistoryRoute() {
         description={`Every change to ${ws.name}, newest first. Undo the latest one at any time.`}
         className="border-b pb-3"
       />
+      <AgentRequests />
       <HistoryList />
     </div>
   );

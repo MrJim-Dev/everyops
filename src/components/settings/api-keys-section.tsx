@@ -225,7 +225,7 @@ function NewKeyDialog({
   const ready = name.trim() && permissions.size && (all || picked.size);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px]">
+      <DialogContent className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-[600px]">
         {secret ? (
           <>
             <DialogHeader>
@@ -247,6 +247,31 @@ function NewKeyDialog({
                 {`curl ${origin}/api/v1/workspaces \\\n  -H "Authorization: Bearer ${secret.slice(0, 17)}…"`}
               </pre>
             </div>
+            {permissions.has("mcp") ? (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[12.5px] text-muted-foreground">
+                  Connect an AI agent (MCP, Streamable HTTP) at{" "}
+                  <code className="font-mono text-foreground">{origin}/mcp</code>. Claude Code:
+                </span>
+                <pre className="overflow-x-auto rounded-lg border bg-muted/30 p-3 font-mono text-[11.5px] leading-relaxed">
+                  {`claude mcp add --transport http everyops ${origin}/mcp \\\n  --header "Authorization: Bearer ${secret}"`}
+                </pre>
+                <span className="text-[12.5px] text-muted-foreground">
+                  Cursor, VS Code and others (mcp.json):
+                </span>
+                <pre className="overflow-x-auto rounded-lg border bg-muted/30 p-3 font-mono text-[11.5px] leading-relaxed">
+                  {JSON.stringify(
+                    {
+                      mcpServers: {
+                        everyops: { url: `${origin}/mcp`, headers: { Authorization: `Bearer ${secret}` } },
+                      },
+                    },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </div>
+            ) : null}
             <DialogFooter className="mx-0 mb-0 rounded-b-none border-t-0 bg-transparent p-0">
               <Button onClick={() => onOpenChange(false)}>Done</Button>
             </DialogFooter>
