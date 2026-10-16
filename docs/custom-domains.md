@@ -1,6 +1,6 @@
 # Custom domains
 
-Owners and admins put a workspace's public pages on their own address in Settings → Domains: `book.myresort.com` for the booking form, `myresort.com` for the site, or a free `<name>.everyops.app`. Up to 3 custom domains per workspace; sign-in and the app stay on everyops.app (custom domains never receive session cookies).
+Owners and admins put a workspace's public pages on their own address in Settings → Domains: `book.myresort.com` for the booking form, `myresort.com` for the site. Up to 3 custom domains per workspace; sign-in and the app stay on everyops.app (custom domains never receive session cookies).
 
 ## Routing (`src/proxy.ts`, `routeCustomHost` in `src/lib/domains.ts`)
 
@@ -19,4 +19,4 @@ Waiting for DNS → Verifying → Issuing certificate → Live, checked by "Chec
 
 ## Platform (once)
 
-`scripts/setup-custom-domains.sh` creates the global external Application Load Balancer, serverless NEG for everyops-web, certificate map with a `*.everyops.app` wildcard, HTTP→HTTPS redirect, and gives `everyops-run` the Certificate Manager role, then prints the DNS records and env (`DOMAINS_LB_IPV4`, `DOMAINS_CNAME_TARGET`, `DOMAINS_CERT_MAP`). Until those are set, DNS checks work and domains stop at Verifying. Phase 2 (the staff app on `app.<domain>`) is not built.
+`scripts/setup-custom-domains.sh` creates the global external Application Load Balancer, serverless NEG for everyops-web, certificate map, HTTP→HTTPS redirect, and gives `everyops-run` the Certificate Manager role, then prints the DNS records and env (`DOMAINS_LB_IPV4`, `DOMAINS_CNAME_TARGET`, `DOMAINS_CERT_MAP`). Until those are set, DNS checks work and domains stop at Verifying. Phase 2 (the staff app on `app.<domain>`) is not built.

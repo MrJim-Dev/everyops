@@ -29,7 +29,6 @@ type Data = {
   domains: Domain[];
   pages: { id: string; name: string }[];
   platformReady: boolean;
-  subdomain: string;
 };
 
 const STEPS = [
@@ -101,7 +100,6 @@ export function DomainSettings() {
         domains: [],
         pages: [],
         platformReady: false,
-        subdomain: "",
       },
     );
   }, [base]);
@@ -146,7 +144,6 @@ export function DomainSettings() {
     id === "home" ? "Public home" : (data?.pages.find((p) => p.id === id)?.name ?? id);
   const open = (h: string) =>
     h.endsWith(".localhost") ? `http://${h}:${window.location.port}/` : `https://${h}/`;
-  const hasSub = data?.domains.some((d) => d.kind === "subdomain");
 
   return (
     <SettingsPage>
@@ -190,21 +187,6 @@ export function DomainSettings() {
             Add domain
           </Button>
         </div>
-        {data && !hasSub && data.subdomain ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-[13px]">
-            <span>
-              No domain yet? Use <code className="font-mono">{data.subdomain}</code> for free, without DNS
-              changes.
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void add({ hostname: data.subdomain, subdomain: true, target: "home" })}
-            >
-              Use free subdomain
-            </Button>
-          </div>
-        ) : null}
         {data === null ? (
           <Skeleton className="h-28 rounded-lg" />
         ) : (

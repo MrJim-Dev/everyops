@@ -38,7 +38,7 @@ const notFound = () =>
 /**
  * Every request starts here. On EveryOps' own hosts: no session cookie on a private page means sign-in, signed-out
  * visitors see the landing page at "/", and a workspace's old /s/<workspace> address moves to its primary custom
- * domain once that's live. On a custom domain (or a free <name>.everyops.app subdomain): only that workspace's public
+ * domain once that's live. On a custom domain: only that workspace's public
  * pages, at clean paths; anything else, and any host nobody has claimed, is a plain 404.
  */
 export async function proxy(request: NextRequest) {
@@ -46,8 +46,7 @@ export async function proxy(request: NextRequest) {
     .split(":")[0]
     .toLowerCase();
   const path = request.nextUrl.pathname;
-  const sub = host.endsWith(`.${APP_DOMAIN}`) && host !== `www.${APP_DOMAIN}`;
-  if (ownHost(host) && !sub) {
+  if (ownHost(host)) {
     const old = /^\/s\/([^/]+)(\/.*)?$/.exec(path);
     if (old && request.method === "GET") {
       const domain = await primaryDomain(old[1]).catch(() => null);

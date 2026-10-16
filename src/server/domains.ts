@@ -141,7 +141,7 @@ export async function listDomains(workspaceId: string): Promise<DomainInfo[]> {
   return rows.map(info);
 }
 
-/** Domains per workspace (the free subdomain doesn't count). */
+/** Custom domains per workspace. */
 export const MAX_DOMAINS = 3;
 
 export async function addDomain(
@@ -167,8 +167,8 @@ export async function addDomain(
   if (kind === "subdomain" && others.length) return { ok: false, message: "That subdomain is taken." };
   // Someone else claimed it first: this workspace has to prove it owns the domain with a TXT record.
   const ownership = others.length ? `everyops-verify=${randomBytes(12).toString("hex")}` : null;
-  // Free subdomains are live as soon as the wildcard certificate exists (platformReady); local hosts at once.
-  const live = (kind === "subdomain" && platformReady()) || devHost(host);
+  // Local *.localhost hosts are live at once (development only); real domains go through DNS and the certificate.
+  const live = devHost(host);
   await sql`insert into workspace_domain (workspace_id, hostname, target, kind, status, message, ownership_token, created_by,
       is_primary, live_at, checked_at)
     values (${workspaceId}, ${host}, ${target}, ${kind}, ${live ? "live" : "pending"},

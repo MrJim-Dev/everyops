@@ -23,15 +23,8 @@ g compute backend-services add-backend everyops-web-backend --global \
   --network-endpoint-group=everyops-web-neg --network-endpoint-group-region="$REGION"
 g compute url-maps create everyops-domains --default-service=everyops-web-backend
 
-# Certificates: a map the app adds one entry per customer hostname to, plus *.everyops.app for free subdomains.
+# Certificates: a map the app adds one entry (and one Google-managed certificate) per customer hostname to.
 g certificate-manager maps create everyops-domains
-g certificate-manager dns-authorizations create everyops-app-wildcard --domain=everyops.app
-g certificate-manager dns-authorizations describe everyops-app-wildcard --format='value(dnsResourceRecord.name,dnsResourceRecord.data)'
-echo "Add that CNAME at everyops.app's DNS, then press enter."; read -r _
-g certificate-manager certificates create everyops-app-wildcard \
-  --domains='*.everyops.app' --dns-authorizations=everyops-app-wildcard
-g certificate-manager maps entries create everyops-app-wildcard --map=everyops-domains \
-  --hostname='*.everyops.app' --certificates=everyops-app-wildcard
 
 # HTTPS front end with the map, and HTTP to HTTPS.
 g compute target-https-proxies create everyops-domains-https --url-map=everyops-domains --certificate-map=everyops-domains
@@ -53,7 +46,7 @@ g projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$RUN_SA" -
 IP=$(g compute addresses describe everyops-domains-ip --global --format='value(address)')
 cat <<EOF
 Done. Next:
-  1. DNS for everyops.app: domains.everyops.app A $IP, and *.everyops.app A $IP.
+  1. DNS for everyops.app: domains.everyops.app A $IP (customer subdomains CNAME to it).
   2. Cloud Run env for $SERVICE:
        DOMAINS_LB_IPV4=$IP
        DOMAINS_CNAME_TARGET=domains.everyops.app

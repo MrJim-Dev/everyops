@@ -20,8 +20,8 @@ describe("parseHostname", () => {
   it.each([
     ["", /Enter/],
     ["10.0.0.1", /IP address/],
-    ["everyops.app", /free subdomain/],
-    ["x.everyops.app", /free subdomain/],
+    ["everyops.app", /domain you own/],
+    ["x.everyops.app", /domain you own/],
     ["bad_host.com", /valid/],
     ["localhost", /valid/],
   ])("refuses %s", (input, why) => {

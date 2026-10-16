@@ -52,7 +52,7 @@ export function parseHostname(input: string): { ok: true; host: string } | { ok:
   if (host === APP_DOMAIN || host.endsWith(`.${APP_DOMAIN}`))
     return {
       ok: false,
-      message: "everyops.app addresses are set up with the free subdomain option instead.",
+      message: "Use a domain you own; everyops.app addresses can't be added.",
     };
   if (
     /\.(local|localhost|internal|test|example|invalid)$/.test(host) &&

@@ -1,5 +1,5 @@
--- Custom domains: hostnames a workspace serves its public pages on (book.myresort.com) and free subdomains
--- (myresort.everyops.app). A hostname can be live for one workspace only; a later claim must prove ownership with a
+-- Custom domains: hostnames a workspace serves its public pages on (book.myresort.com).
+-- A hostname can be live for one workspace only; a later claim must prove ownership with a
 -- TXT record. Certificates come from Certificate Manager (ids kept here so removing a domain deletes them).
 create table if not exists workspace_domain (
   workspace_id text not null references workspace (id) on delete cascade,
