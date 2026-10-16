@@ -8,6 +8,7 @@ import {
   LightningIcon,
   LinkSimpleIcon,
   RobotIcon,
+  TableIcon,
   UserIcon,
 } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -38,6 +39,7 @@ const ICONS: Record<ActorType, typeof UserIcon> = {
   automation: LightningIcon,
   public_form: BrowserIcon,
   booking_link: LinkSimpleIcon,
+  sheet_sync: TableIcon,
 };
 
 const RESULT_STYLE: Record<ActivityItem["result"], { label: string; tone: string } | null> = {

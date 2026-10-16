@@ -363,6 +363,70 @@ export function applyRecordOps(ws: WorkspaceData, ops: RecordOp[], now: Date = n
   return { data, created, replaced: replaced.filter((r) => !removedIds.has(r.id)), removed, errors };
 }
 
+/**
+ * Record ops from an import, in one pass: each record is checked as a save checks it (against the records before it,
+ * the sheet's earlier rows included), then everything is recomputed once. The save automations don't run. Thousands
+ * of rows take one recompute instead of one each, and old bookings don't email guests or move stock again.
+ */
+export function applyImportOps(ws: WorkspaceData, ops: RecordOp[], now: Date = new Date()) {
+  const bp = ws.blueprint;
+  const stamp = now.toISOString();
+  const byId = new Map(ws.records.map((r) => [r.id, r]));
+  const order = ws.records.map((r) => r.id);
+  const created: string[] = [];
+  const replaced: DataRecord[] = [];
+  const errors: string[] = [];
+  for (const op of ops) {
+    if (op.op === "delete_record") {
+      errors.push(`${op.recordId}: an import doesn't delete records`);
+      continue;
+    }
+    const list = [...byId.values()];
+    if (op.op === "create_record") {
+      const entity = bp.entities.find((e) => e.id === op.entityId);
+      if (!entity) {
+        errors.push(`New ${op.entityId}: no such record type`);
+        continue;
+      }
+      const problems = validateRecord(bp, entity, op.data, list);
+      if (problems.length) {
+        errors.push(`New ${op.entityId}: ${problems.map((e) => e.message).join("; ")}`);
+        continue;
+      }
+      byId.set(op.id, {
+        id: op.id,
+        entityId: op.entityId,
+        data: { ...op.data },
+        createdAt: stamp,
+        updatedAt: stamp,
+      });
+      order.push(op.id);
+      created.push(op.id);
+    } else {
+      const was = byId.get(op.recordId);
+      const entity = was && bp.entities.find((e) => e.id === was.entityId);
+      if (!was || !entity) {
+        errors.push(`${op.recordId}: no such record`);
+        continue;
+      }
+      const data = { ...was.data, ...op.patch };
+      const problems = validateRecord(bp, entity, data, list, was.id);
+      if (problems.length) {
+        errors.push(`${op.recordId}: ${problems.map((e) => e.message).join("; ")}`);
+        continue;
+      }
+      if (!created.includes(was.id) && !replaced.some((r) => r.id === was.id)) replaced.push(was);
+      byId.set(was.id, { ...was, data, updatedAt: stamp });
+    }
+  }
+  const records = computeAll(
+    bp,
+    order.map((id) => byId.get(id) as DataRecord),
+    now,
+  );
+  return { data: { ...ws, records }, created, replaced, removed: [] as DataRecord[], errors };
+}
+
 /** Images are only ever our own uploads (or, in a preview that isn't saved, a picture held in the browser). */
 export function isImagePath(value: unknown): value is string {
   return (

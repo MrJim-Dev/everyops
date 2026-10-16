@@ -10,6 +10,7 @@ export const ACTOR_TYPES = [
   "automation",
   "public_form",
   "booking_link",
+  "sheet_sync",
 ] as const;
 export type ActorType = (typeof ACTOR_TYPES)[number];
 
@@ -20,6 +21,7 @@ export const ACTOR_LABELS: Record<ActorType, string> = {
   automation: "Automation",
   public_form: "Public form",
   booking_link: "Booking link",
+  sheet_sync: "Google Sheets",
 };
 
 export const RESULTS = ["ok", "denied", "conflict", "error"] as const;

@@ -6,11 +6,14 @@ import {
   CaretRightIcon,
   CaretUpIcon,
   DownloadSimpleIcon,
+  FileArrowUpIcon,
   TrashIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { ImportDialog } from "@/components/import/import-dialog";
+import { SheetSyncBar } from "@/components/import/sheet-sync-bar";
 import { FieldValue } from "@/components/records/field-value";
 import { useRecordPanels } from "@/components/records/record-panels";
 import { StatusMenu } from "@/components/records/status-menu";
@@ -48,7 +51,7 @@ import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
 import type { DataRecord, Field, Sort, TableView as TableViewConfig } from "@/lib/blueprint/types";
 import { downloadText, fileSlug } from "@/lib/download";
 import { applyFilter, searchRecords, sortRecords } from "@/lib/engine/query";
-import { toCsv, valueText } from "@/lib/engine/value-text";
+import { toCsv, toSheet, valueText } from "@/lib/engine/value-text";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { useFreshStore } from "@/lib/motion/fresh";
 import { useViewPref } from "@/lib/store/view-prefs";
@@ -152,6 +155,28 @@ export function TableView({ view }: { view: TableViewConfig }) {
   const clear = () => setSelected(new Set());
   const plural = entity.pluralName.toLowerCase();
 
+  const [importing, setImporting] = useState(false);
+  const exportXlsx = async (list: DataRecord[]) => {
+    const sheet = toSheet(blueprint, records, fields, list);
+    const name =
+      view.name.startsWith("All ") || view.name === entity.pluralName
+        ? entity.pluralName
+        : `${entity.pluralName} - ${view.name}`;
+    const res = await fetch("/api/export/xlsx", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, ...sheet }),
+    }).catch(() => null);
+    if (!res?.ok) return void toast.error("The Excel file couldn't be made. Try CSV instead.");
+    const url = URL.createObjectURL(await res.blob());
+    const link = Object.assign(document.createElement("a"), {
+      href: url,
+      download: `${fileSlug(name)}.xlsx`,
+    });
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast.success(`Exported ${list.length} ${list.length === 1 ? entity.name.toLowerCase() : plural}`);
+  };
   const exportCsv = (list: DataRecord[]) => {
     downloadText(`${fileSlug(view.name)}.csv`, toCsv(blueprint, records, fields, list), "text/csv");
     toast.success(`Exported ${list.length} ${list.length === 1 ? entity.name.toLowerCase() : plural}`);
@@ -322,16 +347,34 @@ export function TableView({ view }: { view: TableViewConfig }) {
                 Double-click a cell to edit
               </span>
             ) : null}
-            <Button variant="ghost" size="sm" onClick={() => exportCsv(rows)} disabled={!rows.length}>
-              <DownloadSimpleIcon data-icon="inline-start" />
-              Export
-            </Button>
+            {editable && ws.mode === "live" ? (
+              <Button variant="ghost" size="sm" onClick={() => setImporting(true)}>
+                <FileArrowUpIcon data-icon="inline-start" />
+                Import
+              </Button>
+            ) : null}
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="ghost" size="sm" disabled={!rows.length} />}>
+                <DownloadSimpleIcon data-icon="inline-start" />
+                Export
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => exportCsv(rows)}>CSV</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void exportXlsx(rows)}>Excel (.xlsx)</DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <ToolbarSummary>
               {rows.length} {rows.length === 1 ? entity.name.toLowerCase() : plural}
             </ToolbarSummary>
           </>
         )}
       </ViewToolbar>
+      {editable && ws.mode === "live" ? (
+        <ImportDialog open={importing} onOpenChange={setImporting} entityId={entity.id} />
+      ) : null}
+      {ws.mode === "live" ? <SheetSyncBar entityId={entity.id} /> : null}
       {rows.length === 0 ? (
         <ViewEmpty
           title={query ? "No matches" : `No ${plural} yet`}
