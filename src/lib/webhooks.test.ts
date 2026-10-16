@@ -103,7 +103,7 @@ describe("URL safety", () => {
   ])("refuses %s", (url, why) => expect(urlProblem(url)).toMatch(why));
 
   it("accepts public https URLs", () => {
-    expect(urlProblem("https://hooks.zapier.com/hooks/catch/1/abc")).toBeNull();
+    expect(urlProblem("https://hooks.example-crm.com/inbound/everyops")).toBeNull();
   });
 
   it("knows private addresses", () => {
