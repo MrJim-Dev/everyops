@@ -336,9 +336,11 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
             ? sql`created_at ${dir}, seq ${dir}`
             : sql`${sqlValue(sortField)} ${dir} nulls last, seq desc`;
         const limit = Math.min(Math.max(Number(args.limit) || 15, 1), 50);
+        // The REST API pages through results; the assistant and MCP tools read the first page.
+        const offset = Math.min(Math.max(Math.trunc(Number(args.offset)) || 0, 0), 100_000);
         const { rows } = await sql<RecordRow & { total: number }>`
           select id, entity_id, data, created_at, count(*) over ()::int as total from workspace_record
-          where ${cond} order by ${order} limit ${limit}`.execute(db);
+          where ${cond} order by ${order} limit ${limit} offset ${offset}`.execute(db);
         return { total: rows[0]?.total ?? 0, shown: rows.length, records: await present(e, rows) };
       }
       if (name === "get_record") {

@@ -1,6 +1,6 @@
 # API keys
 
-Account → **API keys** makes keys for scripts, integrations and AI agents. They authenticate the public API (`/api/v1`) and, from #105, the MCP server.
+Account → **API keys** makes keys for scripts, integrations and AI agents. They authenticate the REST API (`/api/v1`, `docs/rest-api.md`) and the MCP server (`docs/mcp.md`).
 
 - **Secret:** `eo_live_<8-char id>_<32 random chars>`, shown once after creating it. Only a SHA-256 hash is stored, looked up by hash on each request; secrets never reach logs.
 - **Scope:** every workspace the account can open (including new ones), or a chosen list. A workspace outside the list answers 404, so a key can't tell which workspaces exist.

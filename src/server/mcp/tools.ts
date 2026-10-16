@@ -19,7 +19,16 @@ import { accessibleWorkspaces } from "../workspaces";
 
 export type McpScope = { kind: "account" } | { kind: "workspace"; workspaceId: string };
 
-export class ToolError extends Error {}
+/** A tool call that can't be done; status is what the REST API answers with (400 unless set). */
+export class ToolError extends Error {
+  constructor(
+    message: string,
+    readonly status: 400 | 403 | 404 | 409 = 400,
+    readonly details?: unknown,
+  ) {
+    super(message);
+  }
+}
 
 type Args = Record<string, unknown>;
 type Ctx = { caller: ApiCaller; scope: McpScope; workspaceId: string; bp: Blueprint };
@@ -51,7 +60,10 @@ const entityOf = (bp: Blueprint, idOrName: unknown) => {
       (x) => x.name.toLowerCase() === key.toLowerCase() || x.pluralName.toLowerCase() === key.toLowerCase(),
     );
   if (!e)
-    throw new ToolError(`No record type "${key}". Record types: ${bp.entities.map((x) => x.id).join(", ")}`);
+    throw new ToolError(
+      `No record type "${key}". Record types: ${bp.entities.map((x) => x.id).join(", ")}`,
+      404,
+    );
   return e;
 };
 
@@ -60,7 +72,8 @@ const describeField = (f: Entity["fields"][number]) => ({
   name: f.name,
   type: f.type,
   ...(f.required ? { required: true } : {}),
-  ...(f.options?.length ? { options: f.options.map((o) => o.label) } : {}),
+  // Records store a choice's id; writes take its label or id.
+  ...(f.options?.length ? { options: f.options.map((o) => ({ id: o.id, label: o.label })) } : {}),
   ...(f.relation ? { linksTo: f.relation.entityId } : {}),
   ...(f.type === "formula" || f.type === "rollup" ? { computed: true } : {}),
   ...(f.type === "time_range" ? { range: f.range ?? "times" } : {}),
@@ -85,10 +98,19 @@ const FILTERS = {
 
 const lookup = async (ctx: Ctx, name: string, args: Args) => {
   const result = await recordTools(ctx.workspaceId, ctx.bp).run(name, args);
-  if (result && typeof result === "object" && "error" in result)
-    throw new ToolError(String((result as { error: unknown }).error));
+  if (result && typeof result === "object" && "error" in result) {
+    const message = String((result as { error: unknown }).error);
+    throw new ToolError(message, /^No record\b/.test(message) ? 404 : 400);
+  }
   return result;
 };
+
+/** A record as tools and the REST API show it: its id, every field by id, and its rev. */
+const flat = (record: { id: string; data: Record<string, unknown> }, rev: number | null) => ({
+  id: record.id,
+  ...record.data,
+  rev,
+});
 
 const writeResult = (r: Awaited<ReturnType<typeof writeRecord>>) => {
   if (!r.ok) {
@@ -97,13 +119,13 @@ const writeResult = (r: Awaited<ReturnType<typeof writeRecord>>) => {
         ok: false,
         conflict: true,
         message: r.message,
-        current: { ...r.current.record, rev: r.current.rev },
+        current: flat(r.current.record, r.current.rev),
       };
-    throw new ToolError(r.message);
+    throw new ToolError(r.message, r.status);
   }
   return {
     ok: true,
-    ...(r.record ? { record: { ...r.record, rev: r.rev } } : {}),
+    ...(r.record ? { record: flat(r.record, r.rev) } : {}),
     ...(r.notices.length ? { automations: r.notices } : {}),
   };
 };
@@ -255,10 +277,11 @@ export const TOOLS: Tool[] = [
     run: async (ctx, args) => {
       const viewId = str(args.viewId, "viewId");
       const view = ctx.bp.views.find((v) => v.id === viewId);
-      if (!view) throw new ToolError(`No tab "${viewId}".`);
+      if (!view) throw new ToolError(`No tab "${viewId}".`, 404);
       const body =
         (await readPage(ctx.workspaceId, viewId)) ?? (view.type === "html" ? (view.html ?? null) : null);
-      if (body === null) throw new ToolError(`"${view.name}" has no page text (it's a ${view.type} view).`);
+      if (body === null)
+        throw new ToolError(`"${view.name}" has no page text (it's a ${view.type} view).`, 404);
       return {
         id: viewId,
         name: view.name,
@@ -306,7 +329,7 @@ export const TOOLS: Tool[] = [
       const records = (await readRecords(db, ctx.workspaceId)).map((s) => s.record);
       const record = records.find((r) => r.id === id);
       const entity = ctx.bp.entities.find((e) => e.id === record?.entityId);
-      if (!record || !entity) throw new ToolError(`No record "${id}".`);
+      if (!record || !entity) throw new ToolError(`No record "${id}".`, 404);
       const { data, errors } = coerceValues(ctx.bp, records, entity, (args.values ?? {}) as Args);
       if (errors.length) throw new ToolError(errors.join("\n"));
       return writeResult(
@@ -398,11 +421,33 @@ export async function callTool(
     return tool.run({ caller, scope, workspaceId: "", bp: undefined as unknown as Blueprint }, args);
   const workspaceId = scope.kind === "workspace" ? scope.workspaceId : str(args.workspace, "workspace");
   const access = await workspaceAccess(caller, workspaceId, "mcp");
-  if (access.error) throw new ToolError(await access.error.json().then((b) => b.error.message));
-  const allowed = await workspaceAccess(caller, workspaceId, tool.permission);
-  if (allowed.error) throw new ToolError(await allowed.error.json().then((b) => b.error.message));
-  const bp = await currentBlueprint(db, workspaceId);
-  if (!bp) throw new ToolError("Workspace not found.");
+  if (access.error) throw await accessError(access.error);
   const { workspace: _w, ...rest } = args;
-  return tool.run({ caller, scope, workspaceId, bp }, rest);
+  return runTool(caller, workspaceId, name, rest, scope);
+}
+
+const accessError = async (response: Response) =>
+  new ToolError(
+    await response.json().then((b: { error: { message: string } }) => b.error.message),
+    response.status === 403 ? 403 : 404,
+  );
+
+/**
+ * Runs a workspace tool after checking the caller may reach the workspace and has the tool's permission (capped by
+ * their role). The REST API calls this directly; MCP calls it through callTool, which also needs the mcp permission.
+ */
+export async function runTool(
+  caller: ApiCaller,
+  workspaceId: string,
+  name: string,
+  args: Args,
+  scope: McpScope = { kind: "workspace", workspaceId },
+): Promise<unknown> {
+  const tool = TOOLS.find((t) => t.name === name && !t.accountOnly);
+  if (!tool) throw new ToolError(`Unknown tool "${name}".`);
+  const allowed = await workspaceAccess(caller, workspaceId, tool.permission);
+  if (allowed.error) throw await accessError(allowed.error);
+  const bp = await currentBlueprint(db, workspaceId);
+  if (!bp) throw new ToolError("Workspace not found.", 404);
+  return tool.run({ caller, scope, workspaceId, bp }, args);
 }
