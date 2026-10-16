@@ -19,3 +19,16 @@ Every table view has **Import** for people who can edit records (owners, admins,
 
 Automatic Google Sheets sync (a record type linked to a sheet and kept up to date) is a follow-up on #103.
 
+
+
+## Google Sheets sync
+
+After importing from a Google Sheets link into an existing record type, owners and admins can tick **Keep … in sync with this sheet**. It needs a match field (a name or code) set to update. From then on the cron job reads the sheet every 15 minutes (`runDueSyncs`, `src/server/sheet-sync.ts`):
+
+- Each run previews the sheet as an import with the saved options (`previewImport` with update-on-match) and applies it with `applyImportOps` inside the workspace lock. Only records whose data changed are written, so a sheet that hasn't changed writes nothing.
+- New rows are added and changed rows updated. Rows removed from the sheet stay, and rows with problems are left out and counted.
+- The mapping is saved by header name (`src/lib/sheet-sync.ts`), so columns can move. A mapped column that disappears stops the sync with a plain reason.
+- Like an import, a sync doesn't run save automations. It does log to the activity log (actor "Google Sheets") and send webhooks, since these are changes happening now. An import's own rows send no webhooks.
+- The first run waits for the next pass, so it sees the rows the import is still saving from the browser instead of adding them again.
+- The bar above the table shows the last run, with **Sync now** (which refreshes the tab) and **Stop syncing** (the records stay). One sync per record type is stored in `sheet_sync` (migration 0019).
+- Two-way sync (writing back to the sheet) needs Google OAuth and isn't built. In development, an `http://localhost` CSV address can stand in for a sheet.

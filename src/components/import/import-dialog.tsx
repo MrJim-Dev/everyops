@@ -42,6 +42,7 @@ import {
   type Table,
   withNewType,
 } from "@/lib/engine/import";
+import { mappingByHeader } from "@/lib/sheet-sync";
 import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 
@@ -104,6 +105,9 @@ export function ImportDialog({
   const [defaults, setDefaults] = useState<Record<string, string>>({});
   const [runAutomations, setRunAutomations] = useState(false);
   const [link, setLink] = useState("");
+  /** The Google Sheets link the rows came from, when they did: they can be kept in sync. */
+  const [sheetUrl, setSheetUrl] = useState<string | null>(null);
+  const [keepSync, setKeepSync] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -118,6 +122,8 @@ export function ImportDialog({
     setSheets(null);
     setError(null);
     setLink("");
+    setSheetUrl(null);
+    setKeepSync(false);
     setTarget(entityId);
   }, [open, entityId]);
 
@@ -237,7 +243,7 @@ export function ImportDialog({
     ws.records,
   ]);
 
-  const read = async (request: Promise<Response>, name: string) => {
+  const read = async (request: Promise<Response>, name: string, fromUrl: string | null = null) => {
     setBusy(true);
     setError(null);
     try {
@@ -245,6 +251,7 @@ export function ImportDialog({
       const body = (await res.json()) as { ok: boolean; sheets?: Sheet[]; message?: string };
       if (!body.ok || !body.sheets?.length) throw new Error(body.message ?? "That file couldn't be read.");
       setSheets(body.sheets);
+      setSheetUrl(fromUrl);
       setSheetAt(0);
       setSource(name);
       setNewName(body.sheets[0].name.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()));
@@ -268,6 +275,7 @@ export function ImportDialog({
         body: JSON.stringify({ url: link }),
       }),
       "Google Sheet",
+      link.trim(),
     );
 
   const template = () => {
@@ -312,6 +320,27 @@ export function ImportDialog({
         : "Saved to History, where you can undo it.",
       action: { label: "Undo", onClick: () => undoChange(ws.id, entry.id) },
     });
+    if (keepSync && sheetUrl && matchFieldId && !fresh && sheet)
+      void fetch(`/api/workspaces/${encodeURIComponent(ws.id)}/sheet-sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          entityId: into.id,
+          url: sheetUrl,
+          mapping: mappingByHeader(sheet.headers, mapping),
+          matchFieldId,
+          defaults,
+          createLinked,
+        }),
+      })
+        .then((res) => res.json())
+        .then((body: { ok: boolean; message?: string }) =>
+          body.ok
+            ? toast.success("Kept in sync with the sheet", {
+                description: "Every 15 minutes, new rows are added and changed rows updated.",
+              })
+            : toast.error(body.message ?? "The sync couldn't be set up."),
+        );
     onOpenChange(false);
     if (preview.systemId) router.push(`${ws.basePath}/${preview.systemId}`);
   };
@@ -734,6 +763,25 @@ export function ImportDialog({
               </section>
             ) : null}
 
+            {sheetUrl && !fresh && manager ? (
+              <section className="flex items-start gap-2.5 rounded-lg border px-3.5 py-3 text-[13px]">
+                <Checkbox
+                  id="import-keep-sync"
+                  checked={keepSync && !!matchFieldId && onMatch === "update"}
+                  disabled={!matchFieldId || onMatch !== "update"}
+                  onCheckedChange={(v) => setKeepSync(!!v)}
+                  className="mt-0.5"
+                />
+                <label htmlFor="import-keep-sync" className="flex flex-col gap-0.5">
+                  <span>Keep {into.pluralName.toLowerCase()} in sync with this sheet</span>
+                  <span className="text-muted-foreground">
+                    {matchFieldId && onMatch === "update"
+                      ? "Every 15 minutes, rows added to the sheet are added here and changed rows are updated. Rows removed from the sheet stay."
+                      : "Match rows by a field that identifies them (a name or code) and update them, so a sync knows which record each row is."}
+                  </span>
+                </label>
+              </section>
+            ) : null}
             {automations.length ? (
               <section className="flex items-start gap-2.5 rounded-lg border px-3.5 py-3 text-[13px]">
                 <Checkbox

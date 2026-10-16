@@ -13,6 +13,7 @@ import {
 import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ImportDialog } from "@/components/import/import-dialog";
+import { SheetSyncBar } from "@/components/import/sheet-sync-bar";
 import { FieldValue } from "@/components/records/field-value";
 import { useRecordPanels } from "@/components/records/record-panels";
 import { StatusMenu } from "@/components/records/status-menu";
@@ -373,6 +374,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
       {editable && ws.mode === "live" ? (
         <ImportDialog open={importing} onOpenChange={setImporting} entityId={entity.id} />
       ) : null}
+      {ws.mode === "live" ? <SheetSyncBar entityId={entity.id} /> : null}
       {rows.length === 0 ? (
         <ViewEmpty
           title={query ? "No matches" : `No ${plural} yet`}
