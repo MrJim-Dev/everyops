@@ -233,6 +233,7 @@ export async function writePages(trx: Ex, id: string, pages: Record<string, Page
     d ? [{ key, body: d.body, updatedAt: d.updatedAt || new Date().toISOString() }] : [],
   );
   const gone = Object.entries(pages).flatMap(([key, d]) => (d ? [] : [key]));
+  if (put.length || gone.length) await keepVersions(trx, id, put, gone);
   if (put.length)
     await sql`insert into workspace_page (workspace_id, key, body, updated_at)
       select ${id}, x.key, x.body, x."updatedAt" from jsonb_to_recordset(${JSON.stringify(put)}::jsonb) as
@@ -244,6 +245,71 @@ export async function writePages(trx: Ex, id: string, pages: Record<string, Page
     await sql`delete from workspace_page where workspace_id = ${id} and key = any(${gone}::text[])`.execute(
       trx,
     );
+}
+
+/** How often a page's text is kept as a version while it's being edited, and how many are kept. */
+const VERSION_GAP = "3 minutes";
+const VERSIONS_KEPT = 20;
+
+/**
+ * Before page text changes, keeps the text it replaces as a version: when the newest kept version is older than
+ * VERSION_GAP (autosave runs every few seconds), or when the page is removed. Then trims to VERSIONS_KEPT per page.
+ */
+async function keepVersions(trx: Ex, id: string, put: { key: string; body: string }[], gone: string[]) {
+  const keys = [...put.map((p) => p.key), ...gone];
+  const incoming = JSON.stringify(put);
+  // A page saved for the first time starts from the text in the design (setup's website, a generated page): keep
+  // that as its first version, or restoring could never get back to what setup made.
+  await sql`insert into workspace_page_version (workspace_id, key, body, saved_at)
+    select w.id, x.key, s.body, now() from jsonb_to_recordset(${incoming}::jsonb) as x(key text, body text)
+    join workspace w on w.id = ${id}
+    join workspace_version wv on wv.workspace_id = w.id and wv.version = (w.doc->>'currentVersion')::int
+    cross join lateral (
+      select coalesce(e->>'html', e->>'starter') as body from jsonb_array_elements(wv.blueprint->'views') e
+      where e->>'id' = x.key limit 1) s
+    where s.body is not null and s.body <> x.body
+      and not exists (select 1 from workspace_page p where p.workspace_id = w.id and p.key = x.key)
+      and not exists (select 1 from workspace_page_version v where v.workspace_id = w.id and v.key = x.key)`.execute(
+    trx,
+  );
+  await sql`insert into workspace_page_version (workspace_id, key, body, saved_at)
+    select p.workspace_id, p.key, p.body, p.updated_at from workspace_page p
+    left join jsonb_to_recordset(${incoming}::jsonb) as x(key text, body text) on x.key = p.key
+    where p.workspace_id = ${id} and p.key = any(${keys}::text[])
+      and (x.key is null or x.body <> p.body)
+      and (x.key is null or not exists (
+        select 1 from workspace_page_version v where v.workspace_id = p.workspace_id and v.key = p.key
+          and v.kept_at > now() - ${VERSION_GAP}::interval))`.execute(trx);
+  await sql`delete from workspace_page_version v where v.workspace_id = ${id} and v.key = any(${keys}::text[])
+    and v.id not in (select id from workspace_page_version w where w.workspace_id = v.workspace_id and w.key = v.key
+      order by kept_at desc, id desc limit ${VERSIONS_KEPT})`.execute(trx);
+}
+
+export type PageVersion = { id: number; savedAt: string; keptAt: string; bytes: number };
+
+/** A page's kept versions, newest first, without their text. */
+export async function pageVersions(ex: Ex, id: string, key: string): Promise<PageVersion[]> {
+  const { rows } = await sql<{ id: string; saved_at: Date; kept_at: Date; bytes: number }>`
+    select id, saved_at, kept_at, octet_length(body)::int as bytes from workspace_page_version
+    where workspace_id = ${id} and key = ${key} order by kept_at desc, id desc`.execute(ex);
+  return rows.map((r) => ({
+    id: Number(r.id),
+    savedAt: r.saved_at.toISOString(),
+    keptAt: r.kept_at.toISOString(),
+    bytes: r.bytes,
+  }));
+}
+
+/** One kept version's text. */
+export async function pageVersionBody(
+  ex: Ex,
+  id: string,
+  key: string,
+  versionId: number,
+): Promise<string | null> {
+  const { rows } = await sql<{ body: string }>`select body from workspace_page_version
+    where workspace_id = ${id} and key = ${key} and id = ${versionId}`.execute(ex);
+  return rows[0]?.body ?? null;
 }
 
 /** Saves history entries (new or updated, e.g. marked undone). */

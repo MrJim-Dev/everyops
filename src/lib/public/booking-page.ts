@@ -579,6 +579,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
       el("h2", { text: "You're booked!" }),
       el("p", { class: "muted", text: "Your reference is " + r.reference + ". Keep it for when you arrive." }),
       el("dl", {}, (r.summary || []).map(function (l) { return el("div", {}, [el("dt", { text: l.name }), el("dd", { text: l.text })]); })),
+      r.manage ? el("p", { class: "muted" }, [el("a", { href: r.manage, target: "_top" }, ["View or update your booking"]), " (keep this link to send a proof of payment later)"]) : el("span", {}),
       el("a", { class: "button primary", href: HOME, target: "_top" }, ["Back to home"])
     ]));
   }

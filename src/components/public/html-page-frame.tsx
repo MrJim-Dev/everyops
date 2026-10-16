@@ -158,6 +158,25 @@ export function HtmlPageFrame({
             const item = list.items.find((x) => x.id === str(a.id));
             return reply(item ? { ok: true, item } : { ok: false, missing: true, message: "Not found." });
           }
+          // The visitor's own booking, from the manage link this page was opened with (?manage=) or one it holds.
+          case "mine":
+          case "attach": {
+            const token =
+              str(a.token, 600) || new URLSearchParams(window.location.search).get("manage") || "";
+            if (!token) return reply({ ok: false, message: "Open this page from your booking link." });
+            const url = `/api/public/booking/${encodeURIComponent(token)}`;
+            if (method === "mine") return reply(await getJson(url));
+            if (preview)
+              return reply({
+                ok: false,
+                message: "Uploads are disabled in the editor preview. Open the page to upload.",
+              });
+            if (!(a.file instanceof Blob)) return reply({ ok: false, message: "Choose a picture." });
+            const body = new FormData();
+            body.append("fieldId", str(a.fieldId, 80));
+            body.append("file", a.file);
+            return reply(await getJson(url, { method: "POST", body }));
+          }
         }
       }
       const form = forms.find((f) => f.viewId === data.form);
