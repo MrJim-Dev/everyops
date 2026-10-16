@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     );
   const overBudget = await startAiUsage(`account:${user.id}`);
   if (overBudget) return overBudget;
-  enterAiUsage(`account:${user.id}`);
+  enterAiUsage(`account:${user.id}`, { feature: "voice" });
   const mime = type.mime.replace(/^video\//, "audio/");
   const result = await transcribe(bytes, mime);
   return Response.json(result, { status: result.ok ? 200 : 502 });
