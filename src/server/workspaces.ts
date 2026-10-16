@@ -24,6 +24,7 @@ import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { inviteEmail } from "./emails";
 import { appUrl, sendMail } from "./mail";
+import { hasEndpoints, queueChanges, queueEvents, sendSoon } from "./webhooks";
 import {
   currentBlueprint,
   deleteRecords,
@@ -313,6 +314,7 @@ export async function patchWorkspace(
   let revs: Record<string, number> = {};
   let updated: DataRecord[] = [];
   let emailRuns: number[] = [];
+  let hooks = 0;
   try {
     await db.transaction().execute(async (trx) => {
       // One save at a time per workspace (public bookings take the same lock); each is a few rows now.
@@ -361,6 +363,14 @@ export async function patchWorkspace(
             count: 1,
             detail: `Version ${stored.currentVersion} → ${currentVersion}`,
           });
+        if (currentVersion !== stored.currentVersion)
+          hooks += await queueEvents(trx, slug, [
+            {
+              type: "change.applied",
+              recordType: null,
+              data: { fromVersion: stored.currentVersion, toVersion: currentVersion },
+            },
+          ]);
         await sql`update workspace set doc = ${JSON.stringify(metaFrom(patch.meta))}::jsonb where id = ${slug}`.execute(
           trx,
         );
@@ -400,9 +410,11 @@ export async function patchWorkspace(
         // Automations that fire on a save are logged (and their emails queued) with the save itself.
         const rulesBp = await currentBlueprint(trx, slug);
         const watching = fireOnSave(rulesBp);
+        // Webhooks need each changed record's previous values too (changed fields, status changes).
+        const hooked = await hasEndpoints(trx, slug);
         const editIds = puts.filter((p) => p.rev !== null).map((p) => p.record.id);
         const beforeEdit = new Map<string, DataRecord>();
-        if (watching && editIds.length) {
+        if ((watching || hooked) && editIds.length) {
           const { rows } = await sql<{ id: string; entity_id: string; data: DataRecord["data"] }>`
             select id, entity_id, data from workspace_record
             where workspace_id = ${slug} and id = any(${editIds}::text[])`.execute(trx);
@@ -418,10 +430,18 @@ export async function patchWorkspace(
         const deleteIds = patch.records.delete.map((d) => d.id);
         const deleting = deleteIds.length
           ? (
-              await sql<{ id: string; entity_id: string }>`
-                select id, entity_id from workspace_record
+              await sql<{ id: string; entity_id: string; data: DataRecord["data"] }>`
+                select id, entity_id, data from workspace_record
                 where workspace_id = ${slug} and id = any(${deleteIds}::text[])`.execute(trx)
-            ).rows.map((r) => ({ id: r.id, entityId: r.entity_id }))
+            ).rows.map(
+              (r): DataRecord => ({
+                id: r.id,
+                entityId: r.entity_id,
+                data: r.data,
+                createdAt: "",
+                updatedAt: "",
+              }),
+            )
           : [];
         const put = await putRecords(trx, slug, puts);
         const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, patch.records.delete))];
@@ -436,8 +456,19 @@ export async function patchWorkspace(
         await logActivity(trx, personActor(userId), recordEntries(slug, puts, deleting));
         // Records an import in this save added or changed are data that already happened: the browser didn't run
         // the save automations on them (applyImportOps), and neither does the server, so old bookings don't email.
+        // They don't send webhooks either, so a 2,000-row import doesn't flood an integration.
         const imported = importedIds(patch.changes);
         const watched = imported.size ? puts.filter((p) => !imported.has(p.record.id)) : puts;
+        if (hooked && rulesBp)
+          hooks += await queueChanges(trx, slug, rulesBp, [
+            ...watched
+              .filter((p) => p.rev === null || beforeEdit.has(p.record.id))
+              .map((p) => ({
+                before: p.rev === null ? undefined : beforeEdit.get(p.record.id),
+                after: p.record,
+              })),
+            ...deleting.map((d) => ({ before: d })),
+          ]);
         if (watching && rulesBp && watched.length) {
           const changes = watched.map((p) => ({ before: beforeEdit.get(p.record.id), after: p.record }));
           const records = (await readRecords(trx, slug)).map((s) => s.record);
@@ -542,6 +573,7 @@ export async function patchWorkspace(
     );
   }
   deliverSoon(emailRuns);
+  sendSoon(hooks);
   return { ok: true, revs, ...(updated.length ? { updated } : {}) };
 }
 
