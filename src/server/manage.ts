@@ -6,8 +6,10 @@ import type { DataRecord, Entity, FormView, Tone } from "@/lib/blueprint/types";
 import { isImagePath } from "@/lib/engine/records";
 import { autoReferenceFields } from "@/lib/engine/references";
 import { formatCell, publicFieldsOf, siteOf } from "@/lib/public/resolve";
+import { logActivity } from "./activity";
 import { db } from "./db";
 import { saveImage } from "./storage";
+import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
 
 /**
@@ -169,6 +171,7 @@ export async function attachToBooking(
   const url = await saveImage(claim.workspace, bytes);
   if (!url)
     return { ok: false, status: 415, message: "Upload a photo or screenshot (PNG, JPG, WebP or GIF)." };
+  let hooks = 0;
   const saved = await db.transaction().execute(async (trx) => {
     await sql`select 1 from workspace where id = ${claim.workspace} for update`.execute(trx);
     if (!(await currentBlueprint(trx, claim.workspace))) return false;
@@ -181,10 +184,23 @@ export async function attachToBooking(
     };
     const put = await putRecords(trx, claim.workspace, [{ record, rev: stored.rev }]);
     if (put.conflicts.length) return false;
+    hooks = await queueChanges(trx, claim.workspace, found.bp, [{ before: stored.record, after: record }]);
+    await logActivity(
+      trx,
+      { type: "booking_link", name: "Booking link" },
+      {
+        workspaceId: claim.workspace,
+        action: "record.update",
+        target: record.entityId,
+        ids: [record.id],
+        detail: `Added a picture (${fieldId})`,
+      },
+    );
     await sql`update workspace set updated_at = now() where id = ${claim.workspace}`.execute(trx);
     return true;
   });
   if (!saved) return { ok: false, status: 409, message: "Couldn't save it just now. Try again." };
+  sendSoon(hooks);
   const booking = await managedBooking(token);
   return booking.ok ? { ok: true, booking } : booking;
 }

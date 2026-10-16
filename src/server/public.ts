@@ -30,11 +30,13 @@ import {
 } from "@/lib/public/slots";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { dateKey } from "@/lib/time";
+import { logActivity, recordEntries } from "./activity";
 import { takeToken } from "./ai/rate-limit";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { managePath } from "./manage";
 import { saveImage } from "./storage";
+import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
 
 const ID = /^[a-z0-9][a-z0-9-]{1,79}$/;
@@ -390,6 +392,7 @@ export async function submitPublicForm(
 ): Promise<SubmitResult> {
   if (!ID.test(slug)) return { ok: false, status: 404, message: "This page doesn't exist." };
   let emailRuns: number[] = [];
+  let hooks = 0;
   const result: SubmitResult = await db.transaction().execute(async (trx): Promise<SubmitResult> => {
     // The same lock browser saves take, so revs stay put while the booking is checked and written.
     const { rows } = await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
@@ -416,6 +419,29 @@ export async function submitPublicForm(
     const saved = await putRecords(trx, slug, writes);
     if (saved.conflicts.length)
       throw new Error(`public submission conflicted on ${saved.conflicts.join(", ")}`);
+    hooks = await queueChanges(
+      trx,
+      slug,
+      bp,
+      writes.map((w) => ({ before: before.get(w.record.id)?.record, after: w.record })),
+      [
+        {
+          type: "public_form.submitted",
+          recordType: entity.id,
+          data: {
+            form: view.id,
+            formName: view.name,
+            recordType: entity.id,
+            record: { id: record.id, ...record.data },
+          },
+        },
+      ],
+    );
+    await logActivity(
+      trx,
+      { type: "public_form", id: view.id, name: view.name },
+      recordEntries(slug, writes),
+    );
     if (fireOnSave(bp))
       emailRuns = await logSaveRuns(
         trx,
@@ -462,6 +488,7 @@ export async function submitPublicForm(
     } as const;
   });
   deliverSoon(emailRuns);
+  sendSoon(hooks);
   return result;
 }
 

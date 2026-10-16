@@ -15,8 +15,10 @@ import {
 } from "@/lib/engine/automations";
 import { computeAll } from "@/lib/engine/compute";
 import type { RecordPut } from "@/lib/store/workspace-sync";
+import { logActivity, recordEntries } from "./activity";
 import { db } from "./db";
 import { sendMail } from "./mail";
+import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, putRecords, readRecords } from "./workspace-data";
 
 type Ex = Parameters<typeof readRecords>[0];
@@ -240,12 +242,14 @@ export async function runTimedAutomations(
       const done = await db.transaction().execute(async (trx) => {
         await sql`select 1 from workspace where id = ${id} for update`.execute(trx);
         const bp = await currentBlueprint(trx, id);
-        if (!bp || !bp.rules.some((r) => isOn(r) && isTimed(r))) return { runs: 0, pending: [] as number[] };
+        if (!bp || !bp.rules.some((r) => isOn(r) && isTimed(r)))
+          return { runs: 0, pending: [] as number[], hooks: 0 };
         const stored = await readRecords(trx, id);
         let records = stored.map((s) => s.record);
         const due = dueRuns(bp, records, now, { ruleId: options.ruleId, force: options.force });
         const ids: number[] = [];
         let count = 0;
+        const ran = new Map<string, { name: string; records: string[]; notes: string[] }>();
         for (const run of due) {
           const key = options.force ? `manual:${now.getTime()}:${run.key}` : run.key;
           const label = recordLabel(bp, run.record, records);
@@ -271,6 +275,10 @@ export async function runTimedAutomations(
             ? `Added ${outcome.created.length} record${outcome.created.length === 1 ? "" : "s"}.`
             : "";
           const detail = [added, ...outcome.notices].filter(Boolean).join(" ") || null;
+          const r = ran.get(run.rule.id) ?? { name: run.rule.name, records: [], notes: [] };
+          r.records.push(run.record.id);
+          if (detail) r.notes.push(detail);
+          ran.set(run.rule.id, r);
           await sql`update automation_run set
               status = ${outcome.emails.length ? "pending" : "done"},
               emails = ${outcome.emails.length ? JSON.stringify(outcome.emails) : null}::jsonb,
@@ -279,7 +287,7 @@ export async function runTimedAutomations(
             where id = ${runId}`.execute(trx);
           if (outcome.emails.length) ids.push(Number(runId));
         }
-        if (!count) return { runs: 0, pending: ids };
+        if (!count) return { runs: 0, pending: ids, hooks: 0 };
         const computed = computeAll(bp, records, now);
         const before = new Map(stored.map((s) => [s.record.id, s]));
         const writes = computed.flatMap((r): RecordPut[] => {
@@ -295,10 +303,46 @@ export async function runTimedAutomations(
             throw new Error(`automation write conflicted on ${saved.conflicts.join(", ")}`);
           await sql`update workspace set updated_at = now() where id = ${id}`.execute(trx);
         }
-        return { runs: count, pending: ids };
+        // Each automation that ran, then the records the pass changed, named after the automations.
+        for (const [ruleId, r] of ran)
+          await logActivity(
+            trx,
+            { type: "automation", id: ruleId, name: r.name },
+            {
+              workspaceId: id,
+              action: "automation.run",
+              target: r.name,
+              ids: r.records,
+              detail:
+                [options.force ? "Run now" : null, ...new Set(r.notes)]
+                  .filter(Boolean)
+                  .join(" ")
+                  .slice(0, 500) || null,
+            },
+          );
+        if (writes.length)
+          await logActivity(
+            trx,
+            {
+              type: "automation",
+              id: [...ran.keys()].join(","),
+              name: [...ran.values()].map((r) => r.name).join(", "),
+            },
+            recordEntries(id, writes),
+          );
+        const hooks = writes.length
+          ? await queueChanges(
+              trx,
+              id,
+              bp,
+              writes.map((w) => ({ before: before.get(w.record.id)?.record, after: w.record })),
+            )
+          : 0;
+        return { runs: count, pending: ids, hooks };
       });
       runs += done.runs;
       pending.push(...done.pending);
+      sendSoon(done.hooks);
     } catch (error) {
       console.error(JSON.stringify({ event: "automation_timed_error", workspace: id, error: String(error) }));
     }
