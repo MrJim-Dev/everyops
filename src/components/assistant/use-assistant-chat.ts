@@ -13,6 +13,7 @@ import { pickedNote } from "@/lib/assistant/picked";
 import type { Navigation, Screen } from "@/lib/assistant/screen";
 import { type BlockRef, useScreen } from "@/lib/assistant/screen-store";
 import { useCurrentUser } from "@/lib/auth/client";
+import type { OutsideAction } from "@/lib/connections";
 import type { ChangePlan } from "@/lib/engine/changes";
 import { markFresh } from "@/lib/motion/fresh";
 import { docKey } from "@/lib/public/resolve";
@@ -44,6 +45,7 @@ type Reply =
       navigate?: Navigation;
       sources?: Navigation[];
       evidence?: DataEvidence;
+      actions?: OutsideAction[];
       /** Notes this message added to the workspace's memory. */
       remembered?: string[];
       /** The workspace's permissions let this plan apply without anyone pressing Apply. */
@@ -261,6 +263,7 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
           ...(body.plan ? { plan: body.plan, planState: "pending" as const } : {}),
           ...(body.navigate ? { navigate: body.navigate } : {}),
           ...(body.evidence ? { evidence: body.evidence } : {}),
+          ...(body.actions?.length ? { actions: body.actions } : {}),
           ...(body.sources?.length ? { sources: body.sources } : {}),
           ...(body.remembered?.length ? { remembered: body.remembered } : {}),
         });
