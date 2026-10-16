@@ -151,6 +151,7 @@ type InterviewReply = {
     plan?: string[];
     workspaceName: string;
     brief: string;
+    base?: { id: string; name: string };
   };
 };
 
@@ -238,7 +239,7 @@ export function SetupInterview({
   }, [turns, phase, draft, failure, reviewing]);
 
   const design = useCallback(
-    async (history: ChatTurn[], brief: string, workspaceName: string) => {
+    async (history: ChatTurn[], brief: string, workspaceName: string, base?: string) => {
       setPhase("designing");
       setFailure(null);
       const result = await designWorkspace(
@@ -247,13 +248,14 @@ export function SetupInterview({
         brief,
         workspaceName,
         attachmentsIn(history).slice(-12),
+        base,
       );
       if (!alive.current) return;
       setPhase("idle");
       if (!result.ok)
         return setFailure({
           message: result.message,
-          retry: () => void design(history, brief, workspaceName),
+          retry: () => void design(history, brief, workspaceName, base),
         });
       setDraft(result.draft);
       setMessages(result.messages);
@@ -307,13 +309,19 @@ export function SetupInterview({
         text: turn.message,
         suggestions: turn.action === "ask" && turn.suggestions.length ? turn.suggestions : undefined,
         ...(turn.action === "ask" && turn.ask?.length ? { ask: turn.ask } : {}),
-        ...(turn.action === "design" ? { brief: turn.brief, workspaceName: turn.workspaceName } : {}),
+        ...(turn.action === "design"
+          ? {
+              brief: turn.brief,
+              workspaceName: turn.workspaceName,
+              ...(turn.base ? { base: turn.base.id } : {}),
+            }
+          : {}),
       };
       const next = [...history, reply];
       // The reply was read as it streamed in: it shows whole instead of typing itself out again.
       if (shown) seen.current = next.length;
       setMessages(next);
-      if (turn.action === "design") await design(next, turn.brief, turn.workspaceName);
+      if (turn.action === "design") await design(next, turn.brief, turn.workspaceName, turn.base?.id);
       else setPhase("idle");
     },
     [design],
@@ -326,7 +334,7 @@ export function SetupInterview({
     started.current = true;
     const last = messages.at(-1);
     if (last?.role === "user") void ask(messages, questions);
-    else if (last?.brief && !draft) void design(messages, last.brief, last.workspaceName ?? "");
+    else if (last?.brief && !draft) void design(messages, last.brief, last.workspaceName ?? "", last.base);
   }, [ask, design, messages, draft, questions]);
 
   const send = (text: string, withFiles = true) => {

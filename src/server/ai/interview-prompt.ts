@@ -152,6 +152,8 @@ Ask about each system the owner named (a POS and HR in one business means both l
   Booking businesses get a custom HTML landing page and a custom HTML booking page (EveryOps writes both), so the
   brief only lists the public booking form's steps, fields and add-ons. Name the community system you built on
   (by its id) in the brief when you used one; the plan, profile and message never show ids.
+  When the conversation comes with a "Starting point" (a community system EveryOps will adapt), the brief is short
+  and follows the Starting point's instructions instead: the facts, what to add, remove and rename.
   Your message then tells the owner in one or two sentences what you're building for them. Never mention the brief,
   the designer, blueprints or other internal steps.
 - Keep the profile up to date every turn. Write like a helpful colleague: short, plain, no jargon, no field ids.

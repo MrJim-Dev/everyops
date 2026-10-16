@@ -69,6 +69,8 @@ export function labelOf(build: DesignBuild, focus: SketchPage | undefined): stri
     return `Fixing ${build.issues === 1 ? "one issue" : `${build.issues ?? "a few"} issues`} the check found`;
   if (build.stage === "check") return "Checking the design against your requirements";
   if (build.stage === "finish") return "Adding sample records and arranging your Overview";
+  // The template route: the community system's pages are up from the start while Gemini adapts them.
+  if (build.from) return `Adapting ${build.from.name} to your business`;
   switch (build.sketch?.writing) {
     case "records": {
       const latest = build.sketch.recordTypes.at(-1);

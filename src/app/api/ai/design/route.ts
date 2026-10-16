@@ -11,6 +11,8 @@ const body = z.object({
   workspaceName: z.string().max(80).default(""),
   /** The files from the setup conversation, so real items and prices end up in the workspace. */
   attachments: z.array(attachmentRef).max(12).default([]),
+  /** The community system the interview chose to start from (the template route). */
+  base: z.string().max(80).optional(),
 });
 
 /**
@@ -47,6 +49,7 @@ export async function POST(request: Request) {
           files: { userId: user.id, attachments: parsed.data.attachments },
           onEvent: send,
           signal: request.signal,
+          ...(parsed.data.base ? { base: parsed.data.base } : {}),
         });
         if (result.ok)
           send({

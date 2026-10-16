@@ -20,6 +20,12 @@ export type Playbook = {
   ask: string;
   /** Community systems that are a good starting point. */
   references: string[];
+  /**
+   * Businesses only: the community system a setup can start from as it is, when the owner's description fits this
+   * playbook and nothing else. Setup then clones it and asks Gemini for the changes, instead of designing from
+   * scratch. Only where the system is the business's main shape (courts for court bookings), not a part of it.
+   */
+  base?: string;
   /** Systems only: skip this one when one of these playbooks (a business, or a better-matching system) already covers it. */
   unless?: string[];
 };
