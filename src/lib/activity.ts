@@ -38,6 +38,12 @@ export const ACTIONS = {
   "api.denied": "Was refused",
   "key.create": "Created API key",
   "key.revoke": "Revoked API key",
+  "domain.add": "Added domain",
+  "domain.remove": "Removed domain",
+  "connection.create": "Connected",
+  "connection.revoke": "Disconnected",
+  "outside.read": "Looked up",
+  "outside.action": "Ran outside action",
 } as const;
 export type Action = keyof typeof ACTIONS;
 

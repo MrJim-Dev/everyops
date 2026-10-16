@@ -1,11 +1,16 @@
 import "server-only";
 import type { Blueprint } from "@/lib/blueprint/types";
+import { splitToolName } from "@/lib/connections";
+import type { OutsideTools } from "../connections";
 import { generateJsonHedged } from "./gemini";
 import {
   describeTypes,
   LOOKUP_SYSTEM,
   lookupAnswer,
+  lookupAnswerWithActions,
   needsLookup,
+  OUTSIDE_WORDS,
+  outsideSystem,
   requiresLookupEvidence,
 } from "./lookup-prompt";
 import { type LookupCall, type LookupResult, lookupResult } from "./lookup-result";
@@ -25,14 +30,29 @@ export async function lookupData(input: {
   messages: { role: "user" | "assistant"; text: string }[];
   onStatus?: (text: string) => void;
   signal?: AbortSignal;
-}): Promise<LookupResult> {
+  /** Connected outside MCP servers' read tools (owners and admins only). */
+  outside?: OutsideTools | null;
+}): Promise<LookupResult & { proposals?: { tool: string; arguments: string; summary: string }[] }> {
   // Greetings, navigation and design changes need no records: skip the round instead of asking Gemini.
   const last = input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "";
-  if (!needsLookup(last)) {
+  const outside = input.outside;
+  if (!needsLookup(last) && !(outside && OUTSIDE_WORDS.test(last))) {
     console.info(JSON.stringify({ event: "lookup_skipped" }));
     return lookupResult(input.blueprint, [], true);
   }
-  const tools = recordTools(input.workspaceId, input.blueprint, input.onStatus);
+  const records = recordTools(input.workspaceId, input.blueprint, input.onStatus);
+  const tools = outside
+    ? {
+        ...records,
+        declarations: [...records.declarations, ...outside.declarations],
+        run: (name: string, args: Record<string, unknown>) => {
+          const split = splitToolName(name);
+          if (!split) return records.run(name, args);
+          input.onStatus?.(split.provider === "gmail" ? "Checking Gmail" : "Checking Google Calendar");
+          return outside.run(name, args);
+        },
+      }
+    : records;
   const prompt = `Today in Manila: ${input.today}
 
 Record types (field ids, option ids, links):
@@ -58,9 +78,11 @@ ${input.messages
       return result;
     };
     const result = await generateJsonHedged(
-      lookupAnswer,
+      outside ? lookupAnswerWithActions : lookupAnswer,
       {
-        system: LOOKUP_SYSTEM,
+        system: outside
+          ? LOOKUP_SYSTEM + outsideSystem(outside.providers, outside.proposable, outside.notes)
+          : LOOKUP_SYSTEM,
         prompt:
           prompt +
           (attempt
@@ -77,12 +99,23 @@ ${input.messages
       // then), so its twin starts then instead of after 20.
       { hedgeMs: 10_000, afterSilence: true, attempts: 2 },
     );
-    const complete = result.ok && (!requiresLookupEvidence(last) || log.length > 0);
+    // Outside writes the lookup proposed: saved for approval by the caller, never run here. A request for an outside
+    // change ("add a calendar event Saturday 8 AM") is complete with its proposal even though it read nothing.
+    const proposals =
+      result.ok && "actions" in result.data && Array.isArray(result.data.actions) ? result.data.actions : [];
+    const complete = result.ok && (!requiresLookupEvidence(last) || log.length > 0 || proposals.length > 0);
     const checked = lookupResult(input.blueprint, log, complete);
     console.info(
-      JSON.stringify({ event: "lookup_result", attempt, status: checked.status, calls: log.length }),
+      JSON.stringify({
+        event: "lookup_result",
+        attempt,
+        status: checked.status,
+        calls: log.length,
+        proposals: proposals.length,
+      }),
     );
-    if (checked.status !== "failed" || attempt === 1 || input.signal?.aborted) return checked;
+    if (checked.status !== "failed" || attempt === 1 || input.signal?.aborted)
+      return proposals.length ? { ...checked, proposals } : checked;
     previous = log;
   }
   return lookupResult(input.blueprint, [], false);

@@ -27,7 +27,13 @@ import { bookLabel, defaultCopy, mainForm, offeringOf, standardBlocks } from "./
 export const SITE_TOKEN = "__everyops_site__";
 
 /** The page's HTML with links to the workspace's own pages pointing at its real address. */
-export function withSiteLinks(html: string, slug: string): string {
+export function withSiteLinks(html: string, slug: string, customDomain = false): string {
+  // On the workspace's own domain its pages sit at the root: /s/TOKEN/rooms becomes /rooms, /s/TOKEN becomes /.
+  if (customDomain)
+    return html
+      .split(`/s/${SITE_TOKEN}/`)
+      .join("/")
+      .replace(new RegExp(`(["'(])/s/${SITE_TOKEN}(?=["')#?])`, "g"), "$1/");
   return html.split(`/s/${SITE_TOKEN}`).join(`/s/${slug}`);
 }
 

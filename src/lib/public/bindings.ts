@@ -8,6 +8,7 @@
  * here, so the frame never needs to know the shape of a layout, landing or table result. Every value is text a
  * visitor may already read; nothing here reaches records the source didn't publish.
  */
+import { publicHref } from "@/lib/domains";
 import type { Cell, PublicItem, ResolvedBlock } from "./resolve";
 
 /** One row as the bindings read it: fields by id, by lower-case name and by role (@title, @price, @1 …). */
@@ -202,7 +203,12 @@ export function itemsOf(result: unknown, block?: string): BoundList {
 }
 
 /** The site's pages as items for a shared menu: name, href (the page's address) and current ("true" on this page). */
-export function sitePageItems(site: SiteDetails, slug: string, current?: string): BoundList {
+export function sitePageItems(
+  site: SiteDetails,
+  slug: string,
+  current?: string,
+  customDomain = false,
+): BoundList {
   return list(
     site.pages.map((p, i) => ({
       id: p.id,
@@ -210,7 +216,7 @@ export function sitePageItems(site: SiteDetails, slug: string, current?: string)
         "@id": p.id,
         "@title": p.name,
         name: p.name,
-        href: i === 0 ? `/s/${slug}` : `/s/${slug}/${p.id}`,
+        href: publicHref(slug, i === 0 ? undefined : p.id, customDomain),
         current: p.id === current ? "true" : "",
       },
       rows: [],
@@ -220,7 +226,7 @@ export function sitePageItems(site: SiteDetails, slug: string, current?: string)
 }
 
 /** The site's details as the flat values data-everyops-text="site.…" reads. */
-export function siteValues(site: SiteDetails, slug: string): Record<string, string> {
+export function siteValues(site: SiteDetails, slug: string, customDomain = false): Record<string, string> {
   return {
     name: site.name,
     phone: site.phone ?? "",
@@ -228,8 +234,8 @@ export function siteValues(site: SiteDetails, slug: string): Record<string, stri
     address: site.address ?? "",
     hours: site.hours ?? "",
     contact: site.phone || site.email || site.address || site.hours ? "yes" : "",
-    home: `/s/${slug}`,
-    book: site.book ? `/s/${slug}/${site.book.id}` : "",
+    home: publicHref(slug, undefined, customDomain),
+    book: site.book ? publicHref(slug, site.book.id, customDomain) : "",
     bookLabel: site.book?.label ?? "",
   };
 }

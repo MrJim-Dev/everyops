@@ -5,7 +5,9 @@ import {
   ClockCounterClockwiseIcon,
   GearSixIcon,
   GlobeHemisphereWestIcon,
+  GlobeSimpleIcon,
   LightningIcon,
+  PlugsConnectedIcon,
   UsersThreeIcon,
   WebhooksLogoIcon,
 } from "@phosphor-icons/react";
@@ -29,6 +31,8 @@ export function SettingsLayout({ children }: { children: ReactNode }) {
     ...(canManage(ws.role)
       ? [
           { id: "publish", href: `${base}/publish`, label: "Publish", icon: GlobeHemisphereWestIcon },
+          { id: "domains", href: `${base}/domains`, label: "Domains", icon: GlobeSimpleIcon },
+          { id: "connections", href: `${base}/connections`, label: "Connections", icon: PlugsConnectedIcon },
           { id: "webhooks", href: `${base}/webhooks`, label: "Webhooks", icon: WebhooksLogoIcon },
           { id: "activity", href: `${base}/activity`, label: "Activity", icon: ClockCounterClockwiseIcon },
         ]

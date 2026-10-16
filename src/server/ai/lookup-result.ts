@@ -1,5 +1,7 @@
 import type { DataEvidence } from "@/lib/assistant/evidence";
 import type { Blueprint } from "@/lib/blueprint/types";
+import { PROVIDERS, splitToolName } from "@/lib/connections";
+import { overlapNote } from "./overlaps";
 
 export type LookupCall = { name: string; args: Record<string, unknown>; result: unknown };
 export type LookupResult = {
@@ -44,6 +46,22 @@ const OPERATORS: Record<string, string> = {
 };
 
 function describe(call: LookupCall, bp: Blueprint): DataEvidence["queries"][number] {
+  const outside = splitToolName(call.name);
+  if (outside) {
+    // "Google Calendar · list events", scoped by the dates or search it was asked for.
+    const a = call.args;
+    const scope = [
+      a.timeMin || a.startTime ? `From ${String(a.timeMin ?? a.startTime)}` : "",
+      a.timeMax || a.endTime ? `to ${String(a.timeMax ?? a.endTime)}` : "",
+      a.q || a.query ? `Search: ${String(a.q ?? a.query)}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return {
+      label: `${PROVIDERS[outside.provider].name} · ${outside.tool.replaceAll("_", " ")}`,
+      scope: scope || "As asked",
+    };
+  }
   const entity = bp.entities.find((e) => e.id === call.args.entityId || e.id === object(call.result).type);
   const fieldName = (id: unknown) => entity?.fields.find((f) => f.id === id)?.name ?? "Field";
   const metric = call.args.metric;
@@ -107,6 +125,8 @@ export function lookupResult(
     lines.push(line);
     size += line.length + 1;
   }
+  // Bookings checked against an outside calendar: the overlaps, worked out exactly.
+  const overlaps = overlapNote(bp, all);
   const status: DataEvidence["status"] =
     !ok || all.some((c) => !!object(c.result).error)
       ? "failed"
@@ -117,7 +137,7 @@ export function lookupResult(
           : "success";
   return {
     status,
-    text: `Lookup status: ${status}. Dates and date filters use Asia/Manila.\n${lines.join("\n")}`,
+    text: `Lookup status: ${status}. Dates and date filters use Asia/Manila.\n${lines.join("\n")}${overlaps ? `\n\n${overlaps}` : ""}`,
     evidence: {
       status,
       checkedAt: new Date().toISOString(),
