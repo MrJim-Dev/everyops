@@ -19,7 +19,7 @@ The vetted list lives in `src/lib/connections.ts`. Tools a server offers that ar
 ## Setup (once per Google project)
 
 1. Enable `calendar-json.googleapis.com` and `calendarmcp.googleapis.com` (done for `everyops-prod`), plus `gmail.googleapis.com` and `gmailmcp.googleapis.com` for Gmail. Google's MCP servers are in the Workspace Developer Preview.
-2. Add `https://everyops.app/api/connections/callback` and `http://localhost:3000/api/connections/callback` to the OAuth client's authorized redirect URIs.
+2. The OAuth client's authorized redirect URIs include `https://everyops.app/api/connections/callback` and `http://localhost:3000/api/connections/callback` (added for everyops-prod).
 3. Add the scopes in `PROVIDERS` to the consent screen's Data access list.
 
 ## Local checks
