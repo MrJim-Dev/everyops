@@ -6,6 +6,8 @@
  * them exactly like its own form does. A custom booking page also reads through it: EveryOps.form(id) (fields,
  * courts or rooms, add-ons and payment methods), EveryOps.slots(id, resource, day), EveryOps.days(id, resource, from,
  * count), EveryOps.quote(id, values, extras) and EveryOps.upload(id, file), all answered by the page around it.
+ * EveryOps.mine() and EveryOps.attach(fieldId, file) read and add a picture to the visitor's own booking when the page
+ * was opened from its manage link (?manage=TOKEN, see src/server/manage.ts).
  */
 import type { Blueprint, FieldValue, HtmlPageView } from "@/lib/blueprint/types";
 import { at } from "@/lib/time";
@@ -156,7 +158,9 @@ form:function(f){return call("form",f);},
 slots:function(f,resource,day){return call("slots",f,{resource:resource,date:day});},
 days:function(f,resource,from,count){return call("days",f,{resource:resource,from:from,count:count||42});},
 quote:function(f,values,extras){return call("quote",f,{values:values||{},extras:extras||{}});},
-upload:function(f,file){return call("upload",f,{file:file});}};
+upload:function(f,file){return call("upload",f,{file:file});},
+mine:function(token){return call("mine","",{token:token||""});},
+attach:function(fieldId,file,token){return call("attach","",{fieldId:fieldId,file:file,token:token||""});}};
 var picking=false,hovered=null,mark=null;
 function marker(){if(!mark){mark=document.createElement("div");mark.setAttribute("aria-hidden","true");mark.style.cssText="position:fixed;pointer-events:none;z-index:2147483647;border:2px solid #34c3a6;background:rgba(52,195,166,.12);border-radius:4px;display:none";}return mark;}
 function flat(t,n){return String(t||"").replace(/\\s+/g," ").trim().slice(0,n);}

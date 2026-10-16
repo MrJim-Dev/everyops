@@ -5,7 +5,7 @@ import type { AskQuestion, ChatTurn, SetupQuestion } from "@/lib/store/workspace
 import { promptWithFiles } from "./attachments";
 import { generateJsonHedged } from "./gemini";
 import { INTERVIEW_SYSTEM, INTERVIEW_TEXT_LIMITS, type Turn, turn } from "./interview-prompt";
-import { referencesText, setupReferences } from "./references";
+import { referencesText, setupReferences, setupRoute, startingPointText } from "./references";
 import {
   askAgainMessage,
   askList,
@@ -19,6 +19,8 @@ export type InterviewTurn = Omit<Turn, "questions"> & {
   questions: SetupQuestion[];
   ask: AskQuestion[];
   suggestions: string[];
+  /** The community system setup starts from (the template route), for the design request. */
+  base?: { id: string; name: string };
 };
 export type InterviewResult = { ok: true; turn: InterviewTurn } | { ok: false; message: string };
 
@@ -62,7 +64,13 @@ export async function interviewTurn(
     .map((m) => m.text)
     .join("\n");
   const refs = await setupReferences(said);
-  const references = referencesText(refs);
+  // The route decides what the interview is for: adapting a community system takes a few facts and the differences;
+  // a design from playbooks or from scratch takes the full brief.
+  const route = setupRoute(said, refs);
+  const startFrom = route.tier === "template" ? route.base : undefined;
+  const references = startFrom
+    ? `${referencesText({ ...refs, systems: [] })}\n\n${startingPointText(startFrom)}`
+    : referencesText(refs);
   const named = (s: string) => withSystemNames(s, refs.systems);
   const base = await promptWithFiles(
     userId,
@@ -150,6 +158,7 @@ export async function interviewTurn(
         ask: [],
         profile: t.profile.slice(0, 12).map((p) => ({ ...p, value: named(p.value) })),
         plan: t.plan.slice(0, 8).map(named),
+        ...(startFrom ? { base: { id: startFrom.id, name: startFrom.name } } : {}),
       };
       const open = openRequired(questions);
       if (t.action === "design" && open.length) {

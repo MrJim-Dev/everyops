@@ -31,4 +31,19 @@ describe("needsLookup", () => {
     ])
       expect(needsLookup(text), text).toBe(true);
   });
+
+  it("treats setting up an automation as a design change, even with times and statuses in it", () => {
+    for (const text of [
+      "Every Monday at 8 AM, email each player with an unpaid booking a reminder to pay.",
+      "Email the player the day before their booking at 6 PM",
+      "Turn off the Chase unpaid bookings automation",
+      "Send a reminder 3 days after the due date if the invoice is still unpaid",
+    ])
+      expect(needsLookup(text), text).toBe(false);
+    for (const text of [
+      "How many reminders did the automation send today?",
+      "Which unpaid bookings will the daily reminder email?",
+    ])
+      expect(needsLookup(text), text).toBe(true);
+  });
 });

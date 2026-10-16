@@ -44,12 +44,31 @@ import {
   designPatch,
   designRequest,
   PATCH_INSTRUCTIONS,
+  TEMPLATE_INSTRUCTIONS,
 } from "./design-prompt";
 import { type SetupGap, salvage, widgetProblems } from "./design-salvage";
+import {
+  fewSamples,
+  noProgress,
+  rebindTemplateSamples,
+  seedDesign,
+  seedForPrompt,
+  type TemplateSeed,
+  templateChecks,
+  withBriefHours,
+  withTemplateForms,
+} from "./design-template";
 import { generateJsonHedged } from "./gemini";
 import { withOverviewLayout } from "./overview-layout";
-import { referencesText, setupReferences } from "./references";
-import { fillEmptySamples } from "./samples";
+import {
+  communitySystem,
+  referencesText,
+  type SetupReferences,
+  type SetupRoute,
+  setupReferences,
+  setupRoute,
+} from "./references";
+import { fillEmptySamples, writeTemplateSamples } from "./samples";
 
 const SLOT_MINUTES = [15, 30, 60, 90, 120] as const;
 const pick = <T extends object>(source: T, keys: (keyof T)[]) =>
@@ -732,10 +751,7 @@ function extraChecks(bp: Blueprint, brief: string): string[] {
   const entityIds = new Set(bp.entities.map((e) => e.id));
   if (!bp.systems.length) errors.push("The workspace has no systems.");
   // The brief is the plan the owner agreed to; a public booking page it lists can't be left out.
-  if (
-    asksFor(brief, /public (booking|order|request|inquiry|reservation|form)|booking page|book online/gi) &&
-    !bp.views.some((v) => v.type === "form" && v.public)
-  )
+  if (asksFor(brief, PUBLIC_PAGE_ASK) && !bp.views.some((v) => v.type === "form" && v.public))
     errors.push("The brief asks for a public page customers use, but no form view has public true.");
   // Same for a register: a POS without one is just tables of orders. Only "POS" or "point of sale" asks for one: a
   // finance tracker's "Cashier / Manager" field and a "Cash Register" account type each cost repair rounds that
@@ -753,6 +769,86 @@ function extraChecks(bp: Blueprint, brief: string): string[] {
         errors.push(`${e.name}.${f.id}: rollup uses a missing record type`);
   }
   return errors;
+}
+
+const PUBLIC_PAGE_ASK = /public (booking|order|request|inquiry|reservation|form)|booking page|book online/gi;
+
+/**
+ * Account numbers, phones and emails in configuration records (a GCash account) only when the brief gives them:
+ * Gemini fills a payment method with a made-up "0917 123 4567" otherwise, which looks real enough to be trusted.
+ * The owner adds the real one on the record. Same rule as the website's contact details.
+ */
+export function withoutInventedContacts(
+  samples: Design["samples"],
+  design: Pick<Design, "entities">,
+  brief: string,
+): Design["samples"] {
+  return samples.map((s) => {
+    const entity = design.entities.find((e) => e.id === s.entityId);
+    if (!entity) return s;
+    return {
+      ...s,
+      values: s.values.filter((v) => {
+        const field = entity.fields.find((f) => f.id === v.fieldId);
+        if (!field || (field.type !== "text" && field.type !== "long_text")) return true;
+        if (
+          !/account_?(no|num|number)|phone|mobile|contact|email|gcash_?(no|number)/i.test(
+            `${field.id} ${field.name}`,
+          )
+        )
+          return true;
+        return givenIn(brief, v.value);
+      }),
+    };
+  });
+}
+
+/**
+ * A brief that asks for a public booking page gets one even when every form came back private, which the designer
+ * and a template patch each do now and then: the booking record type's form (else the only form) is copied as a
+ * public form without the fields a visitor can't set (statuses, how the booking was made), on the same page.
+ * tidy then asks visitors for a name and a phone and shows the payment methods, and the custom booking page is
+ * built from it, so the check doesn't cost a repair round.
+ */
+export function ensurePublicForm(bp: Blueprint, brief: string): Blueprint {
+  const forms = bp.views.filter((v): v is Extract<View, { type: "form" }> => v.type === "form");
+  if (forms.some((f) => f.public) || !asksFor(brief, PUBLIC_PAGE_ASK)) return bp;
+  const booking = bp.entities.find((e) => e.booking);
+  const source =
+    forms.find((f) => booking && f.entityId === booking.id) ?? (forms.length === 1 ? forms[0] : null);
+  const entity = source && bp.entities.find((e) => e.id === source.entityId);
+  if (!source || !entity || entity.parent) return bp;
+  const staffOnly = new Set(
+    entity.fields
+      .filter(
+        (f) =>
+          f.type === "status" || f.type === "person" || /^(source|booked_via|channel|cashier)$/.test(f.id),
+      )
+      .map((f) => f.id),
+  );
+  const taken = new Set(bp.views.map((v) => v.id));
+  let id = `${source.id}_public`;
+  for (let n = 2; taken.has(id); n++) id = `${source.id}_public_${n}`;
+  const steps = source.steps
+    ?.map((s) => ({ ...s, fieldIds: s.fieldIds.filter((f) => !staffOnly.has(f)) }))
+    .filter((s) => s.fieldIds.length || s.extras || s.blockIds?.length);
+  const { steps: _steps, review: _review, intro: _intro, submitLabel: _label, ...rest } = source;
+  const copy: Extract<View, { type: "form" }> = {
+    ...rest,
+    id,
+    name: "Book online",
+    public: true,
+    fieldIds: source.fieldIds.filter((f) => !staffOnly.has(f)),
+    ...(steps?.length ? { steps, review: true } : {}),
+  };
+  console.info(JSON.stringify({ event: "design_public_form_added", from: source.id, id }));
+  return {
+    ...bp,
+    views: [...bp.views, copy],
+    systems: bp.systems.map((s) =>
+      s.viewIds.includes(source.id) ? { ...s, viewIds: [...s.viewIds, id] } : s,
+    ),
+  };
 }
 
 const toIso = (v: string) => {
@@ -874,6 +970,24 @@ const EXAMPLES = (() => {
     .join("\n\n");
 })();
 
+/**
+ * The example blueprints the designer follows. A design built from playbooks gets the matched community systems
+ * (the shapes closest to this business, official ones only); a custom design, the standard pair. The template
+ * route needs none: the design it starts from is the example.
+ */
+export function examplesFor(route: SetupRoute, refs: SetupReferences): string {
+  if (route.tier === "template") return "";
+  if (route.tier === "playbook") {
+    const picked = refs.systems
+      .filter((s) => s.official)
+      .map((s) => JSON.stringify(s.blueprint))
+      .filter((json) => json.length <= 30_000)
+      .slice(0, 2);
+    if (picked.length) return picked.join("\n\n");
+  }
+  return EXAMPLES;
+}
+
 export type DesignResult =
   | {
       ok: true;
@@ -898,7 +1012,7 @@ function asGap(error: string): SetupGap {
 const DESIGN_BUDGET_MS = 220_000;
 
 export type DesignProgress =
-  | { type: "stage"; stage: DesignStage; issues?: number }
+  | { type: "stage"; stage: DesignStage; issues?: number; from?: { id: string; name: string } }
   | { type: "sketch"; sketch: DesignSketch };
 
 export type DesignOptions = {
@@ -909,6 +1023,8 @@ export type DesignOptions = {
   /** Stops the design, e.g. when the owner closes the page. */
   signal?: AbortSignal;
   budgetMs?: number;
+  /** The community system the interview chose to start from (its id); otherwise the brief decides the route. */
+  base?: string;
 };
 
 /**
@@ -934,11 +1050,29 @@ export function applyDesignPatch(
     return out;
   };
   const design = structuredClone(previous);
+  // A record type a patch returns keeps the fields it leaves out, and its settings (bookable resource hours, booking
+  // and line-item links) when the patch leaves those out too: a patch that renames a court must not turn the court
+  // into a plain record type.
   design.entities = merge(design.entities, patch.entities, (old, next) => ({
     ...next,
     fields: merge(old.fields, next.fields),
+    ...(next.resource || !old.resource ? {} : { resource: old.resource }),
+    ...(next.booking || !old.booking ? {} : { booking: old.booking }),
+    ...(next.parent || !old.parent ? {} : { parent: old.parent }),
   })).map((e) => ({ ...e, fields: e.fields.filter((f) => !removed.has(`${e.id}.${f.id}`)) }));
-  design.views = merge(design.views, patch.views);
+  // A view a patch returns (to rename it, say) keeps the content it leaves out: a custom page's HTML, a landing
+  // page's sections, a document's starter text. Without this a retitled home page came back empty.
+  design.views = merge(design.views, patch.views, (old, next) => {
+    if (old.type !== next.type) return next;
+    const o = old as { html?: string; blocks?: unknown[]; starter?: string };
+    const n = next as { html?: string; blocks?: unknown[]; starter?: string };
+    return {
+      ...next,
+      ...(n.html || !o.html ? {} : { html: o.html }),
+      ...(n.blocks?.length || !o.blocks?.length ? {} : { blocks: o.blocks }),
+      ...(n.starter || !o.starter ? {} : { starter: o.starter }),
+    } as typeof next;
+  });
   design.widgets = merge(design.widgets, patch.widgets);
   design.rules = merge(design.rules, patch.rules);
   design.systems = merge(design.systems, patch.systems).map((s) => ({
@@ -971,6 +1105,23 @@ export async function designWorkspace(
   const budget = AbortSignal.timeout(options.budgetMs ?? DESIGN_BUDGET_MS);
   const signal = options.signal ? AbortSignal.any([budget, options.signal]) : budget;
   const stats = { calls: 0, repairs: 0, output: 0 };
+  // What businesses like this one need and how similar community systems are built, and from that the route: a
+  // template to adapt, a design guided by the matched systems, or a custom design.
+  const refs: SetupReferences = await setupReferences(brief).catch(() => ({ playbooks: [], systems: [] }));
+  const chosen = options.base
+    ? (refs.systems.find((s) => s.id === options.base) ??
+      (await communitySystem(options.base).catch(() => undefined)))
+    : undefined;
+  const route: SetupRoute = chosen ? { tier: "template", base: chosen } : setupRoute(brief, refs);
+  const from = route.base ? { id: route.base.id, name: route.base.name } : undefined;
+  console.info(
+    JSON.stringify({
+      event: "design_route",
+      tier: route.tier,
+      ...(from ? { from: from.id } : {}),
+      playbooks: refs.playbooks.map((p) => p.id),
+    }),
+  );
   const done = (result: DesignResult): DesignResult => {
     console.info(
       JSON.stringify({
@@ -980,6 +1131,8 @@ export async function designWorkspace(
         calls: stats.calls,
         repairs: stats.repairs,
         output: stats.output,
+        tier: route.tier,
+        ...(from ? { from: from.id } : {}),
         ...(result.ok ? {} : { reason: result.message }),
       }),
     );
@@ -992,11 +1145,12 @@ export async function designWorkspace(
         ? "Designing this one took too long, so I stopped. Try again, or leave out a detail or two."
         : error,
     });
-  // What businesses like this one need and how similar community systems are built; the designer fills gaps from it.
-  const references = referencesText(
-    await setupReferences(brief).catch(() => ({ playbooks: [], systems: [] })),
-  );
-  const context = `Examples:\n${EXAMPLES}\n\nToday in Manila: ${todayKey(now)}\nWorkspace name: ${workspaceName || "choose one"}\n\nBrief:\n${brief}\n\nReferences:\n${references}`;
+  // The designer fills gaps from the references. On the template route the design it starts from stands in for
+  // the community descriptions and the examples.
+  const references = referencesText(route.tier === "template" ? { ...refs, systems: [] } : refs);
+  const examples = examplesFor(route, refs);
+  const facts = `Today in Manila: ${todayKey(now)}\nWorkspace name: ${workspaceName || "choose one"}\n\nBrief:\n${brief}\n\nReferences:\n${references}`;
+  const context = `${examples ? `Examples:\n${examples}\n\n` : ""}${facts}`;
   // The owner's files go with the first request; a repair works from the previous design, which already used them.
   const fileParts = files ? await attachmentParts(files.userId, files.attachments) : [];
   const prompt: string | Part[] = fileParts.length
@@ -1006,6 +1160,24 @@ export async function designWorkspace(
         { text: "Design the workspace from the brief, using these files for real names, items and prices." },
       ]
     : context;
+  /** The template route's prompt: the facts, then the design to start from and how to adapt it. */
+  const templatePrompt = (seed: TemplateSeed, base: { id: string; name: string }): string | Part[] => {
+    const must = seed.master
+      .map((id) => seed.design.entities.find((e) => e.id === id))
+      .filter((e): e is Design["entities"][number] => !!e)
+      .map((e) => `${e.pluralName} (${e.id})`);
+    const start = `${facts}\n\nStarting design: the community system "${base.name}" (${base.id}), a working workspace for a business like this one, with a few of its sample records per record type (the rest follow the same shape):\n${JSON.stringify(seedForPrompt(seed.design))}\n\n${TEMPLATE_INSTRUCTIONS}${
+      must.length
+        ? `\n- The starting sample records belong to another business. You must return the complete sample records of: ${must.join(", ")}, written from the brief (this owner's real names, counts, prices and accounts), with the same refs where a record stays and new refs for new ones.`
+        : ""
+    }`;
+    return fileParts.length
+      ? [{ text: start }, ...fileParts, { text: "Use these files for the real names, items and prices." }]
+      : start;
+  };
+  /** The template the design started from, when it did: its form settings come back on the built form, and its
+   * configuration records must have been replaced. */
+  let seedRef: TemplateSeed | null = null;
 
   // The setup screen draws the design while it's written: a sketch of the answer so far, a few times a second, from
   // whichever hedged twin is furthest along.
@@ -1032,23 +1204,28 @@ export async function designWorkspace(
   /** The last whole design that was rejected: a repair's patch applies to it. */
   let previous: { entities: number; views: number; data: Design; flagged: Set<string> } | null = null;
   let errors: string[] = [];
+  /** The problems the last round was given, to tell a repair that changed nothing. */
+  let lastErrors: string[] = [];
   type Built = { data: Design; samples: Design["samples"]; name: string; bp: Blueprint; advisory: string[] };
   type Candidate = { built: Built; coverage: SetupGap[]; gaps: SetupGap[] };
   /** The design that validated with the fewest shortfalls so far, and the last one that didn't validate. */
   let best: Candidate | null = null;
   let lastBroken: Built | null = null;
-  const finish = async ({ built, coverage, gaps }: Candidate): Promise<DesignResult> => {
-    const { data, samples, name, bp } = built;
+  /** The final touches that don't depend on the review: samples for empty record types and the Overview layout. */
+  const prepare = ({ bp, samples, name }: Built) =>
+    Promise.all([fillEmptySamples(bp, samples, now), withOverviewLayout(bp, name, brief, now)]);
+  const finish = async (
+    { built, coverage, gaps }: Candidate,
+    prepared: ReturnType<typeof prepare> = prepare(built),
+  ): Promise<DesignResult> => {
+    const { data, name, bp } = built;
     if (gaps.length)
       console.info(JSON.stringify({ event: "design_gaps", gaps: gaps.map((g) => g.request).slice(0, 15) }));
     show(sketchOf(bp, true));
     onEvent?.({ type: "stage", stage: "finish" });
     // Record types the design left without samples (line items, most often) get theirs from one small call, while
     // the Overview becomes a layout of library components (when that step fails the template layout stays).
-    const [filled, laidOut] = await Promise.all([
-      fillEmptySamples(bp, samples, now),
-      withOverviewLayout(bp, name, brief, now),
-    ]);
+    const [filled, laidOut] = await prepared;
     // Samples in the wrong year (the right month and day, but 2023) move to this year.
     const dated = samplesThisYear(laidOut, toRecords(laidOut, filled, now), now);
     if (dated.fields) console.info(JSON.stringify({ event: "design_samples_moved", fields: dated.fields }));
@@ -1099,43 +1276,119 @@ export async function designWorkspace(
     let designed: Design;
     let removed = new Set<string>();
     if (!previous) {
-      onEvent?.({ type: "stage", stage: "design" });
-      // Designs take 8–40 s on 3.5 Flash and 60–150 s on 3.7 Flash, longer when Vertex is busy. A call is judged by
-      // whether its answer keeps streaming, not by the clock: one that has said nothing for 20 s gets a parallel twin,
-      // one silent for 15 s mid-answer (60 s before its first part, while it thinks) is stopped and retried. A call
-      // that runs away (see runawayWatcher) is stopped within seconds and replaced. Real designs are 2–16k tokens;
-      // the cap leaves room, because an answer cut off at the cap is thrown away whole.
-      stats.calls++;
-      const result = await generateJsonHedged(
-        designRequest,
-        {
-          system: DESIGN_SYSTEM,
-          prompt,
-          task: "design",
-          timeoutMs: 170_000,
-          idleMs: 15_000,
-          firstPartMs: 60_000,
-          thinking: "LOW",
-          maxOutputTokens: 24_000,
-          enumLiterals: true,
-          signal,
-          onText,
-        },
-        { hedgeMs: 20_000, attempts: 4, afterSilence: true },
-      );
-      if (!result.ok) return settle(result.error);
-      stats.output += result.tokens.output;
-      designed = result.data;
+      onEvent?.({ type: "stage", stage: "design", ...(from ? { from } : {}) });
+      let seeded: Design | null = null;
+      if (route.tier === "template" && route.base && round === 0) {
+        // The template route: the community system for this kind of business, with its sample records, is the
+        // design; Gemini writes the changes that make it the owner's. The patch is a few thousand tokens where a
+        // design is ten thousand or more, and its structure already validates. The template's pages show at once.
+        const seed = seedDesign(route.base, workspaceName, now);
+        seedRef = seed;
+        show(sketchOf(seed.design, true));
+        // Two calls side by side: the structural patch, and this business's configuration records (its courts,
+        // products, payment methods) written from the brief by a small call with a schema that requires them. The
+        // patch call was asked for those records too and left them out more often than not.
+        stats.calls += seed.master.length ? 2 : 1;
+        const [result, config] = await Promise.all([
+          generateJsonHedged(
+            designPatch,
+            {
+              system: DESIGN_SYSTEM,
+              prompt: templatePrompt(seed, route.base),
+              task: "design-template",
+              timeoutMs: 120_000,
+              idleMs: 15_000,
+              firstPartMs: 60_000,
+              thinking: "LOW",
+              maxOutputTokens: 12_000,
+              enumLiterals: true,
+              signal,
+            },
+            { hedgeMs: 20_000, attempts: 3, afterSilence: true },
+          ),
+          seed.master.length
+            ? writeTemplateSamples(
+                toBlueprint(seed.design),
+                seed.design.samples,
+                seed.master,
+                brief,
+                now,
+                signal,
+              )
+            : Promise.resolve<Design["samples"]>([]),
+        ]);
+        if (result.ok) {
+          stats.output += result.tokens.output;
+          const applied = applyDesignPatch(seed.design, result.data);
+          let next = rebindTemplateSamples(seed.design, applied.design, result.data);
+          // The configuration records replace the template's (and whatever the patch wrote for those types).
+          const given = config && withoutInventedContacts(config, seed.design, brief);
+          if (given?.length)
+            next = rebindTemplateSamples(
+              next,
+              { ...next, samples: [...next.samples, ...given] },
+              { samples: given },
+            );
+          seeded = withBriefHours(seed.design, next, brief);
+          console.info(
+            JSON.stringify({
+              event: "design_template_patched",
+              from: route.base.id,
+              entities: (result.data.entities ?? []).map((e) => `${e.id}${e.resource ? "*" : ""}`),
+              views: result.data.views?.length ?? 0,
+              samples: result.data.samples?.length ?? 0,
+              config: config?.length ?? null,
+              removed: [...applied.removed],
+            }),
+          );
+          show(sketchOf(seeded, true));
+        } else if (!result.retryable || signal.aborted) {
+          return settle(result.error);
+        } else {
+          // A patch that never came back: the design is written from scratch instead, as on the other routes.
+          console.warn(
+            JSON.stringify({ event: "design_template_fallback", from: route.base.id, reason: result.error }),
+          );
+          seedRef = null;
+        }
+      }
+      if (seeded) designed = seeded;
+      else {
+        // Designs take 8–40 s on 3.5 Flash and 60–150 s on 3.7 Flash, longer when Vertex is busy. A call is judged by
+        // whether its answer keeps streaming, not by the clock: one that has said nothing for 20 s gets a parallel
+        // twin, one silent for 15 s mid-answer (60 s before its first part, while it thinks) is stopped and retried.
+        // A call that runs away (see runawayWatcher) is stopped within seconds and replaced. Real designs are 2–16k
+        // tokens; the cap leaves room, because an answer cut off at the cap is thrown away whole.
+        stats.calls++;
+        const result = await generateJsonHedged(
+          designRequest,
+          {
+            system: DESIGN_SYSTEM,
+            prompt,
+            task: "design",
+            timeoutMs: 170_000,
+            idleMs: 15_000,
+            firstPartMs: 60_000,
+            thinking: "LOW",
+            maxOutputTokens: 24_000,
+            enumLiterals: true,
+            signal,
+            onText,
+          },
+          { hedgeMs: 20_000, attempts: 4, afterSilence: true },
+        );
+        if (!result.ok) return settle(result.error);
+        stats.output += result.tokens.output;
+        designed = result.data;
+      }
     } else {
       stats.repairs++;
       onEvent?.({ type: "stage", stage: "fix", issues: errors.length });
       stats.calls++;
-      // The large design schema can repeatedly omit optional choices. A tiny required schema repairs them directly.
+      // The large design schema can repeatedly omit optional choices. A tiny required schema repairs them directly,
+      // on any repair: a later patch that turned a formula back into a status once left it with placeholder stages.
       let choices: DesignPatch | null = null;
-      if (
-        round === 1 &&
-        errors.some((e) => e.startsWith("Brief coverage:") && /options|choices|stages/i.test(e))
-      ) {
+      if (errors.some((e) => e.startsWith("Brief coverage:") && /options|choices|stages|statuses/i.test(e))) {
         const result = await generateJsonHedged(
           choiceRepairAnswer,
           {
@@ -1161,7 +1414,13 @@ export async function designWorkspace(
           designPatch,
           {
             system: DESIGN_SYSTEM,
-            prompt: `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour design:\n${JSON.stringify(previous.data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\n\n${PATCH_INSTRUCTIONS}`,
+            // On the template route the repair's samples replace a record type's, since the template's records
+            // are another business's; elsewhere samples are only for record types the repair adds.
+            prompt: `Today in Manila: ${todayKey(now)}\n\nBrief:\n${brief}\n\nYour design:\n${JSON.stringify(seedRef ? seedForPrompt(previous.data, 4) : previous.data)}\n\nIt has these problems:\n- ${errors.slice(0, 20).join("\n- ")}\n\n${PATCH_INSTRUCTIONS}${
+              seedRef
+                ? "\n- Exception on this design: sample records you return for a record type replace all of that record type's. For a record type whose records are still the starting system's, return its complete set from the brief."
+                : ""
+            }`,
             task: "design-fix",
             timeoutMs: 120_000,
             idleMs: 30_000,
@@ -1176,10 +1435,12 @@ export async function designWorkspace(
         if (!result.ok) return settle(result.error);
         stats.output += result.tokens.output;
         ({ design: designed, removed } = applyDesignPatch(previous.data, result.data));
+        // On the template route a repair's samples replace that record type's, as the first patch's do.
+        if (seedRef) designed = rebindTemplateSamples(previous.data, designed, result.data);
       }
     }
     const build = (data: Design) => {
-      const raw = toBlueprint(data);
+      const raw = ensurePublicForm(withTemplateForms(toBlueprint(data), seedRef?.forms ?? new Map()), brief);
       const samples = mergeDateAndSlot(raw, data.samples);
       const name = data.workspaceName || workspaceName;
       const bp = ensurePages(
@@ -1195,7 +1456,7 @@ export async function designWorkspace(
         ...widgetProblems(bp).map((p) => p.message),
         ...partial,
       ];
-      const advisory = extraChecks(bp, brief);
+      const advisory = [...extraChecks(bp, brief), ...(seedRef ? templateChecks(seedRef, data) : [])];
       const errors = [...structural, ...advisory];
       return { data, samples, name, bp, partial, errors, structural, advisory };
     };
@@ -1226,11 +1487,19 @@ export async function designWorkspace(
     if (sound) {
       onEvent?.({ type: "stage", stage: "check" });
       stats.calls++;
+      // On the template route the structure is the community system's and a repair is the exception, so the final
+      // touches start while the review runs; a review that does ask for a repair leaves them unused.
+      const early = route.tier === "template" && !previous ? prepare(built) : null;
+      early?.catch(() => undefined);
       const checked = await reviewCoverage({
         blueprint: bp,
         plan: { request: brief, title: name, facts: [], steps: [], ops: [] },
         conversation: "New workspace setup. The brief contains the owner's requirements.",
-        lookup: `Planned sample records (illustrative, not live business records): ${JSON.stringify(samples)}`,
+        lookup:
+          "Planned sample records (illustrative, not live business records) are in the evidence map as sample:<ref>, up to eight per record type.",
+        // Up to eight samples per record type: every court, product and payment method, without a season of
+        // bookings (a template's) to read.
+        samples: fewSamples(samples, 8),
         today: todayKey(now),
         signal,
         mode: "setup",
@@ -1247,8 +1516,16 @@ export async function designWorkspace(
       }
       const candidate: Candidate = { built, coverage: checked?.covered ?? [], gaps };
       if (!best || gaps.length <= best.gaps.length) best = candidate;
-      if (!errors.length) return finish(candidate);
+      if (!errors.length) return finish(candidate, early ?? undefined);
+      if (early) console.info(JSON.stringify({ event: "design_early_finish_unused", from: route.base?.id }));
     }
+    // A repair that left every problem it was given in place would most likely come back the same again: the
+    // design is handed over now (the best one, with its gaps) instead of after another call.
+    if (previous && noProgress(lastErrors, errors)) {
+      console.warn(JSON.stringify({ event: "design_no_progress", round, errors: errors.slice(0, 10) }));
+      return settle("The repair didn't fix what the check found.");
+    }
+    lastErrors = errors;
     console.warn(JSON.stringify({ event: "design_rejected", round, errors: errors.slice(0, 15) }));
     if (!partial.length)
       previous = {

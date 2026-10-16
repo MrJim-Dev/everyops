@@ -30,7 +30,9 @@ import {
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { dateKey } from "@/lib/time";
 import { takeToken } from "./ai/rate-limit";
+import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
+import { managePath } from "./manage";
 import { saveImage } from "./storage";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
 
@@ -350,7 +352,14 @@ export async function quotePublicForm(
 }
 
 export type SubmitResult =
-  | { ok: true; reference: string; title: string; summary: { name: string; text: string }[] }
+  | {
+      ok: true;
+      reference: string;
+      title: string;
+      summary: { name: string; text: string }[];
+      /** A link to this booking for the visitor (/b/TOKEN): its status, details and a picture to add later. */
+      manage?: string;
+    }
   | { ok: false; status: number; message: string; fieldErrors?: { fieldId?: string; message: string }[] };
 
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : undefined);
@@ -369,7 +378,8 @@ export async function submitPublicForm(
   rawExtras: Record<string, unknown> = {},
 ): Promise<SubmitResult> {
   if (!ID.test(slug)) return { ok: false, status: 404, message: "This page doesn't exist." };
-  return db.transaction().execute(async (trx) => {
+  let emailRuns: number[] = [];
+  const result: SubmitResult = await db.transaction().execute(async (trx): Promise<SubmitResult> => {
     // The same lock browser saves take, so revs stay put while the booking is checked and written.
     const { rows } = await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
     const bp = rows.length ? await currentBlueprint(trx, slug) : undefined;
@@ -395,6 +405,16 @@ export async function submitPublicForm(
     const saved = await putRecords(trx, slug, writes);
     if (saved.conflicts.length)
       throw new Error(`public submission conflicted on ${saved.conflicts.join(", ")}`);
+    if (fireOnSave(bp))
+      emailRuns = await logSaveRuns(
+        trx,
+        slug,
+        bp,
+        writes.map((w) => ({ before: before.get(w.record.id)?.record, after: w.record })),
+        data.records,
+        "booking",
+        now,
+      );
     await sql`update workspace set updated_at = now() where id = ${slug}`.execute(trx);
     const shown = entity.fields.filter(
       (f) =>
@@ -411,6 +431,7 @@ export async function submitPublicForm(
           .map((f) => record.data[f.id])
           .find((v): v is string => typeof v === "string" && !!v) ?? record.id.slice(-6).toUpperCase(),
       title: recordTitle(entity, record),
+      manage: managePath({ workspace: slug, view: view.id, record: record.id }, now),
       summary: [
         ...shown
           .filter((f) => f.type !== "money" && !(f.type === "formula" && f.formula?.resultType === "money"))
@@ -429,6 +450,8 @@ export async function submitPublicForm(
       ],
     } as const;
   });
+  deliverSoon(emailRuns);
+  return result;
 }
 
 /**

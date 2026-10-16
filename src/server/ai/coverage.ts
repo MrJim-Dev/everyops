@@ -20,8 +20,21 @@ export async function reviewCoverage(input: {
   today: string;
   signal?: AbortSignal;
   mode?: "setup" | "change";
+  /**
+   * Setup: the planned sample records, in the evidence map as sample:<ref> so the reviewer can cite the court,
+   * product or payment method a requirement is met by. Pasted as text they were cited anyway, and failed.
+   */
+  samples?: { ref: string; entityId: string; values: { fieldId: string; value: string }[] }[];
 }) {
-  const refs = coverageEvidence(input.blueprint, input.plan);
+  const refs: Record<string, unknown> = {
+    ...coverageEvidence(input.blueprint, input.plan),
+    ...Object.fromEntries(
+      (input.samples ?? []).map((s) => [
+        `sample:${s.ref}`,
+        { entity: s.entityId, ...Object.fromEntries(s.values.map((v) => [v.fieldId, v.value])) },
+      ]),
+    ),
+  };
   const result = await generateJsonHedged(
     coverageAnswer,
     {
@@ -42,7 +55,12 @@ export async function reviewCoverage(input: {
     { hedgeMs: 12_000, afterSilence: true, attempts: 2 },
   );
   if (!result.ok) return null;
-  const checked = checkedCoverage(result.data, refs, changedReferences(input.blueprint, input.plan));
+  const checked = checkedCoverage(
+    result.data,
+    refs,
+    changedReferences(input.blueprint, input.plan),
+    input.mode === "setup",
+  );
   console.info(
     JSON.stringify({
       event: "request_coverage",

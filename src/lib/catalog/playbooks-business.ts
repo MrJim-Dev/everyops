@@ -23,6 +23,7 @@ export const BUSINESS_PLAYBOOKS: Playbook[] = [
   sessions if they run them; Overview with bookings today, revenue, utilization and unpaid bookings.`,
     ask: "Number of courts and hours, rates (and when they change), what they rent or sell, how customers pay.",
     references: ["court-bookings"],
+    base: "court-bookings",
   },
   {
     id: "spaces",
@@ -38,6 +39,7 @@ export const BUSINESS_PLAYBOOKS: Playbook[] = [
   this week, revenue, busy hours heatmap.`,
     ask: "Spaces and capacity, hourly or daily rates, passes or memberships, add-ons.",
     references: ["court-bookings"],
+    base: "court-bookings",
   },
   {
     id: "salon",
@@ -85,6 +87,7 @@ export const BUSINESS_PLAYBOOKS: Playbook[] = [
   Overview with occupancy, revenue and balances due.`,
     ask: "Units and capacity, nightly rates and when they change, down payment rule, add-ons offered.",
     references: ["rental-operations"],
+    base: "rental-operations",
   },
   {
     id: "food",
@@ -101,6 +104,7 @@ export const BUSINESS_PLAYBOOKS: Playbook[] = [
 - Overview with sales today, best sellers and low stock; daily expenses if they track them.`,
     ask: "Menu with prices (a photo of the menu helps), dine-in/takeout/delivery, whether customers order online.",
     references: ["canteen-pos"],
+    base: "canteen-pos",
   },
   {
     id: "retail",
@@ -115,6 +119,7 @@ export const BUSINESS_PLAYBOOKS: Playbook[] = [
 - Utang (credit) per customer if mentioned; Overview with sales, profit, top products and low stock.`,
     ask: "What they sell and roughly how many products, whether they sell online, delivery or pickup, credit.",
     references: ["canteen-pos"],
+    base: "canteen-pos",
   },
   {
     id: "laundry",
@@ -143,6 +148,7 @@ export const BUSINESS_PLAYBOOKS: Playbook[] = [
   payment; Overview with units out today, returns due and revenue.`,
     ask: "Units and daily rates, with or without driver, deposit and requirements, delivery.",
     references: ["rental-operations"],
+    base: "rental-operations",
   },
   {
     id: "fitness",
@@ -293,6 +299,7 @@ export const BUSINESS_PLAYBOOKS: Playbook[] = [
 - Public inquiry page for vacancies; Overview with occupancy, rent due this month and overdue tenants.`,
     ask: "Units or beds and rent, how utilities are billed, deposit and advance rules.",
     references: ["rental-operations"],
+    base: "rental-operations",
   },
   {
     id: "realestate",
