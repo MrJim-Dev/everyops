@@ -32,6 +32,8 @@ export type ChatTurn = {
   /** Set on the turn where Gemini decided to design, so an interrupted design can resume. */
   brief?: string;
   workspaceName?: string;
+  /** With brief: the community system the design starts from. */
+  base?: string;
 };
 export type ProfileLine = { label: string; value: string };
 /** One question on Ask EveryOps's setup checklist. Required ones are asked again until the owner answers them. */

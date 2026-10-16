@@ -28,9 +28,14 @@ export function emptyTypes(bp: Blueprint, samples: Sample[]): Entity[] {
     .slice(0, 8);
 }
 
-/** What Gemini needs to write them: each record type's fields, and the sample records they can link to. */
-export function samplesPrompt(bp: Blueprint, samples: Sample[], empty: Entity[], now: Date): string {
-  const filling = new Set(empty.map((e) => e.id));
+/** Each record type's fields as prompt lines, with the sample records a link can point at. */
+function typeBlocks(
+  bp: Blueprint,
+  samples: Sample[],
+  types: Entity[],
+  how: (e: Entity, parent: Entity | undefined) => string,
+): string[] {
+  const filling = new Set(types.map((e) => e.id));
   const titleOf = (s: Sample) => {
     const entity = bp.entities.find((e) => e.id === s.entityId);
     return s.values.find((v) => v.fieldId === entity?.primaryFieldId)?.value ?? s.ref;
@@ -54,15 +59,91 @@ export function samplesPrompt(bp: Blueprint, samples: Sample[], empty: Entity[],
       return `- ${f.id} (time_range ${f.range === "dates" ? "of dates" : "of date-times"}${req})`;
     return `- ${f.id} (${f.type}${req})`;
   };
-  const blocks = empty.map((e) => {
+  return types.map((e) => {
     const parent = e.parent ? bp.entities.find((x) => x.id === e.parent?.entityId) : undefined;
-    const how = parent
-      ? `line items of ${parent.name}: 2 to 3 under each of the first 3 ${parent.pluralName.toLowerCase()} listed in ${e.parent?.fieldId}`
-      : "3 records";
     const fields = e.fields.filter((f) => !SKIP.includes(f.type)).map(describe);
-    return `${e.id} "${e.pluralName}" (${how}):\n${fields.join("\n")}`;
+    return `${e.id} "${e.pluralName}" (${how(e, parent)}):\n${fields.join("\n")}`;
   });
+}
+
+/** What Gemini needs to write them: each record type's fields, and the sample records they can link to. */
+export function samplesPrompt(bp: Blueprint, samples: Sample[], empty: Entity[], now: Date): string {
+  const blocks = typeBlocks(bp, samples, empty, (e, parent) =>
+    parent
+      ? `line items of ${parent.name}: 2 to 3 under each of the first 3 ${parent.pluralName.toLowerCase()} listed in ${e.parent?.fieldId}`
+      : "3 records",
+  );
   return `Today in Manila: ${todayKey(now)}\nWorkspace: ${bp.workspaceName}\n\nWrite sample records for these record types, which have none yet:\n\n${blocks.join("\n\n")}`;
+}
+
+/**
+ * The template route: the records that are this business's configuration (its courts, products and categories,
+ * payment methods, rates), written from the brief to replace the template's. Each type's whole set, every one the
+ * brief names, counts or prices.
+ */
+export function templateSamplesPrompt(
+  bp: Blueprint,
+  samples: Sample[],
+  types: Entity[],
+  brief: string,
+  now: Date,
+): string {
+  const blocks = typeBlocks(
+    bp,
+    samples.filter((s) => !types.some((t) => t.id === s.entityId)),
+    types,
+    () => "the complete set this business has, from the brief",
+  );
+  return `Today in Manila: ${todayKey(now)}\nWorkspace: ${bp.workspaceName}\n\nBrief (the owner's own words and answers):\n${brief}\n\nThis workspace starts from a template built for another business. Write this business's own records for these record types, replacing the template's: every court, room, unit, product, service, add-on, category, rate or payment method the brief names, counts or prices (a brief that says "4 courts" gets 4 courts; "paddle rental ₱100, balls ₱150" gets those two products with those prices; "GCash" gets a GCash payment method with the account details the brief gives, and none it doesn't). Use the brief's real names; where it gives only a count, number them (Court 1, Court 2…). Set rates, prices, hours and active flags from the brief.\n\n${blocks.join("\n\n")}`;
+}
+
+/**
+ * Writes the configuration records for a template's master record types from the brief, in one small call beside
+ * the structural patch. Returns null when the call fails; the template check then sends the design back for a repair.
+ */
+export async function writeTemplateSamples(
+  bp: Blueprint,
+  samples: Sample[],
+  typeIds: string[],
+  brief: string,
+  now: Date,
+  signal?: AbortSignal,
+): Promise<Sample[] | null> {
+  const types = bp.entities.filter((e) => typeIds.includes(e.id));
+  if (!types.length) return [];
+  const started = Date.now();
+  const result = await generateJsonHedged(
+    answer,
+    {
+      system: SAMPLES_SYSTEM,
+      prompt: templateSamplesPrompt(bp, samples, types, brief, now),
+      task: "design-template-samples",
+      timeoutMs: 60_000,
+      idleMs: 12_000,
+      firstPartMs: 20_000,
+      thinking: "LOW",
+      maxOutputTokens: 8_000,
+      signal,
+    },
+    { hedgeMs: 10_000, attempts: 3, afterSilence: true },
+  );
+  if (!result.ok) {
+    console.warn(
+      JSON.stringify({ event: "design_template_samples_failed", types: typeIds, error: result.error }),
+    );
+    return null;
+  }
+  const allowed = new Set(typeIds);
+  const written = result.data.samples.filter((s) => allowed.has(s.entityId) && s.values.length).slice(0, 60);
+  console.info(
+    JSON.stringify({
+      event: "design_template_samples",
+      types: [...new Set(written.map((s) => s.entityId))],
+      records: written.length,
+      ms: Date.now() - started,
+    }),
+  );
+  return written;
 }
 
 const SAMPLES_SYSTEM = `You write realistic sample records for a Filipino small business's workspace, so its screens and totals aren't empty on day one.

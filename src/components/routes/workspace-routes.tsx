@@ -84,7 +84,6 @@ export function AskRoute() {
   if (workspace?.setup) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <PageHeader title="Ask EveryOps" description="Set up your workspace" className="border-b pb-3" />
         <SetupInterview
           prompt={workspace.setup.prompt}
           attachments={workspace.setup.attachments}

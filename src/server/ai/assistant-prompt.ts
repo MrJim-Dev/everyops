@@ -22,6 +22,40 @@ import { HTML_CAPABILITIES } from "./html-capabilities";
  * are added with add_block, and formula cards live in one plan-level list.
  */
 type AnyObject = z.ZodObject<z.ZodRawShape>;
+
+/**
+ * Automations as the assistant writes them: setup's rule with timed triggers, emails and new records. The answer
+ * schema is near Gemini's structural limit (a larger one was refused with INVALID_ARGUMENT), so nothing is added:
+ * event and type become strings, and to, fieldId and value carry the new parts (see toAssistantRule).
+ */
+export const assistantRule = rule.extend({
+  trigger: rule.shape.trigger.extend({
+    event: z.string().describe("created, updated, status_changed, schedule or date_reached"),
+    to: z
+      .string()
+      .optional()
+      .describe(
+        'status_changed: the option id it changed to. schedule: "daily 08:00", "weekly mon 09:00", "monthly 1 08:00". date_reached (fieldId is the date): "-1 08:00" is the day before at 8 AM, "0 07:00" the day itself, "3 10:00" three days after',
+      ),
+  }),
+  actions: z.array(
+    rule.shape.actions.element.extend({
+      type: z.string().describe("set_field, adjust_number, notify, send_email or create_record"),
+      fieldId: z
+        .string()
+        .optional()
+        .describe(
+          "set_field/adjust_number: the field it changes. send_email: who to email, {{email_field}} or an address. create_record: the record type it adds",
+        ),
+      value: z
+        .string()
+        .optional()
+        .describe(
+          'set_field: formula for the new value. send_email: the email, its subject on the first line and the message after it. create_record: JSON of field id to formula on the trigger record, e.g. {"amount":"price"}',
+        ),
+    }),
+  ),
+});
 // A new hero gets its line from the standard site template; changing it is a section edit (renames, "Text: …").
 // Writing it here, deep inside the ops list, is where Gemini looped: every attempt for "a booking form with a
 // landing page" ran on in the subheading until it was stopped.
@@ -205,7 +239,7 @@ export const designOp = z.union([
     metric: metric.optional(),
     target: z.number().optional().describe("Progress only"),
   }),
-  z.object({ op: z.literal("add_rule"), rule }),
+  z.object({ op: z.literal("add_rule"), rule: assistantRule }),
   z.object({
     op: z.literal("move_view"),
     viewId: z.string().describe("The view (tab) to move"),
@@ -459,6 +493,19 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   keeps them in step with edits and deletes; never adjust_number on updated. set_field computes a value instead
   (target self, value "quantity * product.cost"). Automations only act on records saved after they exist, so when
   records they should have counted are already there, also update_record the totals and say so in the reply.
+- Timed automations and emails: "every morning", "each Monday", "on the 1st" is trigger event schedule with
+  to "daily 08:00", "weekly mon 08:00" or "monthly 1 08:00"; it runs for every record of the trigger's type
+  that matches when (e.g. status == "unpaid"). "The day before a booking", "3 days after the due date" is
+  date_reached with fieldId the date and to "-1 08:00" or "3 09:00" (days from the date, then the time). Times
+  are Manila time; pick a sensible hour when none is said. send_email emails someone: fieldId is who, a
+  {{field}} holding an address ({{email}}, or {{player.email}} through a link) or a fixed address the person
+  gave; value is the email, its subject on the first line and the message after it, with {{field}}
+  placeholders such as {{name}}, {{date}}, {{court.name}}. Only email addresses the records or the person
+  provide; if the record type has no email field, add one first. create_record adds a record of another type:
+  fieldId is that record type and value is JSON of its field ids to formulas on the trigger record, e.g.
+  {"amount":"price"}; its link back to the trigger record is filled in by itself. Owners turn automations on
+  and off in Settings → Automations; when asked to turn one off, tell them to switch it off there (don't
+  remove it unless they ask to delete it).
 - Pages: each sidebar page is a system; its views are the tabs on that page. A new page for something that already
   exists ("a separate page for courts", "give the calendar its own page") is add_system plus add_view (a new view
   of that record type) or move_view (move an existing tab there; the old page keeps its other tabs). Give every

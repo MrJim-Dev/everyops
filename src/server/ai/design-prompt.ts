@@ -518,6 +518,32 @@ export const PATCH_INSTRUCTIONS = `Return only what changes, as a patch:
   section id). Delete only what a problem needs.
 - Sample records only for record types you add.`;
 
+/**
+ * The template route: the design to start from is a community system for this kind of business, and Gemini returns
+ * the changes that make it this owner's. Same patch shape as a repair, with samples replaced per record type.
+ */
+export const TEMPLATE_INSTRUCTIONS = `Make the starting design this business's, as a patch:
+- Put in what the brief gives: the real courts, rooms, units, services or products with their real prices and hours
+  (as the complete set of sample records of that record type, replacing the starting ones), the opening hours and
+  slot length on resources, the payment methods the owner named, the statuses the owner uses.
+- A booking business: always return the bookable record type (courts, rooms, units) with its resource settings set
+  to the brief's opening hours and slot length (opensAt, closesAt, slotMinutes), even when nothing else about it
+  changes, and its rate fields or rate records set to the brief's prices.
+- Add what the brief asks for that the starting design lacks (record types, fields, statuses, pages and tabs, a
+  public form in steps with add-ons, payment methods, rules, dashboard cards), following the references and the
+  starting design's conventions. Keep what the business will obviously use even if the brief doesn't mention it.
+- Remove what this business doesn't do (remove, by id). Rename what the owner calls differently (return the item
+  whole with the same id and the new name).
+- Sample records: only for record types whose records change or are new, and then the complete set for that record
+  type (all 6 courts, every menu item), with realistic Filipino names and PHP amounts dated around today. Records
+  of other types that linked to replaced ones are re-linked for you; leave them out unless they change too.
+- Return only what changes, as a patch:
+  - Each record type, view, widget, rule or sidebar section you change or add, whole, with its id. A record type
+    you return keeps any of its fields you leave out, so return only the fields you change or add.
+  - Leave everything else out: it stays exactly as it is.
+  - Ids to delete go in remove ("court" for a record type, "court.notes" for a field, or a view, widget, rule or
+    section id).`;
+
 /** How public pages, payments and FAQs are built. Shared by the designer and the workspace assistant. */
 export const PUBLIC_PAGES_GUIDE = `Public pages (customers use them without an account, at /s/<workspace>/<view>):
 - A public form is a form view with public true, e.g. a public booking page. Visitors see only its fields; statuses

@@ -18,6 +18,9 @@ export function completeAction(bp: Blueprint, rule: Rule, action: Action): Actio
   const source = entity(rule.trigger.entityId);
   if (!source) return undefined;
   if (action.type === "notify") return action.message.trim() ? action : undefined;
+  if (action.type === "send_email") return action.to.trim() && action.subject.trim() ? action : undefined;
+  if (action.type === "create_record")
+    return bp.entities.some((e) => e.id === action.entityId) ? action : undefined;
   let target = action.target;
   let targetEntity: Entity | undefined = source;
   if (target.kind === "relation") {

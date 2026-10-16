@@ -86,6 +86,12 @@ export function checkedCoverage(
   answer: CoverageAnswer,
   refs: Record<string, unknown>,
   changed = new Set<string>(),
+  /**
+   * Setup: a requirement counts as covered when at least one of its references is real. The reviewer of a new
+   * design cites sample record ids beside the real ones now and then, and each such slip cost a repair round for
+   * something the design had.
+   */
+  lenient = false,
 ) {
   const covered: { request: string; detail: string }[] = [];
   // The requirements a repair has to add, in the person's words, to tell them if the repair can't.
@@ -107,7 +113,8 @@ export function checkedCoverage(
       errors.push(`${item.request}: ${item.detail}`);
       continue;
     }
-    if (!item.evidence.length || item.evidence.some((id) => !Object.hasOwn(refs, id))) {
+    const real = item.evidence.filter((id) => Object.hasOwn(refs, id));
+    if (!real.length || (!lenient && real.length < item.evidence.length)) {
       missing.push(item.request);
       errors.push(`${item.request}: supply real evidence for this requirement.`);
       continue;

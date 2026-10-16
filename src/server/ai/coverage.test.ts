@@ -69,6 +69,21 @@ describe("request coverage gate", () => {
         ).errors,
       ).toHaveLength(1);
   });
+  it("for a new design, accepts a requirement with one real reference beside a slip, never one with none", () => {
+    const check = (evidence: string[]) =>
+      checkedCoverage(
+        {
+          preserve: [],
+          requirements: [{ request: "Add notes", status: "covered", evidence, detail: "Done" }],
+        },
+        refs,
+        new Set(),
+        true,
+      );
+    expect(check(["ops:0", "sample:court_1"]).covered).toHaveLength(1);
+    expect(check(["sample:court_1"]).errors).toHaveLength(1);
+    expect(check([]).errors).toHaveLength(1);
+  });
   it("requires clarification instead of approving a guessed record", () => {
     const checked = checkedCoverage(
       {

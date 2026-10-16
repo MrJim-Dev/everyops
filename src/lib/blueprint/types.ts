@@ -429,16 +429,48 @@ export type Target = { kind: "self" } | { kind: "relation"; fieldId: string };
 export type Action =
   | { type: "set_field"; target: Target; fieldId: string; value: string }
   | { type: "adjust_number"; target: Target; fieldId: string; delta: string }
-  | { type: "notify"; message: string };
+  | { type: "notify"; message: string }
+  /**
+   * Emails someone, sent by the server after the record is saved (or when a timed automation runs). to, subject
+   * and body are text with {{field}} placeholders, which can go through links ({{player.email}}).
+   */
+  | { type: "send_email"; to: string; subject: string; body: string }
+  /**
+   * Adds a record of another type, e.g. an invoice when a booking is confirmed. values maps its field ids to
+   * formulas read on the triggering record; a link back to the triggering record's type is filled in by itself.
+   */
+  | { type: "create_record"; entityId: string; values: Record<string, string> };
+
+/** When a timed automation runs, in Manila time. */
+export type RuleSchedule = {
+  every: "day" | "week" | "month";
+  /** "HH:MM", 24-hour. */
+  at: string;
+  /** every week: 0 = Sunday … 6 = Saturday. */
+  weekday?: number;
+  /** every month: day 1 to 28. */
+  monthDay?: number;
+};
 
 export type Rule = {
   id: string;
   name: string;
+  /** Off when false: the automation stays in the design but does nothing. */
+  enabled?: boolean;
   trigger: {
     entityId: string;
-    event: "created" | "updated" | "status_changed";
+    /**
+     * created / updated / status_changed run when a record is saved. schedule runs at set times for every record
+     * that matches when. date_reached runs once per record, offsetDays from its date field (fieldId), at at.
+     */
+    event: "created" | "updated" | "status_changed" | "schedule" | "date_reached";
     fieldId?: string;
     to?: string;
+    schedule?: RuleSchedule;
+    /** date_reached: days after the date (negative is before, -1 is the day before). */
+    offsetDays?: number;
+    /** date_reached: the time of day it runs, "HH:MM" (default 08:00). */
+    at?: string;
   };
   when?: string;
   actions: Action[];

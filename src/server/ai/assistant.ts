@@ -72,9 +72,10 @@ import {
   assistantAnswer,
   designOp,
 } from "./assistant-prompt";
+import { toAssistantRule } from "./assistant-rule";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
 import { reviewCoverage } from "./coverage";
-import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toRule, toView } from "./design";
+import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toView } from "./design";
 import { view } from "./design-prompt";
 import { dataDigest } from "./digest";
 import { generateJsonHedged } from "./gemini";
@@ -499,7 +500,7 @@ export function toDesignOps(
         else errors.push(`${at}: needs system`);
         break;
       case "add_rule":
-        if (o.rule) ops.push({ op: "add_rule", rule: toRule(o.rule) });
+        if (o.rule) ops.push({ op: "add_rule", rule: toAssistantRule(o.rule) });
         else errors.push(`${at}: needs rule`);
         break;
       case "move_view":

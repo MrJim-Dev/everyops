@@ -287,7 +287,10 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
 }
 
 const NUMERIC = new Set(["number", "money", "percent"]);
-const list = (fields: Field[]) => fields.map((f) => f.id).join(", ") || "none";
+const list = (items: { id: string }[]) => items.map((f) => f.id).join(", ") || "none";
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const resolvesPath = (bp: Blueprint, entity: Entity, ref: string) =>
+  !walkPath(bp, entity, ref.split(".")).error;
 
 /**
  * An automation must do something real: each change points at a link of the record that triggers it and a field
@@ -297,6 +300,36 @@ const list = (fields: Field[]) => fields.map((f) => f.id).join(", ") || "none";
 function checkRule(bp: Blueprint, source: Entity, rule: Rule, path: string, errors: ValidationError[]) {
   const say = (message: string) => errors.push({ path, message: `Automation "${rule.name}": ${message}` });
   const t = rule.trigger;
+  if (!["created", "updated", "status_changed", "schedule", "date_reached"].includes(t.event))
+    say(`"${t.event}" isn't a trigger; use created, updated, status_changed, schedule or date_reached`);
+  if (t.event === "schedule") {
+    const s = t.schedule;
+    if (!s || !["day", "week", "month"].includes(s.every))
+      say("schedule needs trigger.schedule.every: day, week or month");
+    else {
+      if (!HHMM.test(s.at ?? "")) say('schedule needs trigger.schedule.at, a 24-hour time such as "08:00"');
+      if (
+        s.every === "week" &&
+        !(Number.isInteger(s.weekday) && (s.weekday as number) >= 0 && (s.weekday as number) <= 6)
+      )
+        say("a weekly schedule needs weekday, 0 (Sunday) to 6 (Saturday)");
+      if (
+        s.every === "month" &&
+        !(Number.isInteger(s.monthDay) && (s.monthDay as number) >= 1 && (s.monthDay as number) <= 28)
+      )
+        say("a monthly schedule needs monthDay, 1 to 28");
+    }
+  }
+  if (t.event === "date_reached") {
+    const date = source.fields.find((f) => f.id === t.fieldId);
+    if (!date || !["date", "datetime", "time_range"].includes(date.type))
+      say(
+        `date_reached needs trigger.fieldId, a date of ${source.name} (dates: ${list(source.fields.filter((f) => ["date", "datetime", "time_range"].includes(f.type)))})`,
+      );
+    if (t.offsetDays !== undefined && (!Number.isInteger(t.offsetDays) || Math.abs(t.offsetDays) > 365))
+      say("offsetDays is a whole number of days, -365 to 365");
+    if (t.at !== undefined && !HHMM.test(t.at)) say('at is a 24-hour time such as "08:00"');
+  }
   if (t.event === "status_changed") {
     const status = source.fields.find((f) => f.id === t.fieldId);
     if (!status || (status.type !== "status" && status.type !== "select"))
@@ -310,6 +343,32 @@ function checkRule(bp: Blueprint, source: Entity, rule: Rule, path: string, erro
   for (const action of rule.actions) {
     if (action.type === "notify") {
       if (!action.message.trim()) say("the notice has no message");
+      continue;
+    }
+    if (action.type === "send_email") {
+      if (!action.to.trim())
+        say("the email has no recipient; to is an address or a {{field}} that holds one");
+      if (!action.subject.trim()) say("the email has no subject");
+      if (!action.body.trim()) say("the email has no message");
+      for (const text of [action.to, action.subject, action.body])
+        for (const m of text.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g))
+          if (!resolvesPath(bp, source, m[1]))
+            say(`{{${m[1]}}} isn't a field of ${source.name} (fields: ${list(source.fields)})`);
+      continue;
+    }
+    if (action.type === "create_record") {
+      const made = bp.entities.find((e) => e.id === action.entityId);
+      if (!made) {
+        say(`create_record needs entityId, a record type (record types: ${list(bp.entities)})`);
+        continue;
+      }
+      for (const [fieldId, expr] of Object.entries(action.values ?? {})) {
+        const field = made.fields.find((f) => f.id === fieldId);
+        if (!field) say(`${made.name} has no field "${fieldId}" (fields: ${list(made.fields)})`);
+        else if (field.type === "formula" || field.type === "rollup")
+          say(`${made.name}'s ${field.name} is calculated, so an automation can't set it`);
+        else checkExpr(bp, source, expr, path, errors);
+      }
       continue;
     }
     let target = source;
