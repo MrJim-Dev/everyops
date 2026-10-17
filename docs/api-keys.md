@@ -4,7 +4,7 @@ Account → **API keys** makes keys for scripts, integrations and AI agents. The
 
 - **Secret:** `eo_live_<8-char id>_<32 random chars>`, shown once after creating it. Only a SHA-256 hash is stored, looked up by hash on each request; secrets never reach logs.
 - **Scope:** every workspace the account can open (including new ones), or a chosen list. A workspace outside the list answers 404, so a key can't tell which workspaces exist.
-- **Permissions:** `records:read`, `records:write`, `pages:read`, `pages:write`, `design:propose`, `mcp`.
+- **Permissions:** `records:read`, `records:write`, `pages:read`, `pages:write`, `design:propose`, `design:apply` (apply Ask EveryOps design plans), `manage` (memory, activity log, team, run automations), `mcp`. `design:propose`, `design:apply` and `manage` work only for owners and admins.
 - **Role cap:** a key never does more than its owner's current role in a workspace (`allowedIn`): write permissions need staff or above, design proposals need admin or above. Demoting the owner takes effect on the key's next request; if the owner leaves a workspace, the key can't reach it.
 - **Lifetime:** 30, 90 or 365 days, or no expiry. Revoking stops the key on its next request. Last use (time and IP) shows on the account page, updated at most once a minute.
 - **Limits:** 25 active keys per account; 120 requests a minute per key (`API_KEY_RATE_LIMIT`), shared across instances.

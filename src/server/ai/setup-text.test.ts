@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { SetupQuestion } from "@/lib/store/workspace-model";
 import {
   askAgainMessage,
   askList,
+  erpChecklist,
+  keepPartsFirst,
   mergeQuestions,
   openRequired,
   questionsMissing,
@@ -68,3 +71,70 @@ describe("setup checklist", () => {
     expect(askAgainMessage([courts])).toMatch(/one answer.*It's below\.$/);
   });
 });
+
+describe("an ERP's checklist", () => {
+  const q = (id: string, question: string, options: string[] = [], answer = ""): SetupQuestion => ({
+    id,
+    question,
+    required: true,
+    answer,
+    options,
+  });
+  const ids = (list: SetupQuestion[]) => list.map((x) => x.id);
+
+  it("asks what the business does first, alone and with nothing recommended, when the owner didn't say", () => {
+    // What Gemini asked for "I need an ERP.", Trading recommended.
+    const asked = [
+      q("business_type", "What type of business do you run?", ["Trading or wholesale", "Manufacturing", "Services"]),
+      q("business_name", "What is the name of your business?", ["Pick a name for me"]),
+      q("core_ops", "Which key operations do you need to manage most urgently?", ["Sales and inventory"]),
+    ];
+    const { questions, kindFirst } = erpChecklist(asked);
+    expect(kindFirst).toBe("business_type");
+    const cards = askList(questions, [kindFirst ?? ""]).filter((x) => x.id === kindFirst);
+    expect(cards).toEqual([expect.objectContaining({ id: "business_type", neutral: true })]);
+    // The rest of the ERP's questions wait on the checklist.
+    expect(ids(questions)).toEqual(expect.arrayContaining(["erp_stock", "erp_purchasing", "erp_production"]));
+  });
+
+  it("adds the question itself when Gemini didn't ask it", () => {
+    const { questions, kindFirst } = erpChecklist([q("business_name", "What is the name of your business?")]);
+    expect(kindFirst).toBe("erp_kind");
+    expect(questions.find((x) => x.id === "erp_kind")).toMatchObject({ required: true, neutral: true });
+  });
+
+  it("doesn't ask a described business what it does, and keeps a maker's stock and production in", () => {
+    const asked = [
+      q("stock", "Do you want to track raw materials like flour and sugar?", [
+        "Finished goods only",
+        "Raw materials and finished goods",
+      ]),
+      q("suppliers", "Who supplies your flour and do you send purchase orders?", ["Yes, with purchase orders"]),
+    ];
+    const { questions, kindFirst } = erpChecklist(
+      asked,
+      "I need an ERP for my small bakery. Restaurants, cafés, food stalls, canteens, bakeries and catering",
+    );
+    expect(kindFirst).toBeUndefined();
+    expect(ids(questions)).not.toContain("erp_kind");
+    // Gemini's own questions count; only what it didn't ask is added.
+    expect(ids(questions)).toEqual(["stock", "suppliers", "erp_production", "erp_payment_terms", "erp_locations"]);
+    expect(questions[0].options?.[0]).toBe("Raw materials and finished goods");
+    expect(questions.find((x) => x.id === "erp_production")?.options?.[0]).toMatch(/^Yes/);
+  });
+
+  it("doesn't ask a trader to make anything", () => {
+    const { questions } = erpChecklist([
+      q("erp_kind", "What does the business mainly do?", [], "Buy and resell products"),
+    ]);
+    expect(questions.find((x) => x.id === "erp_production")).toMatchObject({ required: false });
+    expect(openRequired(questions).map((x) => x.id)).not.toContain("erp_production");
+    expect(questions.find((x) => x.id === "erp_stock")?.neutral).toBe(true);
+  });
+
+  it("puts an answer that keeps the part first", () => {
+    expect(keepPartsFirst(["Finished goods only", "Both", "Raw only"])).toEqual(["Both", "Finished goods only", "Raw only"]);
+    expect(keepPartsFirst(["Yes, with purchase orders", "No"])).toEqual(["Yes, with purchase orders", "No"]);
+  });
+});
+

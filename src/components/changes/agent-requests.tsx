@@ -11,8 +11,8 @@ import { canManage } from "@/lib/store/workspaces";
 type AgentRequest = { id: number; request: string; keyName: string | null; by: string; createdAt: string };
 
 /**
- * Design changes AI agents asked for through MCP (propose_change). An agent can't change the design; an owner or admin
- * drafts the request with Ask EveryOps, which shows the plan for approval like any other.
+ * Design changes AI agents asked for through MCP (propose_change, or an ask_everyops plan that has to wait for a person).
+ * An owner or admin drafts the request with Ask EveryOps, which shows the plan for approval like any other.
  */
 export function AgentRequests() {
   const ws = useWorkspace();

@@ -6,6 +6,36 @@ import type { Playbook } from "./playbooks";
  */
 export const SYSTEM_PLAYBOOKS: Playbook[] = [
   {
+    id: "erp",
+    kind: "system",
+    name: "ERP: sales, purchasing, stock, production and money in one system",
+    match:
+      /\berp\b|enterprise resource|whole[- ]business system|all[- ]in[- ]one (business )?system|back[- ]office system|run (my|our|the) whole business/i,
+    needs: `- An ERP is the loop the business runs every day, connected: customers order, the business buys or makes what
+  they ordered, stock moves, and money comes in. What the owner answers decides which parts it has: a trader buys
+  and resells, a maker also produces from materials, a service business sells time and materials.
+- Sales: customers; products (category as a record type, price, cost, unit, stock on hand, reorder level, low-stock
+  formula); quotations and sales orders with line items (product, qty, unit price taken from the product when left
+  blank, line total); order status quotation → confirmed → in production or for delivery → delivered → closed,
+  plus cancelled. Totals are rollups; deposit required and balance are formulas.
+- Payments as records against the order (amount, method, reference no., status pending → verified / rejected),
+  rolled up into paid amount; balance = total − paid; payment status is a formula (paid when the balance is 0,
+  partially paid when something is paid, else unpaid), never an automation that sets it.
+- Purchasing: suppliers; purchase orders with line items (item, qty ordered, qty received, unit cost from the item),
+  status draft → ordered → partially received → received, plus cancelled; receiving adds the received qty to stock
+  (the ordered qty when nobody typed one).
+- Stock: raw materials and finished goods as items (separate record types when the business makes things); stock
+  movements as records (item, type: stock in, stock out, production in, production out, adjustment, scrap; qty;
+  reason; date) that move stock in the right direction for every type.
+- Production, for makers: bill of materials lines under each product (material, qty per unit); production or job
+  orders (product, qty to make, linked sales order, status planned → in progress → done, plus cancelled); finishing
+  one logs production in for the product and production out for its materials.
+- Expenses with categories (record type) for money going out. Overview: sales this month, unpaid balances,
+  orders due this week, low stock, purchases waiting to be received, jobs in production.`,
+    ask: "What the business does (buys and resells, makes, or provides services), what it stocks (finished goods, raw materials or both), whether it buys from suppliers with purchase orders, whether it makes products in-house from materials, how customers pay (upfront, deposit then balance, or on credit), and how many branches or warehouses.",
+    references: ["canteen-pos"],
+  },
+  {
     id: "pos",
     kind: "system",
     name: "Point of sale and cash register",
@@ -27,6 +57,7 @@ export const SYSTEM_PLAYBOOKS: Playbook[] = [
   {
     id: "inventory",
     kind: "system",
+    unless: ["erp"],
     name: "Inventory, suppliers and purchasing",
     match:
       /inventor(y|ies)|\bstocks?\b|stock ?(level|count|card)|warehouse|bodega|suppliers?\b|purchase orders?|reorder|restock|raw materials?|spoilage/i,
@@ -112,7 +143,7 @@ export const SYSTEM_PLAYBOOKS: Playbook[] = [
   {
     id: "invoicing",
     kind: "system",
-    unless: ["boarding", "hoa"],
+    unless: ["boarding", "hoa", "erp"],
     name: "Quotes, invoices, billing and collections",
     match:
       /invoic(e|es|ing)|billing|statement of accounts?|\bsoa\b|quotations?|\bquotes?\b|receivables?|official receipts?|\bpayment terms\b|progress billing|\bbill (my |our )?clients\b/i,
@@ -321,6 +352,7 @@ export const SYSTEM_PLAYBOOKS: Playbook[] = [
   {
     id: "money",
     kind: "system",
+    unless: ["erp"],
     name: "Bookkeeping and business finances",
     match:
       /expenses?|\bincome\b|finances?|budgets?|accounting|bookkeep|cash ?flow|\bprofit|gastos|\bkita\b|\bp&l\b|ledger|\bbir\b|receipts?\b/i,
@@ -353,6 +385,7 @@ export const SYSTEM_PLAYBOOKS: Playbook[] = [
   {
     id: "orders",
     kind: "system",
+    unless: ["erp"],
     name: "Orders and pre-orders (online sellers, made-to-order, custom products)",
     match:
       /\borders?\b|pre-?orders?|made[- ]to[- ]order|custom orders?|online (sell|shop|store)|shopee|lazada|messenger orders|dropship|resellers?/i,

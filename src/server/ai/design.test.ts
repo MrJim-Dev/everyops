@@ -12,6 +12,7 @@ import {
   asksFor,
   cleanCopy,
   ensurePages,
+  finishedGoodsWithoutStock,
   flaggedBy,
   flattenLinks,
   givenIn,
@@ -909,5 +910,68 @@ describe("asksFor", () => {
     expect(asksFor("A point of sale is not needed.", pos)).toBe(false);
     expect(asksFor("Account Type (select: Cash Register, E-Wallet, Bank Account)", pos)).toBe(false);
     expect(asksFor("We don't want a website. The POS rings up orders.", pos)).toBe(true);
+  });
+});
+
+describe("finished goods the brief keeps in stock", () => {
+  const product: Entity = {
+    id: "product",
+    name: "Product",
+    pluralName: "Products",
+    primaryFieldId: "name",
+    fields: [
+      { id: "name", name: "Name", type: "text" },
+      { id: "base_price", name: "Base Price", type: "money" },
+    ],
+  };
+  const material: Entity = {
+    id: "raw_material",
+    name: "Raw Material",
+    pluralName: "Raw Materials",
+    primaryFieldId: "name",
+    fields: [
+      { id: "name", name: "Name", type: "text" },
+      { id: "stock_on_hand", name: "Stock on Hand", type: "number" },
+    ],
+  };
+  const order: Entity = {
+    id: "sales_order",
+    name: "Sales Order",
+    pluralName: "Sales Orders",
+    primaryFieldId: "ref",
+    fields: [{ id: "ref", name: "Ref", type: "text" }],
+  };
+  const line: Entity = {
+    id: "sales_order_line",
+    name: "Sales Order Line",
+    pluralName: "Sales Order Lines",
+    primaryFieldId: "id",
+    parent: { entityId: "sales_order", fieldId: "sales_order" },
+    fields: [
+      { id: "id", name: "Line", type: "text" },
+      { id: "sales_order", name: "Sales Order", type: "relation", relation: { entityId: "sales_order" } },
+      { id: "product", name: "Product", type: "relation", relation: { entityId: "product" } },
+    ],
+  };
+  const bp = { entities: [product, material, order, line] } as unknown as Blueprint;
+  const brief = "Stock: track both raw materials and finished goods.";
+
+  it("need a stock field on what the business sells", () => {
+    expect(finishedGoodsWithoutStock(bp, brief)?.id).toBe("product");
+    const stocked = {
+      entities: [
+        {
+          ...product,
+          fields: [...product.fields, { id: "stock_on_hand", name: "Stock on Hand", type: "number" }],
+        },
+        material,
+        order,
+        line,
+      ],
+    } as unknown as Blueprint;
+    expect(finishedGoodsWithoutStock(stocked, brief)).toBeUndefined();
+    expect(
+      finishedGoodsWithoutStock(bp, "Track raw materials only; no finished goods stock."),
+    ).toBeUndefined();
   });
 });

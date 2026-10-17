@@ -19,10 +19,14 @@ type Message = {
 };
 
 const INSTRUCTIONS = `EveryOps holds a small business's records (bookings, sales, customers, staff, inventory…) in record
-types the owner designed. Start with describe_workspace to learn the record types, field ids, choices and links; the
-other tools take those ids. Times are Asia/Manila and money is PHP. Writes are checked like the app checks them and run
-the workspace's automations, so prefer get_record before update_record and send its rev back. You can't change the
-design: use propose_change to leave a request for an owner or admin.`;
+types the owner designed, shown on pages of tabs (tables, boards, calendars, schedules, forms, layouts, documents) and
+dashboard cards. Start with describe_workspace to learn the record types, field ids, pages, tabs and cards; the other
+tools take those ids. describe_view shows how a tab is set up and read_view what it shows right now (pageId for a
+page's dashboard). Times are Asia/Manila and money is PHP. Writes are checked like the app checks them and run the
+workspace's automations, so prefer get_record before update_record and send its rev back. To change the design (fields,
+pages, layouts, automations, websites) or make several record changes at once, use ask_everyops: show the person the
+plan's steps, then apply_change; undo_change takes it back. Plans that must wait for an owner come back with
+canApply false and are already saved for them.`;
 
 const rpcError = (id: Message["id"], code: number, message: string) => ({
   jsonrpc: "2.0",

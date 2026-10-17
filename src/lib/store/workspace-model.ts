@@ -43,6 +43,8 @@ export type SetupQuestion = {
   required: boolean;
   answer: string;
   options?: string[];
+  /** No option is recommended: EveryOps can't guess the answer (what the business does). */
+  neutral?: boolean;
 };
 /** A question Ask EveryOps asked on a turn, answered on a card with its options or the owner's own words. */
 export type AskQuestion = {
@@ -50,6 +52,8 @@ export type AskQuestion = {
   question: string;
   required: boolean;
   options: string[];
+  /** No option is shown as Recommended. */
+  neutral?: boolean;
   /** Opened again from the side panel: the answer it already has, selected to start with. */
   current?: string;
 };

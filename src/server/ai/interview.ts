@@ -9,6 +9,7 @@ import { referencesText, setupReferences, setupRoute, startingPointText } from "
 import {
   askAgainMessage,
   askList,
+  erpChecklist,
   mergeQuestions,
   openRequired,
   questionsMissing,
@@ -64,6 +65,15 @@ export async function interviewTurn(
     .map((m) => m.text)
     .join("\n");
   const refs = await setupReferences(said);
+  // An ERP gets a fixed checklist (what the business does, stock, suppliers, production, payment terms, branches),
+  // asked once each and held until answered, so every ERP is built from the same answers. The business counts as
+  // described when the owner named it ("for my bakery") or a business playbook matched their words.
+  const erp = refs.playbooks.some((p) => p.id === "erp");
+  const businesses = refs.playbooks.filter((p) => p.kind === "business");
+  const described =
+    businesses.length || /\b(for|of) (my|our|a|an|the) +[a-z]/i.test(said)
+      ? [said, ...businesses.map((p) => p.name)].join(" ")
+      : "";
   // The route decides what the interview is for: adapting a community system takes a few facts and the differences;
   // a design from playbooks or from scratch takes the full brief.
   const route = setupRoute(said, refs);
@@ -140,7 +150,7 @@ export async function interviewTurn(
       const askedNow = t.questions.filter((q) => q.askNow && !q.answer.trim());
       // Asking without any question to answer (or announcing ones it never gave) leaves the owner stuck.
       if (t.action === "ask" && !askedNow.length && questionsMissing(t.message) && attempt < 2) continue;
-      const questions = mergeQuestions(
+      let questions = mergeQuestions(
         previous,
         t.questions.map(({ id, question, required, answer, options }) => ({
           id,
@@ -150,6 +160,8 @@ export async function interviewTurn(
           options: options.map(named).filter(Boolean).slice(0, 3),
         })),
       );
+      const checklist = erp ? erpChecklist(questions, described) : undefined;
+      if (checklist) questions = checklist.questions;
       const shaped: InterviewTurn = {
         ...t,
         message: named(t.message),
@@ -170,11 +182,15 @@ export async function interviewTurn(
           .join(" ")} Set action to "ask" and ask them again, with an example answer for each.`;
         continue;
       }
-      if (t.action === "ask")
+      if (t.action === "ask") {
         shaped.ask = askList(
           questions,
           askedNow.map((q) => q.id),
         );
+        // Until the owner says what the business does, that's the only question: the rest depend on it.
+        const first = checklist?.kindFirst;
+        if (first) shaped.ask = askList(questions, [first]).filter((q) => q.id === first);
+      }
       return { ok: true, turn: shaped };
     }
     if (!result.retryable) return { ok: false, message: result.error };

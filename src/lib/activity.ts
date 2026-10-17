@@ -35,6 +35,8 @@ export const ACTIONS = {
   "page.update": "Edited page",
   "design.version": "Changed the design",
   "change.propose": "Proposed a change",
+  "change.apply": "Applied a change",
+  "change.undo": "Undid a change",
   "automation.run": "Ran automation",
   "mcp.tool_call": "Used tool",
   "api.denied": "Was refused",

@@ -45,6 +45,12 @@ describe("what a key may do in a workspace", () => {
     expect(allowedIn(key(null), "w", null).size).toBe(0);
   });
 
+  it("lets only owners and admins apply design changes or manage the workspace", () => {
+    const full = key(null, ["records:read", "design:apply", "manage"]);
+    expect([...allowedIn(full, "w", "admin")]).toEqual(["records:read", "design:apply", "manage"]);
+    expect([...allowedIn(full, "w", "staff")]).toEqual(["records:read"]);
+  });
+
   it("keeps a read-only key read-only, whatever the role", () => {
     expect([...allowedIn(key(null, ["records:read"]), "w", "owner")]).toEqual(["records:read"]);
   });

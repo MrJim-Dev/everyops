@@ -12,20 +12,30 @@ const SKIP: Field["type"][] = ["formula", "rollup", "image"];
 
 /**
  * Record types the designer gave no samples, most useful first: line items (a payroll run without payslips shows ₱0),
- * then day-to-day records with a status or a date (attendance, orders), then the rest. At most 8.
+ * then the types those must link to that have a single sample, then day-to-day records with a status or a date
+ * (attendance, orders), then the rest. At most 8. A furniture ERP's design had one raw material and one product, so
+ * the BOM and order lines written for it linked to records that didn't exist and 14 of them were dropped.
  */
 export function emptyTypes(bp: Blueprint, samples: Sample[]): Entity[] {
-  const has = new Set(samples.map((s) => s.entityId));
+  const count = (id: string) => samples.filter((s) => s.entityId === id).length;
+  const empty = bp.entities.filter((e) => !count(e.id));
+  const needed = new Set(
+    empty.flatMap((e) =>
+      e.fields
+        .filter((f) => f.type === "relation" && f.required && f.id !== e.parent?.fieldId)
+        .map((f) => f.relation?.entityId ?? ""),
+    ),
+  );
+  const thin = bp.entities.filter((e) => count(e.id) === 1 && needed.has(e.id));
   const rank = (e: Entity) =>
     e.parent
       ? 0
-      : e.fields.some((f) => ["status", "date", "datetime", "time_range"].includes(f.type))
+      : thin.includes(e)
         ? 1
-        : 2;
-  return bp.entities
-    .filter((e) => !has.has(e.id))
-    .sort((a, b) => rank(a) - rank(b))
-    .slice(0, 8);
+        : e.fields.some((f) => ["status", "date", "datetime", "time_range"].includes(f.type))
+          ? 2
+          : 3;
+  return [...empty, ...thin].sort((a, b) => rank(a) - rank(b)).slice(0, 8);
 }
 
 /** Each record type's fields as prompt lines, with the sample records a link can point at. */
@@ -71,9 +81,11 @@ export function samplesPrompt(bp: Blueprint, samples: Sample[], empty: Entity[],
   const blocks = typeBlocks(bp, samples, empty, (e, parent) =>
     parent
       ? `line items of ${parent.name}: 2 to 3 under each of the first 3 ${parent.pluralName.toLowerCase()} listed in ${e.parent?.fieldId}`
-      : "3 records",
+      : samples.some((s) => s.entityId === e.id)
+        ? "2 more records, different from the one it has"
+        : "3 records",
   );
-  return `Today in Manila: ${todayKey(now)}\nWorkspace: ${bp.workspaceName}\n\nWrite sample records for these record types, which have none yet:\n\n${blocks.join("\n\n")}`;
+  return `Today in Manila: ${todayKey(now)}\nWorkspace: ${bp.workspaceName}\n\nWrite sample records for these record types, which have none yet (or only one):\n\n${blocks.join("\n\n")}`;
 }
 
 /**

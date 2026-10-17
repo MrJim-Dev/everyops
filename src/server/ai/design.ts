@@ -29,6 +29,7 @@ import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest"
 import { impliedRules, linePriceRules, widenMovements } from "@/lib/engine/implied-rules";
 import { templateOverview } from "@/lib/engine/overview-template";
 import { isImagePath } from "@/lib/engine/records";
+import { stockFieldOf } from "@/lib/engine/register";
 import { backwardsRules, repairRules, unrequireFilled } from "@/lib/engine/rule-repair";
 import { parsePartialJson } from "@/lib/partial-json";
 import { withCustomSite } from "@/lib/public/custom-site";
@@ -841,6 +842,28 @@ export function withoutBases(brief: string, systems: string[] = []): string {
   );
 }
 
+/**
+ * The record type the business sells (what order lines link to, other than raw materials) when the brief keeps
+ * finished goods in stock and it has no stock field; undefined when it has one or the brief doesn't ask.
+ */
+export function finishedGoodsWithoutStock(bp: Blueprint, brief: string): Entity | undefined {
+  if (!asksFor(brief, /finished (goods|products)/gi)) return undefined;
+  const RAW = /raw|material|ingredient|suppl(y|ies)|component|part/i;
+  const sold = bp.entities.filter(
+    (e) =>
+      !RAW.test(`${e.id} ${e.name}`) &&
+      bp.entities.some(
+        (line) =>
+          line.parent &&
+          /order|sale|invoice|quot/i.test(line.parent.entityId) &&
+          line.fields.some(
+            (f) => f.type === "relation" && f.id !== line.parent?.fieldId && f.relation?.entityId === e.id,
+          ),
+      ),
+  );
+  return sold.length && !sold.some((e) => stockFieldOf(e)) ? sold[0] : undefined;
+}
+
 function extraChecks(bp: Blueprint, brief: string, systems: string[] = []): string[] {
   const errors: string[] = [];
   const entityIds = new Set(bp.entities.map((e) => e.id));
@@ -859,6 +882,13 @@ function extraChecks(bp: Blueprint, brief: string, systems: string[] = []): stri
   )
     errors.push(
       "The brief asks for a point of sale, but there is no checkout view (products, orders with line items and a payment field).",
+    );
+  // "Raw materials and finished goods": what the business sells carries stock too. A furniture ERP's owner picked
+  // both and got products without stock on hand, so finished pieces were never counted.
+  const goods = finishedGoodsWithoutStock(bp, brief);
+  if (goods)
+    errors.push(
+      `The brief keeps finished goods in stock, but ${goods.pluralName} have no stock field: add stock on hand and a reorder level to ${goods.id}, and let stock movements (production output) add to it.`,
     );
   for (const e of bp.entities) {
     const primary = e.fields.find((f) => f.id === e.primaryFieldId);
@@ -1057,7 +1087,8 @@ export function toRecords(bp: Blueprint, samples: Design["samples"], now: Date):
   );
   const counts = new Map<string, number>();
   const dropped: Record<string, number> = {};
-  const orphans: Record<string, number> = {};
+  /** Line items left out, by record type, with the links that didn't resolve and what they named. */
+  const orphans: Record<string, string[]> = {};
   // Quantities an automation already subtracts (stock -= qty used) are written positive; a sample of -12 "used"
   // would otherwise read as twelve added.
   const subtracted = new Set(
@@ -1086,18 +1117,19 @@ export function toRecords(bp: Blueprint, samples: Design["samples"], now: Date):
     // A line item with no order, or a bill-of-materials row with no material, is noise every total and automation
     // trips over (4 of 6 BOM rows on a production ERP had no product). Lines whose parent or required links don't
     // resolve are left out.
-    if (
-      entity.parent &&
-      entity.fields.some(
-        (f) =>
-          f.type === "relation" &&
-          (f.id === entity.parent?.fieldId || f.required) &&
-          (data[f.id] == null ||
-            data[f.id] === "" ||
-            (Array.isArray(data[f.id]) && !(data[f.id] as unknown[]).length)),
-      )
-    ) {
-      orphans[entity.id] = (orphans[entity.id] ?? 0) + 1;
+    const unlinked = entity.parent
+      ? entity.fields.filter(
+          (f) =>
+            f.type === "relation" &&
+            (f.id === entity.parent?.fieldId || f.required) &&
+            (data[f.id] == null ||
+              data[f.id] === "" ||
+              (Array.isArray(data[f.id]) && !(data[f.id] as unknown[]).length)),
+        )
+      : [];
+    if (unlinked.length) {
+      const named = unlinked.map((f) => `${f.id}=${s.values.find((v) => v.fieldId === f.id)?.value ?? ""}`);
+      orphans[entity.id] = [...(orphans[entity.id] ?? []), named.join(" ")];
       return [];
     }
     const n = (counts.get(entity.id) ?? 0) + 1;
