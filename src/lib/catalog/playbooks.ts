@@ -121,7 +121,12 @@ export function matchPlaybooks(text: string): Playbook[] {
     }
   }
   const chosen = [...businesses];
-  for (const { p } of ranked("system", text)) {
+  // A system the others step aside for (an ERP covers inventory, orders and invoicing) goes first, however many
+  // more words those matched: "ERP with inventory, suppliers and purchase orders" is an ERP.
+  const systems = ranked("system", text);
+  const covers = (id: string) => systems.some((x) => x.p.unless?.includes(id));
+  systems.sort((a, b) => Number(covers(b.p.id)) - Number(covers(a.p.id)));
+  for (const { p } of systems) {
     if (chosen.length - businesses.length === 2) break;
     if (!p.unless?.some((id) => chosen.some((c) => c.id === id))) chosen.push(p);
   }

@@ -231,7 +231,7 @@ export function QuestionCard({
                   {o.label}
                   {q.current && o.id === q.current ? (
                     <span className="ml-2 text-[11.5px] text-muted-foreground">Current answer</span>
-                  ) : i === 0 && o.id !== OTHER && !q.current ? (
+                  ) : i === 0 && o.id !== OTHER && !q.current && !q.neutral ? (
                     <span className="ml-2 text-[11.5px] text-primary">Recommended</span>
                   ) : null}
                 </span>

@@ -25,13 +25,45 @@ const IN =
 const OUT =
   /sale|sold|order.?line|order.?item|line.?item|usage|used|consum|spoil|wast|damage|expir|issue|stock.?out|pull.?out|loss|lost|redeem|withdraw|payment|repay|leave.?request|leave\b|absence|deduct/i;
 const MOVEMENT = /movement|adjust|transaction|ledger|stock.?log|inventory.?log/i;
+// Matched on any word of a movement type's id or label (underscores count as spaces): "Production Out", "Scrap"
+// and "Consumed" take stock off, and so do "production_issue" and "scrap_defect"; "po_received" and
+// "production_output" add. A garment ERP's fabric never went down when it was issued to production, and a furniture
+// ERP's "po_received" and "production_issue" moved nothing.
 const IN_OPTION =
-  /^(in|stock.?in|receiv|deliver|restock|purchase|return|add|incoming|found|top.?up|deposit)|[_\s-]in$/i;
-// "Production Out", "Scrap" and "Consumed" take stock off too; a garment ERP's fabric never went down when it was
-// issued to production.
+  /\b(in|receiv\w*|deliver(y|ed)?|restock\w*|purchase[ds]?|return(s|ed)?|add(s|ed)?|incoming|found|top up|deposit\w*|output|produced|yield)\b/i;
 const OUT_OPTION =
-  /^(out|stock.?out|sale|sold|used|usage|spoil|waste|damage|expire|issue|pull.?out|loss|lost|remove|deduct|withdraw|scrap|consum|reject|defect)|[_\s-]out$/i;
-const ADJUST_OPTION = /^(adjust|correction|count|recount|manual)/i;
+  /\b(out|sales?|sold|used|usage|spoil\w*|wast\w*|damag\w*|expir\w*|issu\w*|pull out|loss|lost|remov\w*|deduct\w*|withdraw\w*|scrap\w*|consum\w*|reject\w*|defect\w*)\b/i;
+const ADJUST_OPTION = /\b(adjust\w*|correction|count|recount|manual)\b/i;
+/** A movement type's words, for the patterns above. */
+const optionWords = (o: { id: string; label: string }) => `${o.id} ${o.label}`.replace(/[_-]+/g, " ");
+
+/**
+ * Which way a movement type moves stock, once: an "in" or "out" word decides ("sales delivery out" is out, though
+ * "delivery" reads as receiving), then the receiving and using words. Undefined when it says neither.
+ */
+function directionOf(o: { id: string; label: string }): "in" | "out" | undefined {
+  const words = optionWords(o);
+  if (/\bout\b/i.test(words)) return "out";
+  if (/\bin\b/i.test(words)) return "in";
+  if (IN_OPTION.test(words)) return "in";
+  if (OUT_OPTION.test(words)) return "out";
+  return undefined;
+}
+
+/**
+ * The field that says which way a record moves stock: of the select or status fields named like a type, the one
+ * whose options say in or out most. A furniture ERP's movements had "Material Type" (raw material or finished
+ * product) before "Movement Type", and every movement, scrap included, added its quantity.
+ */
+function movementKind(source: Entity): Field | undefined {
+  const moves = (f: Field) => (f.options ?? []).filter((o) => directionOf(o)).length;
+  const kinds = source.fields.filter(
+    (f) =>
+      (f.type === "select" || f.type === "status") &&
+      /type|kind|direction|movement/i.test(text(f.id, f.name)),
+  );
+  return [...kinds].sort((a, b) => moves(b) - moves(a))[0];
+}
 const DONE = /^(received|delivered|completed?|approved|paid|confirmed|posted|done|closed)$/i;
 const CANCELLED = /cancel|void|declin|reject|refund|return/i;
 
@@ -64,16 +96,12 @@ function amountOf(entity: Entity, kind: "stock" | "balance", into: Field): Field
 
 /** The formula a record adds to the total and how it reads, or undefined when its name doesn't say which way. */
 function deltaOf(source: Entity, amount: Field): { delta: string; says?: string } | undefined {
-  const kind = source.fields.find(
-    (f) =>
-      (f.type === "select" || f.type === "status") &&
-      /type|kind|direction|movement/i.test(text(f.id, f.name)),
-  );
+  const kind = movementKind(source);
   if (kind?.options?.length) {
     const options = kind.options;
-    const is = (re: RegExp) => options.filter((o) => re.test(o.id) || re.test(o.label));
-    const ins = is(IN_OPTION);
-    const outs = is(OUT_OPTION);
+    const is = (re: RegExp) => options.filter((o) => re.test(optionWords(o)));
+    const ins = options.filter((o) => directionOf(o) === "in");
+    const outs = options.filter((o) => directionOf(o) === "out");
     if (ins.length || outs.length) {
       const any = (os: typeof ins) => os.map((o) => `${kind.id} == '${o.id}'`).join(" || ");
       const labels = (os: typeof ins) => os.map((o) => o.label).join(" and ");
@@ -277,11 +305,7 @@ export function widenMovements(bp: Blueprint): Rule[] {
     const amount = /^\s*-?\s*([a-z_][a-z0-9_]*)\s*$/i.exec(action.delta)?.[1];
     const amountField = source.fields.find((f) => f.id === amount);
     if (!amountField) return rule;
-    const kind = source.fields.find(
-      (f) =>
-        (f.type === "select" || f.type === "status") &&
-        /type|kind|direction|movement/i.test(text(f.id, f.name)),
-    );
+    const kind = movementKind(source);
     const options = kind?.options ?? [];
     if (!kind || !rule.when) return rule;
     const picked = [...rule.when.matchAll(new RegExp(`\\b${kind.id}\\s*==\\s*'([^']+)'`, "g"))].map(
@@ -292,9 +316,8 @@ export function widenMovements(bp: Blueprint): Rule[] {
       .replace(new RegExp(`\\b${kind.id}\\s*==\\s*'[^']+'`, "g"), "")
       .replace(/[()|\s]/g, "");
     if (!picked.length || rest) return rule;
-    const side = (re: RegExp) => options.filter((o) => re.test(o.id) || re.test(o.label)).map((o) => o.id);
-    const ins = side(IN_OPTION);
-    const outs = side(OUT_OPTION);
+    const ins = options.filter((o) => directionOf(o) === "in").map((o) => o.id);
+    const outs = options.filter((o) => directionOf(o) === "out").map((o) => o.id);
     const oneSide = picked.every((p) => outs.includes(p))
       ? ins
       : picked.every((p) => ins.includes(p))
