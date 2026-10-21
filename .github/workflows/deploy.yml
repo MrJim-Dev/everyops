@@ -45,6 +45,10 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: bash scripts/deploy.sh
+        env:
+          # Private beta gate; empty (and so not deployed) unless set on the production environment.
+          REGISTRATION_WHITELIST_ENABLED: ${{ vars.REGISTRATION_WHITELIST_ENABLED }}
+          REGISTRATION_WHITELIST: ${{ secrets.REGISTRATION_WHITELIST }}
 
       - name: Smoke test
         run: |

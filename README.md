@@ -182,6 +182,19 @@ Each account has its own workspaces; the demo workspaces are created on an accou
 
 Accounts live in PostgreSQL through Better Auth, with scrypt password hashes and HttpOnly session cookies. Google sign-in is available when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are configured. The shared demo account has protected profile, password and deletion settings.
 
+### Private beta (registration whitelist)
+
+New accounts can be limited to a list of emails. The gate is off unless `REGISTRATION_WHITELIST_ENABLED=true`; with it off, anyone can sign up as before.
+
+| Variable | Meaning |
+|---|---|
+| `REGISTRATION_WHITELIST_ENABLED` | `true` (or `1`, `yes`, `on`) turns the gate on. Unset or anything else leaves it off |
+| `REGISTRATION_WHITELIST` | Emails allowed to create an account, separated by commas, semicolons or whitespace. Matching ignores case |
+
+With the gate on, email sign-up and a first Google sign-in for an email not on the list create nothing and show "EveryOps is in private beta. Request access and we'll let you know when you're in." Existing accounts always sign in, with a password or Google, whether or not they are on the list. Invited teammates and setup scripts that create accounts (`pnpm db:seed` on a fresh database) need their emails on the list too. The check is a Better Auth `user.create.before` hook (`src/server/registration-whitelist.ts`), so it runs on the server for every way an account gets created.
+
+To add someone, add their email to `REGISTRATION_WHITELIST` and redeploy. `scripts/deploy.sh` replaces Cloud Run's variables on every deploy, so set them where the deploy reads them: the GitHub `production` environment's variable `REGISTRATION_WHITELIST_ENABLED` and secret `REGISTRATION_WHITELIST` (or the same names in your shell for an emergency deploy). Locally, put them in `.env.local`. The env is read on each sign-up, so no other restart is needed.
+
 ## Team and Community publishing
 
 Both are tabs in workspace Settings, next to General. Publish only shows for owners and admins.
