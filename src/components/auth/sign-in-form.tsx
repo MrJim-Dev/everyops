@@ -7,9 +7,10 @@ import { Input } from "@/components/ui/input";
 import { DEMO_ACCOUNT, googleErrorMessage, signIn } from "@/lib/auth/client";
 import { safeNext } from "@/lib/auth/redirect";
 import { type FormErrors, fieldErrors, signInSchema } from "@/lib/auth/schemas";
+import { WAITLIST_CODE } from "@/lib/auth/waitlist";
 import { RedirectIfSignedIn } from "./auth-guards";
 import { AuthLink, AuthShell } from "./auth-shell";
-import { FormAlert } from "./form-alert";
+import { FormAlert, FormNotice } from "./form-alert";
 import { GoogleButton, OrDivider } from "./google-button";
 import { PasswordInput } from "./password-input";
 import { SubmitButton } from "./submit-button";
@@ -28,6 +29,8 @@ export function SignInForm() {
     return oauthError ? { message: googleErrorMessage(oauthError), attempt: 0 } : null;
   });
   const [pending, setPending] = useState(false);
+  // A Google sign-up the private beta put on the waitlist lands here with ?error=waitlist.
+  const waitlisted = params.get("error") === WAITLIST_CODE && !failure?.attempt;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -59,7 +62,11 @@ export function SignInForm() {
           <GoogleButton next={safeNext(next)} />
           <OrDivider />
           <form onSubmit={submit} noValidate className="flex flex-col gap-4">
-            {failure ? <FormAlert key={failure.attempt} message={failure.message} /> : null}
+            {waitlisted && failure ? (
+              <FormNotice message={failure.message} />
+            ) : failure ? (
+              <FormAlert key={failure.attempt} message={failure.message} />
+            ) : null}
             <FieldGroup className="gap-4">
               <Field data-invalid={errors.email ? true : undefined}>
                 <FieldLabel htmlFor={ids.email}>Email</FieldLabel>

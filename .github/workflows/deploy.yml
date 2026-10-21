@@ -45,6 +45,10 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: bash scripts/deploy.sh
+        env:
+          # Private beta gate; empty (and so not deployed) unless set on the production environment.
+          PRIVATE_BETA_ENABLED: ${{ vars.PRIVATE_BETA_ENABLED }}
+          PRIVATE_BETA_ALLOWLIST: ${{ secrets.PRIVATE_BETA_ALLOWLIST }}
 
       - name: Smoke test
         run: |
