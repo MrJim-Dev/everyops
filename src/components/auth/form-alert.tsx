@@ -13,7 +13,7 @@ export function FormAlert({ message }: { message: string }) {
   );
 }
 
-/** Calm notice for a sign-up the private beta doesn't let in yet. */
+/** Calm notice for a sign-up the private beta put on the waitlist. */
 export function FormNotice({ message }: { message: string }) {
   return (
     <output className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2.5 text-[13px] text-foreground">

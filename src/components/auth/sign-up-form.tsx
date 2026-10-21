@@ -5,9 +5,9 @@ import { useState } from "react";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { signUp } from "@/lib/auth/client";
-import { PRIVATE_BETA_CODE } from "@/lib/auth/private-beta";
 import { safeNext } from "@/lib/auth/redirect";
 import { type FormErrors, fieldErrors, signUpSchema } from "@/lib/auth/schemas";
+import { WAITLIST_CODE } from "@/lib/auth/waitlist";
 import { RedirectIfSignedIn } from "./auth-guards";
 import { AuthLink, AuthShell } from "./auth-shell";
 import { FormNotice } from "./form-alert";
@@ -40,7 +40,7 @@ export function SignUpForm() {
     const result = await signUp(parsed.data);
     setPending(false);
     if (result.ok) router.replace(safeNext(next));
-    else if (result.code === PRIVATE_BETA_CODE) setNotice(result.message);
+    else if (result.code === WAITLIST_CODE) setNotice(result.message);
     else setErrors({ [result.field ?? "email"]: result.message });
   };
 

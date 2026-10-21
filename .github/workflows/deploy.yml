@@ -47,8 +47,8 @@ jobs:
         run: bash scripts/deploy.sh
         env:
           # Private beta gate; empty (and so not deployed) unless set on the production environment.
-          REGISTRATION_WHITELIST_ENABLED: ${{ vars.REGISTRATION_WHITELIST_ENABLED }}
-          REGISTRATION_WHITELIST: ${{ secrets.REGISTRATION_WHITELIST }}
+          PRIVATE_BETA_ENABLED: ${{ vars.PRIVATE_BETA_ENABLED }}
+          PRIVATE_BETA_ALLOWLIST: ${{ secrets.PRIVATE_BETA_ALLOWLIST }}
 
       - name: Smoke test
         run: |

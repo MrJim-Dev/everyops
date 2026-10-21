@@ -5,9 +5,9 @@ import { useState } from "react";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { DEMO_ACCOUNT, googleErrorMessage, signIn } from "@/lib/auth/client";
-import { PRIVATE_BETA_CODE } from "@/lib/auth/private-beta";
 import { safeNext } from "@/lib/auth/redirect";
 import { type FormErrors, fieldErrors, signInSchema } from "@/lib/auth/schemas";
+import { WAITLIST_CODE } from "@/lib/auth/waitlist";
 import { RedirectIfSignedIn } from "./auth-guards";
 import { AuthLink, AuthShell } from "./auth-shell";
 import { FormAlert, FormNotice } from "./form-alert";
@@ -29,8 +29,8 @@ export function SignInForm() {
     return oauthError ? { message: googleErrorMessage(oauthError), attempt: 0 } : null;
   });
   const [pending, setPending] = useState(false);
-  // A Google sign-up the private beta turned away lands here with ?error=private_beta.
-  const privateBeta = params.get("error") === PRIVATE_BETA_CODE && !failure?.attempt;
+  // A Google sign-up the private beta put on the waitlist lands here with ?error=waitlist.
+  const waitlisted = params.get("error") === WAITLIST_CODE && !failure?.attempt;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -62,7 +62,7 @@ export function SignInForm() {
           <GoogleButton next={safeNext(next)} />
           <OrDivider />
           <form onSubmit={submit} noValidate className="flex flex-col gap-4">
-            {privateBeta && failure ? (
+            {waitlisted && failure ? (
               <FormNotice message={failure.message} />
             ) : failure ? (
               <FormAlert key={failure.attempt} message={failure.message} />

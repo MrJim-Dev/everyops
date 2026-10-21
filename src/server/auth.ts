@@ -6,7 +6,7 @@ import { googleAccountLinking } from "./auth-linking";
 import { db } from "./db";
 import { resetPasswordEmail } from "./emails";
 import { sendMail } from "./mail";
-import { registrationWhitelist } from "./registration-whitelist";
+import { privateBeta } from "./private-beta";
 
 const google =
   process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
@@ -43,7 +43,7 @@ export const auth = betterAuth({
   },
   socialProviders: google ? { google } : {},
   ...googleAccountLinking,
-  databaseHooks: { ...googleAccountLinking.databaseHooks, ...registrationWhitelist.databaseHooks },
+  databaseHooks: { ...googleAccountLinking.databaseHooks, ...privateBeta.databaseHooks },
   user: { deleteUser: { enabled: true } },
   session: {
     expiresIn: 60 * 60 * 24 * 30,

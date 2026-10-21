@@ -1,7 +1,7 @@
 "use client";
 
 import { createAuthClient } from "better-auth/react";
-import { PRIVATE_BETA_CODE, PRIVATE_BETA_MESSAGE } from "./private-beta";
+import { WAITLIST_CODE, WAITLIST_MESSAGE } from "./waitlist";
 
 /** Better Auth client. Talks to /api/auth on the same origin. */
 export const authClient = createAuthClient();
@@ -50,8 +50,7 @@ export async function signUp(input: { name: string; email: string; password: str
   if (!error) return { ok: true };
   if (error.code === "USER_ALREADY_EXISTS" || error.code === "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL")
     return { ok: false, field: "email", message: "An account with this email already exists" };
-  if (error.code === PRIVATE_BETA_CODE)
-    return { ok: false, code: PRIVATE_BETA_CODE, message: PRIVATE_BETA_MESSAGE };
+  if (error.code === WAITLIST_CODE) return { ok: false, code: WAITLIST_CODE, message: WAITLIST_MESSAGE };
   return failure(error, "We couldn't create your account. Try again.");
 }
 
@@ -82,8 +81,8 @@ export function googleErrorMessage(code: string): string {
       return "We couldn't connect Google to the account with this email. Sign in with your password instead.";
     case "account_already_linked_to_different_user":
       return "That Google account is already connected to a different EveryOps account.";
-    case PRIVATE_BETA_CODE:
-      return PRIVATE_BETA_MESSAGE;
+    case WAITLIST_CODE:
+      return WAITLIST_MESSAGE;
     default:
       return "Google sign-in didn't finish. Try again, or use your email and password.";
   }

@@ -182,18 +182,26 @@ Each account has its own workspaces; the demo workspaces are created on an accou
 
 Accounts live in PostgreSQL through Better Auth, with scrypt password hashes and HttpOnly session cookies. Google sign-in is available when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are configured. The shared demo account has protected profile, password and deletion settings.
 
-### Private beta (registration whitelist)
+### Private beta (waitlist and allowlist)
 
-New accounts can be limited to a list of emails. The gate is off unless `REGISTRATION_WHITELIST_ENABLED=true`; with it off, anyone can sign up as before.
+New accounts can be limited to approved emails, with everyone else kept on a waitlist. The gate is off unless `PRIVATE_BETA_ENABLED=true`; with it off, anyone can sign up as before and the waitlist is never read or written.
 
 | Variable | Meaning |
 |---|---|
-| `REGISTRATION_WHITELIST_ENABLED` | `true` (or `1`, `yes`, `on`) turns the gate on. Unset or anything else leaves it off |
-| `REGISTRATION_WHITELIST` | Emails allowed to create an account, separated by commas, semicolons or whitespace. Matching ignores case |
+| `PRIVATE_BETA_ENABLED` | `true` (or `1`, `yes`, `on`) turns the gate on. Unset or anything else leaves it off |
+| `PRIVATE_BETA_ALLOWLIST` | Emails allowed to create an account, separated by commas, semicolons or whitespace. Matching ignores case |
 
-With the gate on, email sign-up and a first Google sign-in for an email not on the list create nothing and show "EveryOps is in private beta. Request access and we'll let you know when you're in." Existing accounts always sign in, with a password or Google, whether or not they are on the list. Invited teammates and setup scripts that create accounts (`pnpm db:seed` on a fresh database) need their emails on the list too. The check is a Better Auth `user.create.before` hook (`src/server/registration-whitelist.ts`), so it runs on the server for every way an account gets created.
+With the gate on, an email may create an account when it is on `PRIVATE_BETA_ALLOWLIST` or its `waitlist` row has status `approved`. Anyone else who tries email sign-up or a first Google sign-in gets no user, account or session; they are added to the `waitlist` table (migration `0021_waitlist.sql`: email lowercased and unique, name, source `email` or `google`, status `waiting` or `approved`, `created_at`, `updated_at`, `approved_at`) and see "You're on the EveryOps waitlist. We'll email you as soon as your spot opens." Trying again keeps one row and its original `created_at`. No password is stored for waitlisted people. Existing accounts always sign in, with a password or Google, whether or not they are allowed. Invited teammates and setup scripts that create accounts (`pnpm db:seed` on a fresh database) need to be allowed too. The check is a Better Auth `user.create.before` hook (`src/server/private-beta.ts`), so it runs on the server for every way an account gets created.
 
-To add someone, add their email to `REGISTRATION_WHITELIST` and redeploy. `scripts/deploy.sh` replaces Cloud Run's variables on every deploy, so set them where the deploy reads them: the GitHub `production` environment's variable `REGISTRATION_WHITELIST_ENABLED` and secret `REGISTRATION_WHITELIST` (or the same names in your shell for an emergency deploy). Locally, put them in `.env.local`. The env is read on each sign-up, so no other restart is needed.
+To approve someone on the waitlist, run this against the database (they can then sign up with that email; no redeploy needed):
+
+```sql
+update waitlist set status = 'approved', approved_at = now(), updated_at = now() where email = lower('person@example.com');
+```
+
+`select email, name, source, created_at from waitlist where status = 'waiting' order by created_at` lists who is waiting. EveryOps doesn't send acceptance emails yet; the table holds what the team needs to send them.
+
+To allow an email that never joined the waitlist, add it to `PRIVATE_BETA_ALLOWLIST` and redeploy. `scripts/deploy.sh` replaces Cloud Run's variables on every deploy and passes these two only when they are set, so set them where the deploy reads them: the GitHub `production` environment's variable `PRIVATE_BETA_ENABLED` and secret `PRIVATE_BETA_ALLOWLIST` (or the same names in your shell for an emergency deploy). Locally, put them in `.env.local`. The env is read on each sign-up, so no other restart is needed.
 
 ## Team and Community publishing
 
