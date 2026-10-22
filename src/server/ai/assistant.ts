@@ -39,6 +39,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { requestGuide } from "@/lib/catalog/playbooks";
 import { parseLayout } from "@/lib/components/registry";
 import type { OutsideAction } from "@/lib/connections";
+import type { Viewer } from "@/lib/engine/access";
 import { actorTypeFor } from "@/lib/engine/actors";
 import { widgetValue } from "@/lib/engine/aggregate";
 import {
@@ -1093,6 +1094,8 @@ export async function assistantTurn(input: {
   /** Owners and admins: the workspace's webhook endpoints a call_api automation can post to. */
   endpoints?: { id: string; label: string; acceptsCalls: boolean }[];
   signal?: AbortSignal;
+  /** Who is asking, so lookups find only the records they may see (src/lib/engine/access.ts). */
+  viewer?: Viewer;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
   const role = input.canDesign
@@ -1153,6 +1156,7 @@ export async function assistantTurn(input: {
     onStatus: status,
     signal: input.signal,
     outside,
+    viewer: input.viewer,
   });
   const problem = lookupProblem(looked);
   if (problem)

@@ -1,5 +1,6 @@
 "use client";
 
+import { ScanInput } from "@/components/scan/scan-input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
@@ -14,6 +15,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useCurrency } from "@/components/workspace/currency";
 import { normalizeUrl } from "@/lib/blueprint/contact";
+import { isScannable } from "@/lib/blueprint/scannable";
 import type { Field, FieldValue, TimeRange } from "@/lib/blueprint/types";
 import { currencySymbol, isTimeRange } from "@/lib/format";
 import { at, dateKey, fromLocal, zonedParts } from "@/lib/time";
@@ -224,6 +226,16 @@ export function FieldInput({ id, field, value, onChange, invalid }: Props) {
         />
       );
     default:
+      if (isScannable(field))
+        return (
+          <ScanInput
+            id={id}
+            field={field}
+            value={String(value ?? "")}
+            onChange={onChange}
+            invalid={invalid}
+          />
+        );
       return <Input {...common} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} />;
   }
 }

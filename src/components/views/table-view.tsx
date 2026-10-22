@@ -2,7 +2,9 @@
 
 import {
   ArrowsOutSimpleIcon,
+  BarcodeIcon,
   CaretDownIcon,
+  CaretLeftIcon,
   CaretRightIcon,
   CaretUpIcon,
   DownloadSimpleIcon,
@@ -17,6 +19,7 @@ import { SheetSyncBar } from "@/components/import/sheet-sync-bar";
 import { FieldValue } from "@/components/records/field-value";
 import { useRecordPanels } from "@/components/records/record-panels";
 import { StatusMenu } from "@/components/records/status-menu";
+import { ScanDialog } from "@/components/scan/scan-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -48,6 +51,7 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useReportView } from "@/lib/assistant/screen-store";
 import { displayKind, isNumericKind, statusField } from "@/lib/blueprint/field-kind";
 import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
+import { sameCode, scannableFields } from "@/lib/blueprint/scannable";
 import type { DataRecord, Field, Sort, TableView as TableViewConfig } from "@/lib/blueprint/types";
 import { downloadText, fileSlug } from "@/lib/download";
 import { applyFilter, searchRecords, sortRecords } from "@/lib/engine/query";
@@ -65,6 +69,11 @@ import { ToolbarSummary, ViewToolbar } from "./view-toolbar";
 
 const GROUPABLE = new Set(["choice", "status", "relation", "person", "checkbox"]);
 const NO_GROUP = "__none";
+/**
+ * Rows on screen at once. A busy workspace's history runs to tens of thousands of rows; drawing them all crashed the
+ * tab at 20,000. Search, sorting, grouping, totals and select-all still cover every matching row.
+ */
+export const PAGE_SIZE = 100;
 
 type Group = { key: string; label: string; rows: DataRecord[] };
 
@@ -75,6 +84,21 @@ export function TableView({ view }: { view: TableViewConfig }) {
   const actions = useRecordActions();
   const applyChange = useWorkspaces((s) => s.applyChange);
   const entity = getEntity(blueprint, view.entityId);
+  // Records with a code field (Barcode, SKU, Serial number) can be found by scanning it.
+  const codes = scannableFields(entity);
+  const [scanning, setScanning] = useState(false);
+  const onScan = (code: string) => {
+    const found = records.find(
+      (r) => r.entityId === entity.id && codes.some((f) => sameCode(r.data[f.id], code)),
+    );
+    if (found) return openRecord(found.id);
+    const one = entity.name.toLowerCase();
+    toast.info(`No ${one} with ${codes[0].name.toLowerCase()} ${code}`, {
+      ...(editable
+        ? { action: { label: `Add ${one}`, onClick: () => openCreate(entity.id, { [codes[0].id]: code }) } }
+        : {}),
+    });
+  };
   const fields = view.fieldIds.map((id) => getField(entity, id));
   const fresh = useFreshStore((s) => s.ids);
   const [query, setQuery] = useState("");
@@ -146,6 +170,16 @@ export function TableView({ view }: { view: TableViewConfig }) {
   }, [groupField, rows, blueprint, records]);
 
   const visibleIds = rows.map((r) => r.id);
+  // Paging: the page goes back to the first when the search, sort or grouping changes.
+  const pageKey = JSON.stringify([view.id, query, sort, groupBy]);
+  const [paging, setPaging] = useState({ key: pageKey, page: 0 });
+  const ordered = groups ? groups.flatMap((g) => (collapsed.has(g.key) ? [] : g.rows)) : rows;
+  const pages = Math.max(1, Math.ceil(ordered.length / PAGE_SIZE));
+  const page = paging.key === pageKey ? Math.min(paging.page, pages - 1) : 0;
+  const goTo = (n: number) => setPaging({ key: pageKey, page: Math.max(0, Math.min(pages - 1, n)) });
+  const onPage = new Set(ordered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((r) => r.id));
+  const paged = ordered.length > PAGE_SIZE;
+  const shownRows = (list: DataRecord[]) => (paged ? list.filter((r) => onPage.has(r.id)) : list);
   const picked = visibleIds.filter((id) => selected.has(id));
   const allPicked = picked.length > 0 && picked.length === visibleIds.length;
   const toggle = (id: string) =>
@@ -325,6 +359,12 @@ export function TableView({ view }: { view: TableViewConfig }) {
         ) : (
           <>
             <SearchInput value={query} onChange={setQuery} placeholder={`Search ${plural}`} />
+            {codes.length ? (
+              <Button variant="outline" size="sm" onClick={() => setScanning(true)}>
+                <BarcodeIcon data-icon="inline-start" />
+                Scan
+              </Button>
+            ) : null}
             {groupable.length ? (
               <Select
                 value={groupBy}
@@ -377,13 +417,28 @@ export function TableView({ view }: { view: TableViewConfig }) {
               </DropdownMenuContent>
             </DropdownMenu>
             <ToolbarSummary>
-              {rows.length} {rows.length === 1 ? entity.name.toLowerCase() : plural}
+              {rows.length.toLocaleString("en-PH")} {rows.length === 1 ? entity.name.toLowerCase() : plural}
+              {/* Staff and viewers who see only their own records are told so, so a short list isn't a surprise. */}
+              {entity.access && (ws.role === "staff" || ws.role === "viewer")
+                ? entity.access.by === "created_by"
+                  ? " · only the ones you added"
+                  : " · only the ones assigned to you"
+                : null}
             </ToolbarSummary>
           </>
         )}
       </ViewToolbar>
       {editable && ws.mode === "live" ? (
         <ImportDialog open={importing} onOpenChange={setImporting} entityId={entity.id} />
+      ) : null}
+      {codes.length ? (
+        <ScanDialog
+          open={scanning}
+          onOpenChange={setScanning}
+          title={`Find a ${entity.name.toLowerCase()}`}
+          description={`Scan its ${codes[0].name.toLowerCase()} with the camera or a handheld scanner to open it.`}
+          onScan={onScan}
+        />
       ) : null}
       {ws.mode === "live" ? <SheetSyncBar entityId={entity.id} /> : null}
       {rows.length === 0 ? (
@@ -478,6 +533,8 @@ export function TableView({ view }: { view: TableViewConfig }) {
               {groups
                 ? groups.map((group) => {
                     const open = !collapsed.has(group.key);
+                    // On a later page, only the groups with rows there (and closed ones, to open them) show.
+                    if (paged && open && !group.rows.some((r) => onPage.has(r.id))) return null;
                     return (
                       <Fragment key={group.key || "__empty"}>
                         <TableRow className="h-9 bg-muted/30 hover:bg-muted/50">
@@ -523,11 +580,11 @@ export function TableView({ view }: { view: TableViewConfig }) {
                             </TableCell>
                           ))}
                         </TableRow>
-                        {open ? group.rows.map(renderRow) : null}
+                        {open ? shownRows(group.rows).map(renderRow) : null}
                       </Fragment>
                     );
                   })
-                : rows.map(renderRow)}
+                : shownRows(rows).map(renderRow)}
             </TableBody>
             {view.totals && fields.some(summable) ? (
               <TableFooter className="sticky bottom-0 bg-background">
@@ -550,6 +607,26 @@ export function TableView({ view }: { view: TableViewConfig }) {
               </TableFooter>
             ) : null}
           </Table>
+          {paged ? (
+            <nav
+              aria-label="Pages"
+              className="flex items-center justify-end gap-3 border-t px-5 py-2.5 text-[12.5px] text-muted-foreground"
+            >
+              <span className="tabular">
+                {(page * PAGE_SIZE + 1).toLocaleString("en-PH")}–
+                {Math.min((page + 1) * PAGE_SIZE, ordered.length).toLocaleString("en-PH")} of{" "}
+                {ordered.length.toLocaleString("en-PH")}
+              </span>
+              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => goTo(page - 1)}>
+                <CaretLeftIcon data-icon="inline-start" />
+                Previous
+              </Button>
+              <Button variant="outline" size="sm" disabled={page >= pages - 1} onClick={() => goTo(page + 1)}>
+                Next
+                <CaretRightIcon data-icon="inline-end" />
+              </Button>
+            </nav>
+          ) : null}
         </div>
       )}
     </div>

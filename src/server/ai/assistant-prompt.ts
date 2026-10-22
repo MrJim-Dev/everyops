@@ -462,6 +462,9 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   clickable" or "check phone numbers" is redefining that text field as email or phone. Email, phone and file
   fields never show on public pages or shared tables. A rollup can count only some children with rollup.filter
   (paid payments: status == 'paid'), e.g. "only count paid lines in the total".
+- Barcode / QR scanning: a text field named Barcode, SKU, Serial number, Asset tag, Tracking number, ISBN, Product
+  code or QR code can be scanned with the camera or a handheld scanner (tables get a Scan button; the register adds
+  the scanned product). "Let me scan products" is adding such a field (named Barcode) if the record type has none.
 - rating (1 to 5 stars) and duration (minutes, shown as "1 h 30 min") are their own types: "add a star rating",
   "track how long each job took". Redefining a number field that holds ratings or minutes is the same change.
 - A signature someone draws (a waiver, a rental agreement, proof of delivery) is a file field named Signature (or

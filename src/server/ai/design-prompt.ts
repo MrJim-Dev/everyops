@@ -622,6 +622,9 @@ Rules for a valid blueprint:
 - Contact details and documents have their own types: email (an email address), phone (a phone number), url (a
   website or link) and file (a document such as a PDF receipt, contract or ID scan; the team uploads it). Use
   them instead of text for those, and keep names plain (Email, Phone, Website, Contract).
+- Things people scan (products in a shop or POS, stock items, equipment, parcels, books) get a text field named
+  Barcode, SKU, Serial number, Asset tag, Tracking number or ISBN; EveryOps scans it with the camera or a handheld
+  scanner, to find the record and at the register.
 - rating is a score from 1 to 5 shown as stars (a customer review, service quality, a lead's priority); sample
   values are whole numbers 1-5. duration is a length of time in minutes shown as "1 h 30 min" (a session, a
   repair, time spent); sample values are minutes (90, not 1.5). Use number only for counts and other quantities.

@@ -50,6 +50,15 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
       errors.push({ path: kind, message: `Duplicate ${kind} id "${id}"` });
 
   bp.entities.forEach((entity, ei) => {
+    const by = entity.access?.by;
+    if (by && by !== "created_by") {
+      const field = entity.fields.find((f) => f.id === by);
+      if (!field || !["person", "email", "text"].includes(field.type))
+        errors.push({
+          path: `entities.${ei}.access`,
+          message: `${entity.name}'s access needs a person, email or text field naming who it's for, or created_by`,
+        });
+    }
     const fieldIds = new Set<string>();
     entity.fields.forEach((field, fi) => {
       const path = `entities.${ei}.fields.${fi}`;

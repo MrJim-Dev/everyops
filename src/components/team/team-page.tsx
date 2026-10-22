@@ -31,6 +31,7 @@ import { isDemoEmail } from "@/lib/auth/demo";
 import { emailSchema } from "@/lib/auth/schemas";
 import { formatDate } from "@/lib/format";
 import { canManage, type Member, ROLES, useWorkspaces } from "@/lib/store/workspaces";
+import { RecordAccessSettings } from "./record-access-settings";
 import { RoleSelect } from "./role-select";
 
 const ROLE_LABEL = { owner: "Owner", ...Object.fromEntries(ROLES.map((r) => [r.id, r.label])) } as Record<
@@ -291,6 +292,7 @@ export function TeamPage() {
           </div>
         </SettingsSection>
       ) : null}
+      <RecordAccessSettings manager={manager} />
     </SettingsPage>
   );
 }
