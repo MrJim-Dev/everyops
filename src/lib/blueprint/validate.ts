@@ -1,7 +1,10 @@
 import { publicProblems, sharedTableProblems } from "@/lib/components/public-safety";
 import { componentDef, layoutItems, type Ref } from "@/lib/components/registry";
+import { allActions } from "@/lib/engine/branches";
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
+import { isCurrency } from "@/lib/format";
+import { isTimeZone } from "@/lib/time";
 import { displayKind, isNumericKind } from "./field-kind";
 import { walkPath } from "./paths";
 import type { Block, Blueprint, Entity, Field, FormExtras, LayoutView, Rule } from "./types";
@@ -30,6 +33,10 @@ function checkExpr(bp: Blueprint, entity: Entity, src: string, path: string, err
 /** Returns every problem in a blueprint, each with a path and a plain message. */
 export function validateBlueprint(bp: Blueprint): ValidationError[] {
   const errors: ValidationError[] = [];
+  if (bp.currency !== undefined && !isCurrency(bp.currency))
+    errors.push({ path: "currency", message: `"${bp.currency}" isn't a currency EveryOps supports` });
+  if (bp.timeZone !== undefined && !isTimeZone(bp.timeZone))
+    errors.push({ path: "timeZone", message: `"${bp.timeZone}" isn't a time zone` });
   const entityIds = new Set(bp.entities.map((e) => e.id));
   const viewIds = new Set(bp.views.map((v) => v.id));
   const widgetIds = new Set(bp.widgets.map((w) => w.id));
@@ -43,6 +50,15 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
       errors.push({ path: kind, message: `Duplicate ${kind} id "${id}"` });
 
   bp.entities.forEach((entity, ei) => {
+    const by = entity.access?.by;
+    if (by && by !== "created_by") {
+      const field = entity.fields.find((f) => f.id === by);
+      if (!field || !["person", "email", "text"].includes(field.type))
+        errors.push({
+          path: `entities.${ei}.access`,
+          message: `${entity.name}'s access needs a person, email or text field naming who it's for, or created_by`,
+        });
+    }
     const fieldIds = new Set<string>();
     entity.fields.forEach((field, fi) => {
       const path = `entities.${ei}.fields.${fi}`;
@@ -52,6 +68,8 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
         errors.push({ path, message: `${field.name} links to a missing entity` });
       if ((field.type === "select" || field.type === "status") && !field.options?.length)
         errors.push({ path, message: `${field.name} needs options` });
+      if (field.range !== undefined && field.range !== "dates" && field.range !== "times")
+        errors.push({ path, message: `${field.name}: range is "dates" or "times", not "${field.range}"` });
       if (field.type === "formula") {
         if (!field.formula) errors.push({ path, message: `${field.name} has no formula` });
         else {
@@ -285,11 +303,24 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
     }
   });
 
+  const templateIds = new Set<string>();
+  (bp.printTemplates ?? []).forEach((template, ti) => {
+    const path = `printTemplates.${ti}`;
+    if (templateIds.has(template.id))
+      errors.push({ path, message: `Duplicate print template id "${template.id}"` });
+    templateIds.add(template.id);
+    if (!template.name.trim()) errors.push({ path, message: "A print template needs a name" });
+    if (!entityIds.has(template.entityId))
+      errors.push({ path, message: `${template.name} prints a missing record type` });
+  });
+
   return errors;
 }
 
-const NUMERIC = new Set(["number", "money", "percent"]);
+const NUMERIC = new Set(["number", "money", "percent", "rating", "duration"]);
 const list = (items: { id: string }[]) => items.map((f) => f.id).join(", ") || "none";
+/** Who a notification can go to by role (src/server/notifications.ts). */
+export const RECIPIENT_GROUPS = new Set(["owner", "admins", "team", "staff"]);
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const resolvesPath = (bp: Blueprint, entity: Entity, ref: string) =>
   !walkPath(bp, entity, ref.split(".")).error;
@@ -341,8 +372,16 @@ function checkRule(bp: Blueprint, source: Entity, rule: Rule, path: string, erro
         `${status.name} has no option "${t.to}" (options: ${(status.options ?? []).map((o) => o.id).join(", ")})`,
       );
   }
-  if (!rule.actions.length) say("it has no actions");
-  for (const action of rule.actions) {
+  const branches = rule.branches ?? [];
+  if (!rule.actions.length && !branches.some((b) => b.actions.length)) say("it has no actions");
+  branches.forEach((b, i) => {
+    const which = i === 0 ? "the if" : b.when?.trim() ? `else if #${i}` : "the otherwise";
+    if (b.when?.trim()) checkExpr(bp, source, b.when, path, errors);
+    else if (i !== branches.length - 1)
+      say(`${which} branch needs a condition; only the last one can be the otherwise`);
+    if (!b.actions.length) say(`${which} branch has no actions`);
+  });
+  for (const action of allActions(rule)) {
     if (action.type === "notify") {
       if (!action.message.trim()) say("the notice has no message");
       continue;
@@ -356,6 +395,46 @@ function checkRule(bp: Blueprint, source: Entity, rule: Rule, path: string, erro
         for (const m of text.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g))
           if (!resolvesPath(bp, source, m[1]))
             say(`{{${m[1]}}} isn't a field of ${source.name} (fields: ${list(source.fields)})`);
+      continue;
+    }
+    if (action.type === "notify_people") {
+      if (!action.title.trim()) say("the notification has no title");
+      const who = action.to
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      if (!who.length)
+        say(
+          "the notification has no one to notify; to is owner, admins, team, staff, an address or a {{field}}",
+        );
+      for (const t of who)
+        if (
+          !RECIPIENT_GROUPS.has(t.toLowerCase()) &&
+          !/^\{\{\s*[\w.]+\s*\}\}$/.test(t) &&
+          !/^\S+@\S+\.\S+$/.test(t)
+        )
+          say(
+            `"${t}" isn't someone to notify; use owner, admins, team, staff, an email address or a {{field}}`,
+          );
+      for (const text of [action.to, action.title, action.body ?? ""])
+        for (const m of text.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g))
+          if (!resolvesPath(bp, source, m[1]))
+            say(`{{${m[1]}}} isn't a field of ${source.name} (fields: ${list(source.fields)})`);
+      continue;
+    }
+    if (action.type === "call_api") {
+      if (!action.endpointId?.trim())
+        say("call_api needs endpointId, a webhook endpoint from Settings → Webhooks");
+      if (action.body?.trim()) {
+        for (const m of action.body.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g))
+          if (!resolvesPath(bp, source, m[1]))
+            say(`{{${m[1]}}} isn't a field of ${source.name} (fields: ${list(source.fields)})`);
+        try {
+          JSON.parse(action.body.replace(/\{\{\s*[\w.]+\s*\}\}/g, "x"));
+        } catch {
+          say('the call body isn\'t JSON; write it like {"text": "New booking for {{name}}"}');
+        }
+      }
       continue;
     }
     if (action.type === "create_record") {

@@ -3,9 +3,12 @@ import { sql } from "kysely";
 import { notesFromSetup } from "@/lib/assistant/memory";
 import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { freshSample } from "@/lib/catalog/shift";
+import { guardWrites, isLimited, settleTotals } from "@/lib/engine/access";
 import { renumberTaken } from "@/lib/engine/sequence";
+import { WINDOW_AT, windowRecords } from "@/lib/engine/window";
 import { htmlDocKeys } from "@/lib/public/html-page";
 import {
+  blueprintOf,
   type ChangeEntry,
   type Invite,
   importedIds,
@@ -19,7 +22,8 @@ import {
   workspaceFrom,
 } from "@/lib/store/workspace-model";
 import type { PatchResult, WorkspaceMeta, WorkspacePatch } from "@/lib/store/workspace-sync";
-import { logActivity, personActor, recordEntries } from "./activity";
+import { limitWorkspace, viewerOf } from "./access";
+import { logActivity, personActor, recordActor, recordEntries } from "./activity";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { inviteEmail } from "./emails";
@@ -37,6 +41,7 @@ import {
   writePages,
 } from "./workspace-data";
 import { applyEditsIn } from "./workspace-memory";
+import { enterZone } from "./zone";
 
 const ID = /^[a-z0-9][a-z0-9-]{1,79}$/;
 /** Largest save accepted. Saves are patches now; only creating a big workspace comes close. */
@@ -268,10 +273,26 @@ export async function loadWorkspace(
   if (!access) return null;
   const found = await readWorkspace(db, id);
   if (!found) return null;
+  // Members who see only their own records of some type get only those, everywhere this copy goes (the browser,
+  // the assistant, MCP plans).
+  const viewer = await viewerOf(db, userId, access.role);
+  const limited = limitWorkspace(blueprintOf(found.doc), viewer, found.doc, found.revs);
+  // The team comes too: the browser replaces its summary with this copy and reads a member's role from it, so
+  // without it staff and admins could only view a workspace once it opened.
+  const team = await loadTeam(id);
+  const manager = access.role === "owner" || access.role === "admin";
   return {
-    workspace: { ...found.doc, slug: id, syncedAt: found.syncedAt, ownerId: access.ownerId, loaded: true },
+    workspace: {
+      ...limited.doc,
+      slug: id,
+      syncedAt: found.syncedAt,
+      ownerId: access.ownerId,
+      members: team.members,
+      invites: manager ? team.invites : [],
+      loaded: true,
+    },
     role: access.role,
-    revs: found.revs,
+    revs: limited.revs,
   };
 }
 
@@ -386,6 +407,7 @@ export async function patchWorkspace(
         let puts = patch.records.put;
         const fresh = puts.filter((p) => p.rev === null).map((p) => p.record);
         const bp = fresh.length ? await currentBlueprint(trx, slug) : undefined;
+        enterZone(bp);
         if (bp) {
           const types = [...new Set(fresh.map((r) => r.entityId))];
           const { rows } = await sql<{ id: string; entity_id: string; data: DataRecord["data"] }>`
@@ -409,6 +431,38 @@ export async function patchWorkspace(
         }
         // Automations that fire on a save are logged (and their emails queued) with the save itself.
         const rulesBp = await currentBlueprint(trx, slug);
+        enterZone(rulesBp);
+        // Members who see only their own records change only those; totals are worked out here from every record
+        // (src/lib/engine/access.ts), since their browser has only some of them.
+        let settled = false;
+        if (!manager && rulesBp) {
+          const viewer = await viewerOf(trx, userId, access.role);
+          if (isLimited(rulesBp, viewer)) {
+            const checked = guardWrites(
+              rulesBp,
+              viewer,
+              await readRecords(trx, slug),
+              puts,
+              patch.records.delete,
+              new Date(),
+            );
+            if (!checked.ok) throw new Conflict({ ok: false, status: 403, message: checked.message });
+            puts = checked.puts;
+            settled = true;
+          }
+        }
+        // Large record types reach the browser as a recent window (src/lib/engine/window.ts), so totals over them
+        // are the server's: worked out here from every record. A count first, so small workspaces skip the read.
+        if (rulesBp && !settled && (puts.length || patch.records.delete.length)) {
+          const { rows: large } = await sql<{ n: number }>`
+            select count(*)::int as n from workspace_record where workspace_id = ${slug}
+            group by entity_id having count(*) > ${WINDOW_AT} limit 1`.execute(trx);
+          if (large.length) {
+            const stored = await readRecords(trx, slug);
+            if (Object.keys(windowRecords(rulesBp, stored, new Date()).windowed).length)
+              puts = settleTotals(rulesBp, stored, puts, patch.records.delete, new Date());
+          }
+        }
         const watching = fireOnSave(rulesBp);
         // Webhooks need each changed record's previous values too (changed fields, status changes).
         const hooked = await hasEndpoints(trx, slug);
@@ -443,7 +497,7 @@ export async function patchWorkspace(
               }),
             )
           : [];
-        const put = await putRecords(trx, slug, puts);
+        const put = await putRecords(trx, slug, puts, await recordActor(trx, personActor(userId)));
         const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, patch.records.delete))];
         if (conflicts.length)
           throw new Conflict({

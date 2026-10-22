@@ -1,6 +1,8 @@
 import { isEmail, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, Field, FieldValue, RecordData } from "@/lib/blueprint/types";
+import { parseDuration, parseRating, RATING_MAX, stripMoney } from "@/lib/format";
+import { at, fromLocal } from "@/lib/time";
 
 /**
  * Values an agent or script sends (JSON) as a record's stored values: fields named by id or by name, choices by id or
@@ -13,12 +15,13 @@ const fieldFor = (entity: Entity, key: string) => {
   return entity.fields.find((f) => f.id === key) ?? entity.fields.find((f) => f.name.toLowerCase() === k);
 };
 
-const MANILA_ISO = (text: string): string | null => {
+/** A date or date-time as written on the workspace's clock (or with its own offset), as an ISO instant. */
+const LOCAL_ISO = (text: string): string | null => {
   const t = text.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return new Date(`${t}T00:00:00+08:00`).toISOString();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return at(t, "00:00");
   if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(t)) return null;
-  const withZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t.replace(" ", "T")}+08:00`;
-  const ms = Date.parse(withZone);
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(t)) return fromLocal(t);
+  const ms = Date.parse(t);
   return Number.isNaN(ms) ? null : new Date(ms).toISOString();
 };
 
@@ -34,13 +37,18 @@ function one(
     case "formula":
     case "rollup":
       return { error: "is worked out by EveryOps and can't be set" };
+    case "created_by":
+    case "edited_by":
+      return { error: "is filled in by EveryOps from whoever adds or changes the record, and can't be set" };
     case "image":
     case "file":
       return { error: "takes an upload, which isn't available here" };
+    case "signature":
+      return { error: "is signed on a signature pad in EveryOps, which isn't available here" };
     case "number":
     case "money":
     case "percent": {
-      const n = typeof value === "number" ? value : Number(text.replace(/[₱,\s%]/g, ""));
+      const n = typeof value === "number" ? value : Number(stripMoney(text).replace(/%/g, ""));
       return Number.isFinite(n) ? { value: n } : { error: `needs a number, not "${text}"` };
     }
     case "checkbox":
@@ -48,6 +56,18 @@ function one(
       if (/^(true|yes|1)$/i.test(text)) return { value: true };
       if (/^(false|no|0)$/i.test(text)) return { value: false };
       return { error: "needs true or false" };
+    case "rating": {
+      const n = typeof value === "number" && Number.isInteger(value) ? value : parseRating(text);
+      return n !== null && n >= 1 && n <= RATING_MAX
+        ? { value: n }
+        : { error: `needs 1 to ${RATING_MAX} stars, not "${text}"` };
+    }
+    case "duration": {
+      const n = typeof value === "number" ? value : parseDuration(text);
+      return n !== null && n >= 0
+        ? { value: n }
+        : { error: `needs a length of time like 1:30, 90 or 1h 30m, not "${text}"` };
+    }
     case "select":
     case "status": {
       const o = field.options?.find((x) => x.id === text || x.label.toLowerCase() === text.toLowerCase());
@@ -84,7 +104,7 @@ function one(
       return m ? { value: m[1] } : { error: "needs a date as YYYY-MM-DD" };
     }
     case "datetime": {
-      const iso = MANILA_ISO(text);
+      const iso = LOCAL_ISO(text);
       return iso ? { value: iso } : { error: "needs a date and time as YYYY-MM-DDTHH:MM (Manila)" };
     }
     case "time_range": {
@@ -98,8 +118,8 @@ function one(
           ? { value: { start: s, end: e } }
           : { error: "needs start and end dates as YYYY-MM-DD" };
       }
-      const s = MANILA_ISO(v.start);
-      const e = MANILA_ISO(v.end);
+      const s = LOCAL_ISO(v.start);
+      const e = LOCAL_ISO(v.end);
       return s && e
         ? { value: { start: s, end: e } }
         : { error: "needs start and end as YYYY-MM-DDTHH:MM (Manila)" };

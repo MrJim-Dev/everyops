@@ -24,6 +24,8 @@ import { FREE_PAGE_TYPES } from "@/lib/blueprint/types";
 import { GROUP_KINDS, validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { samplesThisYear } from "@/lib/catalog/shift";
+import { actorTypeFor } from "@/lib/engine/actors";
+import { allActions } from "@/lib/engine/branches";
 import { computeAll } from "@/lib/engine/compute";
 import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
 import { impliedRules, linePriceRules, widenMovements } from "@/lib/engine/implied-rules";
@@ -35,7 +37,7 @@ import { parsePartialJson } from "@/lib/partial-json";
 import { withCustomSite } from "@/lib/public/custom-site";
 import { MAX_HTML_BYTES } from "@/lib/public/html-page";
 import { copyFromBlocks, type SiteCopy, standardBlocks } from "@/lib/public/site-template";
-import { hhmm, todayKey } from "@/lib/time";
+import { fromLocal, hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
 import { CHOICE_REPAIR_SYSTEM, choicePatch, choiceRepairAnswer } from "./choice-repair-prompt";
 import { reviewCoverage } from "./coverage";
@@ -174,10 +176,18 @@ export function toView(v: Design["views"][number]): View {
 }
 
 /**
+ * Names that mean a drawn signature: anything ending in the word signature (Signature, Staff signature, Driver's
+ * signature, E-signature) or Signed by. "Signature date" or "Signed contract" stay what they are.
+ */
+export const SIGNATURE_NAME = /^(.{0,40}[\s'’-])?(e-?)?signature$|^signed by$/i;
+
+/**
  * A text field named exactly like contact details becomes that type ("Email" → email, "Phone" → phone, "Website"
  * → url), for designs that still used text for them. Only plain names: "Email template" stays text.
  */
 function contactType(f: { id: string; name: string; type: Field["type"] }): Field["type"] {
+  // A file field named Signature is a signature pad (the designer's schema has no signature type).
+  if (f.type === "file" && SIGNATURE_NAME.test(`${f.name}`.trim())) return "signature";
   if (f.type !== "text") return f.type;
   const name = `${f.name}`.trim().toLowerCase();
   const id = f.id.toLowerCase();
@@ -186,7 +196,7 @@ function contactType(f: { id: string; name: string; type: Field["type"] }): Fiel
     return "phone";
   if (/^(phone|mobile|phone_number|mobile_number|contact_number)$/.test(id)) return "phone";
   if (/^(website|web address|url|site)$/.test(name) || /^(website|url|web_address)$/.test(id)) return "url";
-  return "text";
+  return actorTypeFor(f.name) ?? "text";
 }
 
 type ResultType = NonNullable<Field["formula"]>["resultType"];
@@ -207,12 +217,20 @@ export function resultTypeOf(raw: string): ResultType {
 }
 
 export function toEntity(e: Design["entities"][number]): Entity {
+  const rangeOf = (raw: string): Field["range"] => {
+    const t = raw.trim().toLowerCase();
+    if (/^(dates?|days?|whole days?|all[- ]day)$/.test(t)) return "dates";
+    if (/^(times?|hours?|clock( times?)?|hh:mm)$/.test(t)) return "times";
+    return raw as Field["range"];
+  };
   const fields = e.fields.map((f) => {
     const out: Field = {
       id: f.id,
       name: f.name,
       type: contactType(f),
       ...(pick(f, ["required", "description", "options", "range", "relation"]) as Partial<Field>),
+      // range comes as plain text too: "days" or "whole days" mean dates, "hours" or "clock" times.
+      ...(f.range !== undefined ? { range: rangeOf(f.range) } : {}),
       // resultType and op come as plain text (the schema is near Gemini's limit); validation names a wrong one.
       ...(f.formula
         ? {
@@ -987,8 +1005,9 @@ export function ensurePublicForm(bp: Blueprint, brief: string): Blueprint {
 const toIso = (v: string) => {
   const t = v.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
-  const withZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t.length === 16 ? `${t}:00` : t}+08:00`;
-  const ms = Date.parse(withZone);
+  // Without an offset it's the workspace's wall time.
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(t)) return fromLocal(t);
+  const ms = Date.parse(t);
   return Number.isNaN(ms) ? null : new Date(ms).toISOString();
 };
 
@@ -1093,7 +1112,7 @@ export function toRecords(bp: Blueprint, samples: Design["samples"], now: Date):
   // would otherwise read as twelve added.
   const subtracted = new Set(
     (bp.rules ?? []).flatMap((rule) =>
-      rule.actions.flatMap((a) => {
+      allActions(rule).flatMap((a) => {
         const m =
           a.type === "adjust_number" ? /^\s*(?:0\s*)?-\s*([a-z_][a-z0-9_]*)\s*$/i.exec(a.delta) : null;
         return m ? [`${rule.trigger.entityId}.${m[1]}`] : [];

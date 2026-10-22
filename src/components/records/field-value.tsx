@@ -2,13 +2,22 @@
 
 import { ArrowUpRightIcon, CheckIcon, FileIcon } from "@phosphor-icons/react";
 import { useWorkspace } from "@/components/workspace/workspace-context";
-import { fileName, isFilePath, normalizeUrl, telHref, urlLabel } from "@/lib/blueprint/contact";
+import {
+  fileName,
+  isFilePath,
+  isSignaturePath,
+  normalizeUrl,
+  telHref,
+  urlLabel,
+} from "@/lib/blueprint/contact";
 import { displayKind } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { Field, FieldValue as Value } from "@/lib/blueprint/types";
 import {
+  currencyOf,
   formatDate,
   formatDateTime,
+  formatDuration,
   formatMoney,
   formatNumber,
   formatPercent,
@@ -17,6 +26,7 @@ import {
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { PersonChip } from "./person-chip";
+import { RatingStars } from "./rating-input";
 import { StatusBadge } from "./status-badge";
 
 const Empty = () => <span className="text-muted-foreground/50">—</span>;
@@ -38,7 +48,9 @@ export function FieldValue({
   switch (kind) {
     case "money":
       return (
-        <span className={cn("font-mono tabular text-[12.5px]", className)}>{formatMoney(Number(value))}</span>
+        <span className={cn("font-mono tabular text-[12.5px]", className)}>
+          {formatMoney(Number(value), { currency: currencyOf(blueprint) })}
+        </span>
       );
     case "number":
       return (
@@ -50,6 +62,14 @@ export function FieldValue({
       return (
         <span className={cn("font-mono tabular text-[12.5px]", className)}>
           {formatPercent(Number(value))}
+        </span>
+      );
+    case "rating":
+      return <RatingStars value={Number(value)} className={className} />;
+    case "duration":
+      return (
+        <span className={cn("font-mono tabular text-[12.5px]", className)}>
+          {formatDuration(Number(value))}
         </span>
       );
     case "checkbox":
@@ -136,6 +156,17 @@ export function FieldValue({
         <span className={cn("truncate", className)}>{String(value)}</span>
       );
     }
+    case "signature":
+      return isSignaturePath(value, { preview: true }) ? (
+        // biome-ignore lint/performance/noImgElement: a private upload served to the team, not an optimizable asset
+        <img
+          src={value}
+          alt={`${field.name} (signed)`}
+          className={cn("h-8 w-auto max-w-[140px] rounded-sm bg-white object-contain px-1", className)}
+        />
+      ) : (
+        <Empty />
+      );
     case "file":
       return isFilePath(value) ? (
         <a

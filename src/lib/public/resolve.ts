@@ -4,6 +4,7 @@
  * Only fields a block lists are included, and a form only offers records people may see (bookable resources,
  * or record types a public block already shows), never, say, the list of customers.
  */
+
 import { displayKind, editableFields } from "@/lib/blueprint/field-kind";
 import { formSteps, placeExtras } from "@/lib/blueprint/form-steps";
 import { findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
@@ -27,14 +28,18 @@ import type {
 import { applyFilter, sortRecords } from "@/lib/engine/query";
 import { autoReferenceFields } from "@/lib/engine/references";
 import {
+  currencyOf,
   formatDate,
   formatDateTime,
+  formatDuration,
   formatMoney,
   formatNumber,
   formatPercent,
   formatRange,
+  formatRating,
   isTimeRange,
 } from "@/lib/format";
+import { timeZoneOf } from "@/lib/time";
 import { type SiteDetails, withIncludes } from "./bindings";
 import { liveBlocksOf, liveSiteHtml } from "./custom-site";
 import { type HeroFact, heroFacts } from "./hero-facts";
@@ -82,6 +87,8 @@ export type PublicResource = {
 export type PublicForm = {
   viewId: string;
   title: string;
+  /** The workspace's time zone: booking pages read "today" and slot times on its clock. */
+  timeZone?: string;
   intro?: string;
   submitLabel: string;
   /** Text that was written into the button label but is too long for a button; shown above it. */
@@ -188,6 +195,10 @@ export type PublicSite = {
   pages: { id: string; name: string; type: "landing" | "form" | "html" | "layout" }[];
   /** The header's button: the main public form, named for what it does ("Book a court"). */
   book?: { id: string; label: string };
+  /** The currency the site's prices read in. */
+  currency?: string;
+  /** The workspace's time zone, for the dates visitors see. */
+  timeZone?: string;
 };
 
 export const sitePath = (slug: string, viewId?: string) => (viewId ? `/s/${slug}/${viewId}` : `/s/${slug}`);
@@ -242,6 +253,8 @@ export function siteOf(slug: string, name: string, bp: Blueprint): PublicSite | 
     slug,
     name,
     pages,
+    currency: currencyOf(bp),
+    timeZone: timeZoneOf(bp),
     ...(book ? { book: { id: formPageOf(bp, book) ?? book.id, label: bookLabel(bp, book.id) } } : {}),
   };
 }
@@ -264,14 +277,21 @@ export function formatCell(
   switch (kind) {
     case "image":
       return { ...base, kind: "image", text: typeof value === "string" ? value : "" };
+    case "signature":
+      // The drawing is the team's; anywhere it's listed it only says it's there.
+      return { ...base, kind: "text", text: "Signed" };
     case "long_text":
       return { ...base, kind: "markdown", text: String(value) };
     case "money":
-      return { ...base, kind: "number", text: formatMoney(Number(value)) };
+      return { ...base, kind: "number", text: formatMoney(Number(value), { currency: currencyOf(bp) }) };
     case "number":
       return { ...base, kind: "number", text: formatNumber(Number(value)) };
     case "percent":
       return { ...base, kind: "number", text: formatPercent(Number(value)) };
+    case "rating":
+      return { ...base, kind: "text", text: formatRating(Number(value)) };
+    case "duration":
+      return { ...base, kind: "number", text: formatDuration(Number(value)) };
     case "date":
       return { ...base, kind: "text", text: typeof value === "string" ? formatDate(value) : "" };
     case "datetime":
@@ -534,6 +554,7 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
   }
   return {
     viewId: view.id,
+    timeZone: timeZoneOf(bp),
     title: view.name,
     intro: view.intro,
     ...(() => {
@@ -575,7 +596,9 @@ export function publicExtras(
     return {
       id: r.id,
       title: recordTitle(items, r),
-      ...(Number.isFinite(price) ? { price, priceText: formatMoney(price) } : {}),
+      ...(Number.isFinite(price)
+        ? { price, priceText: formatMoney(price, { currency: currencyOf(bp) }) }
+        : {}),
     };
   });
   return offered.length

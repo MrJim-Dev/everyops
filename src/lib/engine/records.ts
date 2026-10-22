@@ -1,4 +1,4 @@
-import { isEmail, isFilePath, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
+import { isEmail, isFilePath, isPhone, isSignaturePath, normalizeUrl } from "@/lib/blueprint/contact";
 import { findRecord, getEntity, optionOf } from "@/lib/blueprint/lookup";
 import type {
   Blueprint,
@@ -8,9 +8,10 @@ import type {
   RecordData,
   WorkspaceData,
 } from "@/lib/blueprint/types";
-import { formatRange, isTimeRange } from "@/lib/format";
+import { formatRange, isTimeRange, RATING_MAX } from "@/lib/format";
 import { isOn, runSaveRules } from "./automations";
 import { findConflict, resourceLabel } from "./availability";
+import { actionsFor, allActions } from "./branches";
 import type { RecordOp } from "./changes";
 import { computeAll } from "./compute";
 import { recordContext } from "./context";
@@ -38,7 +39,14 @@ export function validateRecord(
 ): FieldError[] {
   const errors: FieldError[] = [];
   for (const field of entity.fields) {
-    if (field.type === "formula" || field.type === "rollup") continue;
+    // Computed or stamped by EveryOps, never typed.
+    if (
+      field.type === "formula" ||
+      field.type === "rollup" ||
+      field.type === "created_by" ||
+      field.type === "edited_by"
+    )
+      continue;
     const value = data[field.id];
     if (field.required && isEmpty(value) && !notYet?.has(field.id)) {
       errors.push({ fieldId: field.id, message: `${field.name} is required` });
@@ -51,6 +59,17 @@ export function validateRecord(
       case "percent":
         if (typeof value !== "number" || Number.isNaN(value))
           errors.push({ fieldId: field.id, message: `${field.name} must be a number` });
+        break;
+      case "rating":
+        if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > RATING_MAX)
+          errors.push({ fieldId: field.id, message: `${field.name} must be 1 to ${RATING_MAX} stars` });
+        break;
+      case "duration":
+        if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+          errors.push({
+            fieldId: field.id,
+            message: `${field.name} needs a length of time, like 1:30 or 45 min`,
+          });
         break;
       case "select":
       case "status":
@@ -91,6 +110,11 @@ export function validateRecord(
         if (!isFilePath(value))
           errors.push({ fieldId: field.id, message: `Upload ${field.name.toLowerCase()} again` });
         break;
+      case "signature":
+        // A preview keeps the drawing in the page; a saved workspace stores it as a document.
+        if (!isSignaturePath(value, { preview: true }))
+          errors.push({ fieldId: field.id, message: `Sign ${field.name.toLowerCase()} again` });
+        break;
     }
   }
   if (errors.length === 0 && entity.booking) {
@@ -127,7 +151,7 @@ function contributions(bp: Blueprint, records: DataRecord[], record: DataRecord,
       continue;
     const ctx = recordContext(bp, entity, record.data, records, now);
     if (rule.when && !truthy(run(rule.when, ctx))) continue;
-    for (const raw of rule.actions) {
+    for (const raw of actionsFor(rule, ctx)) {
       const action = completeAction(bp, rule, raw);
       if (action?.type !== "adjust_number" || action.target.kind !== "relation") continue;
       const targetId = record.data[action.target.fieldId];
@@ -187,7 +211,11 @@ function rulesReadComputed(bp: Blueprint, entityId: string): boolean {
   );
   return bp.rules.some((rule) => {
     if (!isOn(rule) || rule.trigger.entityId !== entityId) return false;
-    const text = [rule.when ?? "", ...rule.actions.map((a) => JSON.stringify(a))].join(" ");
+    const text = [
+      rule.when ?? "",
+      ...(rule.branches ?? []).map((b) => b.when ?? ""),
+      ...allActions(rule).map((a) => JSON.stringify(a)),
+    ].join(" ");
     if (/\b[a-z_][a-z0-9_]*\.[a-z_]/i.test(text.replace(/'[^']*'/g, ""))) return true;
     return (text.match(/[a-z_][a-z0-9_]*/gi) ?? []).some((word) => computed.has(word));
   });

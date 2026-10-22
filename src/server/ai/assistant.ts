@@ -1,3 +1,4 @@
+import { currencyOf, formatMoney } from "@/lib/format";
 import { htmlConnectionProblems } from "@/lib/public/html-connections";
 import "server-only";
 import type { Part } from "@google/genai";
@@ -38,6 +39,8 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { requestGuide } from "@/lib/catalog/playbooks";
 import { parseLayout } from "@/lib/components/registry";
 import type { OutsideAction } from "@/lib/connections";
+import type { Viewer } from "@/lib/engine/access";
+import { actorTypeFor } from "@/lib/engine/actors";
 import { widgetValue } from "@/lib/engine/aggregate";
 import {
   applyOps,
@@ -64,7 +67,7 @@ import {
 } from "@/lib/public/resolve";
 import { copyFromBlocks, mainForm, standardBlocks } from "@/lib/public/site-template";
 import { type Invite, type Member, randomToken } from "@/lib/store/workspace-model";
-import { todayKey } from "@/lib/time";
+import { addDays, todayKey, utcOffset, zone } from "@/lib/time";
 import { personActor } from "../activity";
 import { type OutsideTools, outsideTools, proposeActions } from "../connections";
 import {
@@ -78,7 +81,7 @@ import {
 import { toAssistantRule } from "./assistant-rule";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
 import { reviewCoverage } from "./coverage";
-import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toView } from "./design";
+import { fillNotesView, SIGNATURE_NAME, tidyBlocks, toEntity, toFieldValue, toView } from "./design";
 import { view } from "./design-prompt";
 import { dataDigest } from "./digest";
 import { generateJsonHedged } from "./gemini";
@@ -391,10 +394,20 @@ export function toDesignOps(
       case "add_field":
         if (o.entityId && o.field) {
           const owner = bp.entities.find((e) => e.id === o.entityId)?.name ?? o.entityId;
+          // The schema has no signature or created_by / edited_by type: a file field named Signature is a signature
+          // pad, and a text field named Created by / Last edited by is stamped by the app.
+          const asked = o.field as Field;
+          const actorType = asked.type === "text" ? actorTypeFor(asked.name) : null;
+          const typed =
+            asked.type === "file" && SIGNATURE_NAME.test(asked.name.trim())
+              ? { ...asked, type: "signature" as const }
+              : actorType
+                ? { ...asked, type: actorType }
+                : asked;
           ops.push({
             op: "add_field",
             entityId: o.entityId,
-            field: withStatusOptions(o.field as Field, owner),
+            field: withStatusOptions(typed, owner),
           });
         } else errors.push(`${at}: needs entityId and field`);
         break;
@@ -1078,7 +1091,11 @@ export async function assistantTurn(input: {
   memory?: WorkspaceMemory;
   /** The one-line description setup wrote for the workspace. */
   summary?: string;
+  /** Owners and admins: the workspace's webhook endpoints a call_api automation can post to. */
+  endpoints?: { id: string; label: string; acceptsCalls: boolean }[];
   signal?: AbortSignal;
+  /** Who is asking, so lookups find only the records they may see (src/lib/engine/access.ts). */
+  viewer?: Viewer;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
   const role = input.canDesign
@@ -1104,10 +1121,21 @@ export async function assistantTurn(input: {
           ].join("\n") || "- nobody besides the owner"
         }`
       : "";
+  // The endpoints a call_api automation can post to, by id and name only (URLs and secrets stay in Settings).
+  const endpointsText =
+    input.canDesign && input.endpoints
+      ? `\n\nWebhook endpoints (call_api posts to one by its id; only those that accept automation calls can be used):\n${
+          input.endpoints
+            .map(
+              (e) => `- ${e.id}: ${e.label}${e.acceptsCalls ? "" : " (doesn't accept automation calls yet)"}`,
+            )
+            .join("\n") || "- none yet"
+        }`
+      : "";
   const today = todayKey();
-  const weekday = new Date(`${today}T12:00:00+08:00`).toLocaleDateString("en-PH", {
+  const weekday = new Date(`${today}T12:00:00Z`).toLocaleDateString("en-PH", {
     weekday: "long",
-    timeZone: "Asia/Manila",
+    timeZone: "UTC",
   });
   // A digest of the records instead of every record, plus exact lookups (SQL) for what this message needs.
   const digest = dataDigest(bp, records, { ids: screen.focusIds, entityId: screen.entityId });
@@ -1123,11 +1151,12 @@ export async function assistantTurn(input: {
     blueprint: bp,
     digest,
     screen: screen.text,
-    today: `${weekday}, ${today}`,
+    today: `${weekday}, ${today} (time zone ${zone()}, UTC${utcOffset()})`,
     messages: input.messages,
     onStatus: status,
     signal: input.signal,
     outside,
+    viewer: input.viewer,
   });
   const problem = lookupProblem(looked);
   if (problem)
@@ -1192,6 +1221,8 @@ ${about || "Nothing saved yet. Work it out from the workspace's pages and record
 Sidebar pages (in order), with their tabs:
 ${sidebar}
 
+Money is in ${currencyOf(bp)}, written like ${formatMoney(1250, { currency: currencyOf(bp) })}.
+
 Blueprint:
 ${JSON.stringify(bp)}
 ${
@@ -1209,10 +1240,10 @@ ${written}`
     : ""
 }
 
-Today in Manila: ${weekday}, ${today}
+Today (time zone ${zone()}, UTC${utcOffset()}; every date and time in this workspace is on this clock): ${weekday}, ${today}
 Coming days: ${comingDays(today)}
 
-${permissions}${team}
+${permissions}${team}${endpointsText}
 
 What the person is looking at:
 ${screen.text}
@@ -1989,15 +2020,15 @@ export function withStatusOptions(field: Field, entityName: string): Field {
 
 /** The next two weeks as "Mon, Oct 19 (2026-10-19)", so dates like "next Monday" are read off, not worked out. */
 export function comingDays(today: string, count = 14): string {
-  const start = new Date(`${today}T12:00:00+08:00`).getTime();
   return Array.from({ length: count }, (_, i) => {
-    const day = new Date(start + (i + 1) * 86_400_000);
-    const label = day.toLocaleDateString("en-US", {
+    // Calendar days: noon UTC read in UTC is that day in every zone.
+    const key = addDays(today, i + 1);
+    const label = new Date(`${key}T12:00:00Z`).toLocaleDateString("en-US", {
       weekday: "short",
       month: "short",
       day: "numeric",
-      timeZone: "Asia/Manila",
+      timeZone: "UTC",
     });
-    return `${label} (${day.toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })})`;
+    return `${label} (${key})`;
   }).join("; ");
 }

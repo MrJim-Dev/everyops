@@ -2,6 +2,7 @@
 
 import { MinusIcon, PlusIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { useCurrency } from "@/components/workspace/currency";
 import { formatMoney } from "@/lib/format";
 import type { PublicExtraItem } from "@/lib/public/resolve";
 
@@ -18,6 +19,7 @@ export function ExtrasPicker({
   onChange: (id: string, n: number) => void;
 }) {
   const total = items.reduce((sum, i) => sum + (i.price ?? 0) * (value[i.id] ?? 0), 0);
+  const currency = useCurrency();
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="mb-1 text-[13.5px] font-medium">{title}</legend>
@@ -63,7 +65,8 @@ export function ExtrasPicker({
       </ul>
       {total > 0 ? (
         <p className="text-right text-[13px] text-muted-foreground">
-          Add-ons <span className="font-mono text-foreground tabular">{formatMoney(total)}</span>
+          Add-ons{" "}
+          <span className="font-mono text-foreground tabular">{formatMoney(total, { currency })}</span>
         </p>
       ) : null}
     </fieldset>

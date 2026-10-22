@@ -2,7 +2,7 @@ import { displayKind } from "@/lib/blueprint/field-kind";
 import { optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, Field } from "@/lib/blueprint/types";
 import { applyFilter } from "@/lib/engine/query";
-import { formatMoney } from "@/lib/format";
+import { currencyOf, formatMoney } from "@/lib/format";
 import { liveFilter, offeringOf, paymentsOf } from "./site-template";
 
 /** A fact a visitor wants before booking, shown under the hero's buttons. Built only from public-safe data. */
@@ -37,7 +37,7 @@ function startingPrice(bp: Blueprint, offer: Entity, live: DataRecord[]): string
     const prices = live.map((r) => Number(r.data[own.id])).filter((n) => Number.isFinite(n) && n > 0);
     if (prices.length) {
       const unit = unitOf(own);
-      return `From ${formatMoney(Math.min(...prices))}${unit ? ` ${unit}` : ""}`;
+      return `From ${formatMoney(Math.min(...prices), { currency: currencyOf(bp) })}${unit ? ` ${unit}` : ""}`;
     }
   }
   // Court bookings price the booking, not the court: "Rate per hour" = 400.
@@ -53,7 +53,7 @@ function startingPrice(bp: Blueprint, offer: Entity, live: DataRecord[]): string
     const amount = rate?.formula ? Number(rate.formula.expr) : Number.NaN;
     if (rate && amount > 0) {
       const unit = unitOf(rate);
-      return `From ${formatMoney(amount)}${unit ? ` ${unit}` : ""}`;
+      return `From ${formatMoney(amount, { currency: currencyOf(bp) })}${unit ? ` ${unit}` : ""}`;
     }
   }
   return undefined;

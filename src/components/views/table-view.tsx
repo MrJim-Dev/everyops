@@ -2,7 +2,9 @@
 
 import {
   ArrowsOutSimpleIcon,
+  BarcodeIcon,
   CaretDownIcon,
+  CaretLeftIcon,
   CaretRightIcon,
   CaretUpIcon,
   DownloadSimpleIcon,
@@ -10,13 +12,14 @@ import {
   TrashIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ImportDialog } from "@/components/import/import-dialog";
 import { SheetSyncBar } from "@/components/import/sheet-sync-bar";
 import { FieldValue } from "@/components/records/field-value";
 import { useRecordPanels } from "@/components/records/record-panels";
 import { StatusMenu } from "@/components/records/status-menu";
+import { ScanDialog } from "@/components/scan/scan-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -48,13 +51,15 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useReportView } from "@/lib/assistant/screen-store";
 import { displayKind, isNumericKind, statusField } from "@/lib/blueprint/field-kind";
 import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
+import { sameCode, scannableFields } from "@/lib/blueprint/scannable";
 import type { DataRecord, Field, Sort, TableView as TableViewConfig } from "@/lib/blueprint/types";
 import { downloadText, fileSlug } from "@/lib/download";
-import { applyFilter, searchRecords, sortRecords } from "@/lib/engine/query";
-import { toCsv, toSheet, valueText } from "@/lib/engine/value-text";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { tableRows } from "@/lib/engine/table-rows";
+import { toCsv, toSheet } from "@/lib/engine/value-text";
+import { currencyOf, currencySymbol, formatDuration, formatMoney, formatNumber } from "@/lib/format";
 import { useFreshStore } from "@/lib/motion/fresh";
 import { useViewPref } from "@/lib/store/view-prefs";
+import type { StoredRecord } from "@/lib/store/workspace-sync";
 import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 import { canEditInline, EditableCell } from "./editable-cell";
@@ -65,8 +70,33 @@ import { ToolbarSummary, ViewToolbar } from "./view-toolbar";
 
 const GROUPABLE = new Set(["choice", "status", "relation", "person", "checkbox"]);
 const NO_GROUP = "__none";
+/**
+ * Rows on screen at once. A busy workspace's history runs to tens of thousands of rows; drawing them all crashed the
+ * tab at 20,000. Search, sorting, grouping, totals and select-all still cover every matching row.
+ */
+export const PAGE_SIZE = 100;
 
 type Group = { key: string; label: string; rows: DataRecord[] };
+
+type RemoteRows = {
+  total: number;
+  rows: StoredRecord[];
+  totals: Record<string, number>;
+  groups: { key: string; label: string; count: number; totals: Record<string, number> }[] | null;
+};
+
+/** A page of a table worked out on the server (src/server/view-rows.ts), or null when it can't be read. */
+async function fetchRows(
+  workspaceId: string,
+  viewId: string,
+  qs: URLSearchParams,
+): Promise<RemoteRows | null> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/views/${encodeURIComponent(viewId)}/rows?${qs}`,
+    { cache: "no-store" },
+  ).catch(() => null);
+  return res?.ok ? ((await res.json().catch(() => null)) as RemoteRows | null) : null;
+}
 
 export function TableView({ view }: { view: TableViewConfig }) {
   const ws = useWorkspace();
@@ -75,6 +105,21 @@ export function TableView({ view }: { view: TableViewConfig }) {
   const actions = useRecordActions();
   const applyChange = useWorkspaces((s) => s.applyChange);
   const entity = getEntity(blueprint, view.entityId);
+  // Records with a code field (Barcode, SKU, Serial number) can be found by scanning it.
+  const codes = scannableFields(entity);
+  const [scanning, setScanning] = useState(false);
+  const onScan = (code: string) => {
+    const found = records.find(
+      (r) => r.entityId === entity.id && codes.some((f) => sameCode(r.data[f.id], code)),
+    );
+    if (found) return openRecord(found.id);
+    const one = entity.name.toLowerCase();
+    toast.info(`No ${one} with ${codes[0].name.toLowerCase()} ${code}`, {
+      ...(editable
+        ? { action: { label: `Add ${one}`, onClick: () => openCreate(entity.id, { [codes[0].id]: code }) } }
+        : {}),
+    });
+  };
   const fields = view.fieldIds.map((id) => getField(entity, id));
   const fresh = useFreshStore((s) => s.ids);
   const [query, setQuery] = useState("");
@@ -92,7 +137,9 @@ export function TableView({ view }: { view: TableViewConfig }) {
   const groupable = entity.fields.filter((f) => GROUPABLE.has(displayKind(blueprint, f)));
   const groupField = groupable.find((f) => f.id === groupBy);
   const numeric = (f: Field) => isNumericKind(displayKind(blueprint, f));
-  const summable = (f: Field) => ["money", "number"].includes(displayKind(blueprint, f));
+  // Columns with a total: amounts and counts add up, time adds up as time, and ratings show their average.
+  const summable = (f: Field) =>
+    ["money", "number", "duration", "rating"].includes(displayKind(blueprint, f));
 
   const moveColumn = (fieldId: string, to: number) => {
     const from = view.fieldIds.indexOf(fieldId);
@@ -111,39 +158,95 @@ export function TableView({ view }: { view: TableViewConfig }) {
       toast.success("Columns reordered", { description: "Saved to History, where you can undo it." });
   };
 
-  const rows = useMemo(() => {
-    const filtered = applyFilter(blueprint, entity, records, view.filter);
-    const searched = searchRecords(filtered, query, (r) =>
-      [recordTitle(entity, r), ...fields.map((f) => JSON.stringify(r.data[f.id] ?? ""))].join(" "),
+  // Large record types page on the server: the browser has only a recent window of them (src/lib/engine/window.ts).
+  const windowed = useWorkspaces((s) =>
+    ws.mode === "live" ? s.workspaces[ws.id]?.windowed?.[entity.id] : undefined,
+  );
+  const absorb = useWorkspaces((s) => s.absorb);
+  // Paging: the page goes back to the first when the search, sort or grouping changes.
+  const pageKey = JSON.stringify([view.id, query, sort, groupBy]);
+  const [paging, setPaging] = useState({ key: pageKey, page: 0 });
+  // A new search, sort or grouping starts again from the first page (and stays there when it changes back).
+  if (paging.key !== pageKey) setPaging({ key: pageKey, page: 0 });
+  const pageIndex = paging.key === pageKey ? paging.page : 0;
+  const [remote, setRemote] = useState<RemoteRows | null>(null);
+  const remoteKey = windowed ? JSON.stringify([pageKey, pageIndex]) : null;
+  useEffect(() => {
+    if (!remoteKey) return;
+    let live = true;
+    const timer = setTimeout(
+      async () => {
+        const qs = new URLSearchParams({
+          offset: String(pageIndex * PAGE_SIZE),
+          limit: String(PAGE_SIZE),
+          q: query.trim(),
+          ...(sort?.length ? { sort: JSON.stringify(sort) } : {}),
+          ...(groupField ? { group: groupField.id } : {}),
+        });
+        const body = await fetchRows(ws.id, view.id, qs);
+        if (!live || !body) return;
+        absorb(ws.id, body.rows);
+        setRemote(body);
+      },
+      query.trim() ? 250 : 0,
     );
-    return sortRecords(searched, sort);
-  }, [blueprint, entity, records, view.filter, query, sort, fields]);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [remoteKey, pageIndex, query, sort, groupField, ws.id, view.id, absorb]);
+
+  const local = useMemo(
+    () =>
+      windowed
+        ? { rows: [], groups: null }
+        : tableRows(blueprint, entity, view, records, { query, sort, groupField }),
+    [windowed, blueprint, entity, view, records, query, sort, groupField],
+  );
+  const byId = useMemo(() => new Map(records.map((r) => [r.id, r])), [records]);
+  const server = windowed ? remote : null;
+  const rows: DataRecord[] = server ? server.rows.map((s) => byId.get(s.record.id) ?? s.record) : local.rows;
+  const groupKey = (r: DataRecord) => {
+    const raw = groupField ? r.data[groupField.id] : undefined;
+    return raw === undefined || raw === null || raw === "" ? "" : String(raw);
+  };
+  const groups: Group[] | null = server
+    ? (server.groups
+        ?.map((g) => ({ key: g.key, label: g.label, rows: rows.filter((r) => groupKey(r) === g.key) }))
+        .filter((g) => g.rows.length) ?? null)
+    : local.groups;
+  const serverGroup = (key: string) => server?.groups?.find((g) => g.key === key);
   useReportView({ viewId: view.id, search: query.trim() || undefined });
-
-  // Groups follow the field's option order; other values sort by name, and empty values go last.
-  const groups = useMemo((): Group[] | null => {
-    if (!groupField) return null;
-    const map = new Map<string, Group>();
-    for (const o of groupField.options ?? []) map.set(o.id, { key: o.id, label: o.label, rows: [] });
-    for (const row of rows) {
-      const raw = row.data[groupField.id];
-      const key = raw === undefined || raw === null || raw === "" ? "" : String(raw);
-      let group = map.get(key);
-      if (!group) {
-        const label = key
-          ? valueText(blueprint, records, groupField, raw) || key
-          : `No ${groupField.name.toLowerCase()}`;
-        group = { key, label, rows: [] };
-        map.set(key, group);
-      }
-      group.rows.push(row);
-    }
-    const list = [...map.values()].filter((g) => g.rows.length);
-    if (!groupField.options) list.sort((a, b) => (a.key ? (b.key ? a.label.localeCompare(b.label) : -1) : 1));
-    return list;
-  }, [groupField, rows, blueprint, records]);
-
   const visibleIds = rows.map((r) => r.id);
+  const ordered = groups ? groups.flatMap((g) => (collapsed.has(g.key) ? [] : g.rows)) : rows;
+  // Rows in all: the server's count when it pages there, else every matching row here.
+  const count = server ? server.total : ordered.length;
+  const pages = Math.max(1, Math.ceil(count / PAGE_SIZE));
+  const page = Math.min(pageIndex, pages - 1);
+  const goTo = (n: number) => setPaging({ key: pageKey, page: Math.max(0, Math.min(pages - 1, n)) });
+  const onPage = new Set(
+    (server ? ordered : ordered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)).map((r) => r.id),
+  );
+  const paged = count > PAGE_SIZE;
+  const shownRows = (list: DataRecord[]) => (paged && !server ? list.filter((r) => onPage.has(r.id)) : list);
+  // Exports cover every matching row, read from the server page by page when it pages there.
+  const allRows = async (): Promise<DataRecord[]> => {
+    if (!windowed) return rows;
+    const out: DataRecord[] = [];
+    for (let offset = 0; ; offset += 500) {
+      const qs = new URLSearchParams({
+        offset: String(offset),
+        limit: "500",
+        q: query.trim(),
+        ...(sort?.length ? { sort: JSON.stringify(sort) } : {}),
+      });
+      const body = await fetchRows(ws.id, view.id, qs);
+      if (!body) break;
+      out.push(...body.rows.map((s) => s.record));
+      if (offset + 500 >= body.total) break;
+    }
+    return out;
+  };
   const picked = visibleIds.filter((id) => selected.has(id));
   const allPicked = picked.length > 0 && picked.length === visibleIds.length;
   const toggle = (id: string) =>
@@ -165,7 +268,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
     const res = await fetch("/api/export/xlsx", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, ...sheet }),
+      body: JSON.stringify({ name, ...sheet, currencySymbol: currencySymbol(currencyOf(blueprint)) }),
     }).catch(() => null);
     if (!res?.ok) return void toast.error("The Excel file couldn't be made. Try CSV instead.");
     const url = URL.createObjectURL(await res.blob());
@@ -188,10 +291,19 @@ export function TableView({ view }: { view: TableViewConfig }) {
     else toast.error("Couldn't update all of them", { description: result.message });
   };
 
-  const total = (f: Field, list: DataRecord[]) =>
-    list.reduce((sum, r) => sum + (Number(r.data[f.id]) || 0), 0);
-  const formatTotal = (f: Field, value: number) =>
-    displayKind(blueprint, f) === "money" ? formatMoney(value) : formatNumber(value);
+  const total = (f: Field, list: DataRecord[]) => {
+    if (displayKind(blueprint, f) !== "rating")
+      return list.reduce((sum, r) => sum + (Number(r.data[f.id]) || 0), 0);
+    const rated = list.map((r) => Number(r.data[f.id])).filter((n) => n > 0);
+    return rated.length ? rated.reduce((a, b) => a + b, 0) / rated.length : 0;
+  };
+  const formatTotal = (f: Field, value: number) => {
+    const kind = displayKind(blueprint, f);
+    if (kind === "money") return formatMoney(value, { currency: currencyOf(blueprint) });
+    if (kind === "duration") return formatDuration(value);
+    if (kind === "rating") return value ? `${formatNumber(Math.round(value * 10) / 10)} avg` : "";
+    return formatNumber(value);
+  };
 
   const toggleSort = (fieldId: string) =>
     setSort((s) =>
@@ -314,6 +426,12 @@ export function TableView({ view }: { view: TableViewConfig }) {
         ) : (
           <>
             <SearchInput value={query} onChange={setQuery} placeholder={`Search ${plural}`} />
+            {codes.length ? (
+              <Button variant="outline" size="sm" onClick={() => setScanning(true)}>
+                <BarcodeIcon data-icon="inline-start" />
+                Scan
+              </Button>
+            ) : null}
             {groupable.length ? (
               <Select
                 value={groupBy}
@@ -360,13 +478,21 @@ export function TableView({ view }: { view: TableViewConfig }) {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => exportCsv(rows)}>CSV</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => void exportXlsx(rows)}>Excel (.xlsx)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void allRows().then(exportCsv)}>CSV</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void allRows().then(exportXlsx)}>
+                    Excel (.xlsx)
+                  </DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
             <ToolbarSummary>
-              {rows.length} {rows.length === 1 ? entity.name.toLowerCase() : plural}
+              {count.toLocaleString("en-PH")} {count === 1 ? entity.name.toLowerCase() : plural}
+              {/* Staff and viewers who see only their own records are told so, so a short list isn't a surprise. */}
+              {entity.access && (ws.role === "staff" || ws.role === "viewer")
+                ? entity.access.by === "created_by"
+                  ? " · only the ones you added"
+                  : " · only the ones assigned to you"
+                : null}
             </ToolbarSummary>
           </>
         )}
@@ -374,8 +500,19 @@ export function TableView({ view }: { view: TableViewConfig }) {
       {editable && ws.mode === "live" ? (
         <ImportDialog open={importing} onOpenChange={setImporting} entityId={entity.id} />
       ) : null}
+      {codes.length ? (
+        <ScanDialog
+          open={scanning}
+          onOpenChange={setScanning}
+          title={`Find a ${entity.name.toLowerCase()}`}
+          description={`Scan its ${codes[0].name.toLowerCase()} with the camera or a handheld scanner to open it.`}
+          onScan={onScan}
+        />
+      ) : null}
       {ws.mode === "live" ? <SheetSyncBar entityId={entity.id} /> : null}
-      {rows.length === 0 ? (
+      {windowed && !server ? (
+        <p className="px-5 py-10 text-center text-[13px] text-muted-foreground">Loading {plural}…</p>
+      ) : count === 0 ? (
         <ViewEmpty
           title={query ? "No matches" : `No ${plural} yet`}
           description={
@@ -467,6 +604,8 @@ export function TableView({ view }: { view: TableViewConfig }) {
               {groups
                 ? groups.map((group) => {
                     const open = !collapsed.has(group.key);
+                    // On a later page, only the groups with rows there (and closed ones, to open them) show.
+                    if (paged && open && !group.rows.some((r) => onPage.has(r.id))) return null;
                     return (
                       <Fragment key={group.key || "__empty"}>
                         <TableRow className="h-9 bg-muted/30 hover:bg-muted/50">
@@ -493,7 +632,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
                               )}
                               {group.label}
                               <span className="font-normal text-muted-foreground tabular">
-                                {group.rows.length}
+                                {(serverGroup(group.key)?.count ?? group.rows.length).toLocaleString("en-PH")}
                               </span>
                             </button>
                           </TableCell>
@@ -507,16 +646,19 @@ export function TableView({ view }: { view: TableViewConfig }) {
                               )}
                             >
                               {view.totals && summable(field)
-                                ? formatTotal(field, total(field, group.rows))
+                                ? formatTotal(
+                                    field,
+                                    serverGroup(group.key)?.totals[field.id] ?? total(field, group.rows),
+                                  )
                                 : null}
                             </TableCell>
                           ))}
                         </TableRow>
-                        {open ? group.rows.map(renderRow) : null}
+                        {open ? shownRows(group.rows).map(renderRow) : null}
                       </Fragment>
                     );
                   })
-                : rows.map(renderRow)}
+                : shownRows(rows).map(renderRow)}
             </TableBody>
             {view.totals && fields.some(summable) ? (
               <TableFooter className="sticky bottom-0 bg-background">
@@ -532,13 +674,37 @@ export function TableView({ view }: { view: TableViewConfig }) {
                         numeric(field) && "text-right font-mono text-[12.5px] font-medium tabular",
                       )}
                     >
-                      {i === 0 ? "Total" : summable(field) ? formatTotal(field, total(field, rows)) : null}
+                      {i === 0
+                        ? "Total"
+                        : summable(field)
+                          ? formatTotal(field, server ? (server.totals[field.id] ?? 0) : total(field, rows))
+                          : null}
                     </TableCell>
                   ))}
                 </TableRow>
               </TableFooter>
             ) : null}
           </Table>
+          {paged ? (
+            <nav
+              aria-label="Pages"
+              className="flex items-center justify-end gap-3 border-t px-5 py-2.5 text-[12.5px] text-muted-foreground"
+            >
+              <span className="tabular">
+                {(page * PAGE_SIZE + 1).toLocaleString("en-PH")}–
+                {Math.min((page + 1) * PAGE_SIZE, count).toLocaleString("en-PH")} of{" "}
+                {count.toLocaleString("en-PH")}
+              </span>
+              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => goTo(page - 1)}>
+                <CaretLeftIcon data-icon="inline-start" />
+                Previous
+              </Button>
+              <Button variant="outline" size="sm" disabled={page >= pages - 1} onClick={() => goTo(page + 1)}>
+                Next
+                <CaretRightIcon data-icon="inline-end" />
+              </Button>
+            </nav>
+          ) : null}
         </div>
       )}
     </div>

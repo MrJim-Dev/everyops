@@ -3,6 +3,7 @@ import { db } from "@/server/db";
 import { writePageText } from "@/server/record-writes";
 import { apiError, badRequest, jsonBody, restRoute } from "@/server/rest";
 import { currentBlueprint } from "@/server/workspace-data";
+import { enterZone } from "@/server/zone";
 
 type Ctx = RouteContext<"/api/v1/workspaces/[id]/pages/[viewId]">;
 
@@ -35,6 +36,7 @@ export async function PUT(request: Request, { params }: Ctx) {
       `Page text is limited to ${MAX_PAGE_CHARS.toLocaleString("en-US")} characters.`,
     );
   const bp = await currentBlueprint(db, id);
+  enterZone(bp);
   const view = bp?.views.find((v) => v.id === viewId);
   if (!view || (view.type !== "document" && view.type !== "html"))
     return apiError(404, "not_found", `No document or custom HTML page "${viewId}".`);

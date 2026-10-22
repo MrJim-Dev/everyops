@@ -7,8 +7,10 @@ import { Input } from "@/components/ui/input";
 import { signUp } from "@/lib/auth/client";
 import { safeNext } from "@/lib/auth/redirect";
 import { type FormErrors, fieldErrors, signUpSchema } from "@/lib/auth/schemas";
+import { WAITLIST_CODE } from "@/lib/auth/waitlist";
 import { RedirectIfSignedIn } from "./auth-guards";
 import { AuthLink, AuthShell } from "./auth-shell";
+import { FormNotice } from "./form-alert";
 import { GoogleButton, OrDivider } from "./google-button";
 import { PasswordInput } from "./password-input";
 import { PasswordStrength } from "./password-strength";
@@ -22,10 +24,12 @@ export function SignUpForm() {
   const router = useRouter();
   const [values, setValues] = useState({ name: "", email: params.get("email") ?? "", password: "" });
   const [errors, setErrors] = useState<FormErrors>({});
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const set = (key: keyof typeof values) => (value: string) => {
     setValues((v) => ({ ...v, [key]: value }));
     setErrors((e) => ({ ...e, [key]: undefined }));
+    if (key === "email") setNotice(null);
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -36,6 +40,7 @@ export function SignUpForm() {
     const result = await signUp(parsed.data);
     setPending(false);
     if (result.ok) router.replace(safeNext(next));
+    else if (result.code === WAITLIST_CODE) setNotice(result.message);
     else setErrors({ [result.field ?? "email"]: result.message });
   };
 
@@ -55,6 +60,7 @@ export function SignUpForm() {
           <GoogleButton next={safeNext(next)} />
           <OrDivider />
           <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+            {notice ? <FormNotice message={notice} /> : null}
             <FieldGroup className="gap-4">
               <Field data-invalid={errors.name ? true : undefined}>
                 <FieldLabel htmlFor={ids.name}>Full name</FieldLabel>

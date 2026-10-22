@@ -14,15 +14,19 @@ const body = z.object({
     .min(1)
     .max(200),
   rows: z.array(z.array(z.union([z.string().max(20_000), z.number(), z.boolean(), z.null()]))).max(50_000),
+  /** The workspace's money symbol (₱, S$, RM); pesos when it isn't sent. */
+  currencySymbol: z.string().max(4).optional(),
 });
 
 const FORMATS = {
   number: "#,##0.##",
-  money: '"₱"#,##0.00',
   percent: '0.##"%"',
   date: "yyyy-mm-dd",
   datetime: "yyyy-mm-dd hh:mm",
 } as const;
+
+/** Excel's money format with the workspace's symbol, quoted (only characters that can't break the format). */
+const moneyFormat = (symbol = "₱") => `"${symbol.replace(/["\\]/g, "")}"#,##0.00`;
 
 /**
  * A table view as an Excel workbook: one sheet with a bold, frozen header row, numbers as numbers in peso or plain
@@ -35,7 +39,7 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return Response.json({ ok: false, message: "Forbidden" }, { status: 403 });
   const parsed = body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ ok: false, message: "Nothing to export." }, { status: 400 });
-  const { name, columns, rows } = parsed.data;
+  const { name, columns, rows, currencySymbol } = parsed.data;
   const { default: ExcelJS } = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "EveryOps";
@@ -45,14 +49,18 @@ export async function POST(request: Request) {
   sheet.columns = columns.map((c) => ({
     header: c.header,
     width: Math.min(48, Math.max(10, c.header.length + 4)),
-    ...(c.format in FORMATS ? { style: { numFmt: FORMATS[c.format as keyof typeof FORMATS] } } : {}),
+    ...(c.format === "money"
+      ? { style: { numFmt: moneyFormat(currencySymbol) } }
+      : c.format in FORMATS
+        ? { style: { numFmt: FORMATS[c.format as keyof typeof FORMATS] } }
+        : {}),
   }));
   sheet.getRow(1).font = { bold: true };
   for (const row of rows)
     sheet.addRow(
       row.map((cell, i) => {
         const format = columns[i]?.format;
-        // Dates are written as Manila wall time; Excel has no time zones, so it shows them as written.
+        // Dates are written as the workspace's wall time; Excel has no time zones, so it shows them as written.
         if ((format === "date" || format === "datetime") && typeof cell === "string") {
           const d = new Date(format === "date" ? `${cell}T00:00:00Z` : `${cell}:00Z`);
           return Number.isNaN(d.getTime()) ? cell : d;

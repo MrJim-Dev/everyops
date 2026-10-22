@@ -1,5 +1,6 @@
 "use client";
 
+import { ScanInput } from "@/components/scan/scan-input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
@@ -12,17 +13,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useCurrency } from "@/components/workspace/currency";
 import { normalizeUrl } from "@/lib/blueprint/contact";
+import { isScannable } from "@/lib/blueprint/scannable";
 import type { Field, FieldValue, TimeRange } from "@/lib/blueprint/types";
-import { isTimeRange } from "@/lib/format";
-import { at, dateKey, manilaParts } from "@/lib/time";
+import { currencySymbol, isTimeRange } from "@/lib/format";
+import { at, dateKey, fromLocal, zonedParts } from "@/lib/time";
+import { DurationInput } from "./duration-input";
 import { FileInput } from "./file-input";
 import { ImageInput } from "./image-input";
+import { RatingInput } from "./rating-input";
 import { RelationInput } from "./relation-input";
+import { SignatureInput } from "./signature-input";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const timeOf = (iso: string) => {
-  const p = manilaParts(iso);
+  const p = zonedParts(iso);
   return `${pad(p.hour)}:${pad(p.minute)}`;
 };
 const localDateTime = (iso: string) => `${dateKey(iso)}T${timeOf(iso)}`;
@@ -37,6 +43,7 @@ type Props = {
 
 /** One input for every field type, so every form in EveryOps behaves the same. */
 export function FieldInput({ id, field, value, onChange, invalid }: Props) {
+  const currency = useCurrency();
   const common = { id, "aria-invalid": invalid || undefined, "aria-required": field.required || undefined };
 
   switch (field.type) {
@@ -60,11 +67,29 @@ export function FieldInput({ id, field, value, onChange, invalid }: Props) {
           onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
         />
       );
+    case "rating":
+      return (
+        <RatingInput
+          id={id}
+          label={field.name}
+          invalid={invalid}
+          value={typeof value === "number" ? value : null}
+          onChange={onChange}
+        />
+      );
+    case "duration":
+      return (
+        <DurationInput
+          {...common}
+          value={typeof value === "number" || typeof value === "string" ? value : null}
+          onChange={onChange}
+        />
+      );
     case "money":
       return (
         <InputGroup>
           <InputGroupAddon>
-            <InputGroupText>₱</InputGroupText>
+            <InputGroupText>{currencySymbol(currency)}</InputGroupText>
           </InputGroupAddon>
           <InputGroupInput
             {...common}
@@ -90,9 +115,7 @@ export function FieldInput({ id, field, value, onChange, invalid }: Props) {
           {...common}
           type="datetime-local"
           value={typeof value === "string" ? localDateTime(value) : ""}
-          onChange={(e) =>
-            onChange(e.target.value ? new Date(`${e.target.value}:00+08:00`).toISOString() : null)
-          }
+          onChange={(e) => onChange(e.target.value ? fromLocal(e.target.value) : null)}
         />
       );
     case "time_range":
@@ -163,6 +186,16 @@ export function FieldInput({ id, field, value, onChange, invalid }: Props) {
           onChange={onChange}
         />
       );
+    case "signature":
+      return (
+        <SignatureInput
+          id={id}
+          field={field}
+          invalid={invalid}
+          value={typeof value === "string" ? value : null}
+          onChange={onChange}
+        />
+      );
     case "email":
     case "phone":
     case "url":
@@ -193,6 +226,16 @@ export function FieldInput({ id, field, value, onChange, invalid }: Props) {
         />
       );
     default:
+      if (isScannable(field))
+        return (
+          <ScanInput
+            id={id}
+            field={field}
+            value={String(value ?? "")}
+            onChange={onChange}
+            invalid={invalid}
+          />
+        );
       return <Input {...common} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} />;
   }
 }

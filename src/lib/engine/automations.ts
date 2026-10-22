@@ -1,3 +1,4 @@
+import { displayKind } from "@/lib/blueprint/field-kind";
 import { findRecord } from "@/lib/blueprint/lookup";
 import { walkPath } from "@/lib/blueprint/paths";
 import type {
@@ -10,15 +11,19 @@ import type {
   Rule,
 } from "@/lib/blueprint/types";
 import {
+  currencyOf,
   formatDate,
   formatDateTime,
+  formatDuration,
   formatMoney,
   formatNumber,
   formatPercent,
   formatRange,
+  formatRating,
   isTimeRange,
 } from "@/lib/format";
-import { addDays, dateKey, manilaParts, minutesOf, todayKey } from "@/lib/time";
+import { addDays, dateKey, minutesOf, todayKey, zonedParts } from "@/lib/time";
+import { actionsFor, allActions, mapActions } from "./branches";
 import { recordContext } from "./context";
 import { run, truthy } from "./expr";
 import { newId } from "./ids";
@@ -32,10 +37,22 @@ import { completeAction } from "./rule-repair";
 
 export type Email = { to: string; subject: string; body: string };
 
+/** A call to a webhook endpoint an automation makes: which endpoint, and the JSON it posts. */
+export type ApiCall = { endpointId: string; body: unknown };
+
+/**
+ * A notification an automation sends: to is who, filled in ("owner, admins, ana@shop.ph"); title and body are its
+ * text. The server turns it into in-app notifications for workspace members and emails for everyone else.
+ */
+export type Alert = { to: string; title: string; body: string; email: boolean; recordId: string };
+
 export type RuleOutcome = {
   records: DataRecord[];
   notices: string[];
   emails: Email[];
+  calls: ApiCall[];
+  /** Notifications for people: the team in the app, everyone else by email (src/server/notifications.ts). */
+  alerts: Alert[];
   /** Ids of records added by create_record and link_record actions. */
   created: string[];
 };
@@ -47,22 +64,72 @@ const SAVE_EVENTS = new Set(["created", "updated", "status_changed"]);
 export const isOn = (rule: Rule) => rule.enabled !== false;
 export const isTimed = (rule: Rule) =>
   rule.trigger.event === "schedule" || rule.trigger.event === "date_reached";
-export const sendsEmail = (rule: Rule) => rule.actions.some((a) => a.type === "send_email");
+export const sendsEmail = (rule: Rule) => allActions(rule).some((a) => a.type === "send_email");
+export const callsApi = (rule: Rule) => allActions(rule).some((a) => a.type === "call_api");
+
+/**
+ * What a call_api action posts for a record. With a body template, its {{placeholders}} are filled as JSON string
+ * content (quotes and line breaks escaped), so they belong inside quotes: {"text": "Booked by {{name}}"}. A
+ * template that still isn't JSON is sent as {"text": …}. Without one, the record itself, shaped like a webhook
+ * event's: its type and its fields' stored values (numbers stay numbers, choices are their ids).
+ */
+export function callBody(
+  bp: Blueprint,
+  rule: Rule,
+  action: { body?: string },
+  entity: Entity,
+  record: DataRecord,
+  records: DataRecord[],
+  now: Date,
+): unknown {
+  if (!action.body?.trim())
+    return { automation: rule.name, recordType: entity.id, record: { id: record.id, ...record.data } };
+  const ctx = recordContext(bp, entity, record.data, records, now);
+  const filled = action.body.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, path: string) => {
+    const parts = path.split(".");
+    const value = ctx.get(parts);
+    if (value === undefined || value === null) return "";
+    const steps = walkPath(bp, entity, parts).steps;
+    return JSON.stringify(readable(bp, steps[steps.length - 1]?.field, value as FieldValue, records)).slice(
+      1,
+      -1,
+    );
+  });
+  try {
+    return JSON.parse(filled);
+  } catch {
+    return { text: filled };
+  }
+}
 
 const entityOf = (bp: Blueprint, id: string) => bp.entities.find((e) => e.id === id);
 
 /** A value as people read it: ₱1,200.00, Oct 16, the option's label, the linked record's name. */
-function readable(bp: Blueprint, field: Field | undefined, value: FieldValue, records: DataRecord[]): string {
+export function readable(
+  bp: Blueprint,
+  field: Field | undefined,
+  value: FieldValue,
+  records: DataRecord[],
+): string {
   if (Array.isArray(value))
     return value.map((v) => field?.options?.find((o) => o.id === v)?.label ?? v).join(", ");
   if (isTimeRange(value)) return `${formatDate(value.start)} · ${formatRange(value)}`;
   if (!field) return String(value);
-  const type = field.type === "formula" ? field.formula?.resultType : field.type;
+  if (field.type === "signature") return "Signed";
+  // A rollup reads as what it adds up: an order's total as money, hours worked as time.
+  const type =
+    field.type === "rollup"
+      ? displayKind(bp, field)
+      : field.type === "formula"
+        ? field.formula?.resultType
+        : field.type;
   const option = field.options?.find((o) => o.id === value);
   if (option) return option.label;
   if (typeof value === "number") {
-    if (type === "money") return formatMoney(value);
+    if (type === "money") return formatMoney(value, { currency: currencyOf(bp) });
     if (type === "percent") return formatPercent(value);
+    if (type === "rating") return formatRating(value);
+    if (type === "duration") return formatDuration(value);
     return formatNumber(value);
   }
   if (typeof value === "boolean") return value ? "Yes" : "No";
@@ -86,13 +153,44 @@ export function fillTemplate(
   now: Date,
 ): string {
   const ctx = recordContext(bp, entity, data, records, now);
-  return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, path: string) => {
-    const parts = path.split(".");
+  return text.replace(TEMPLATE, (_, symbol: string | undefined, inner: string) => {
+    const out = placeholder(bp, entity, ctx, inner.trim(), records);
+    // "₱{{amount}}": the amount already reads with its currency, so the one written before it would double it.
+    return symbol && /^[^\d\s-]+\d/.test(out) ? out : (symbol ?? "") + out;
+  });
+}
+
+/** A placeholder, with a currency symbol written just before it (₱, S$, PHP …) captured on its own. */
+const TEMPLATE = /((?:[A-Z]{1,2})?[$₱€£¥]|PHP ?|RM ?)?\{\{\s*([^{}]+?)\s*\}\}/g;
+
+/**
+ * One placeholder's text: a field ({{email}}, through links {{player.email}}) as it reads in the app, or a formula
+ * ({{guest_email ? guest_email : player.email}}) worked out on the record. Blank when it has no value.
+ */
+function placeholder(
+  bp: Blueprint,
+  entity: Entity,
+  ctx: ReturnType<typeof recordContext>,
+  inner: string,
+  records: DataRecord[],
+): string {
+  if (/^[\w.]+$/.test(inner)) {
+    const parts = inner.split(".");
     const value = ctx.get(parts);
     if (value === undefined || value === null) return "";
     const steps = walkPath(bp, entity, parts).steps;
     return readable(bp, steps[steps.length - 1]?.field, value as FieldValue, records);
-  });
+  }
+  try {
+    const value = run(inner, ctx);
+    return value === undefined || value === null || value === false
+      ? ""
+      : Array.isArray(value)
+        ? value.join(", ")
+        : String(value);
+  } catch {
+    return "";
+  }
 }
 
 export function matchesSave(
@@ -122,10 +220,12 @@ export function applyActions(
   now: Date,
   depth = 0,
 ): RuleOutcome {
-  const out: RuleOutcome = { records: rows, notices: [], emails: [], created: [] };
+  const out: RuleOutcome = { records: rows, notices: [], emails: [], calls: [], alerts: [], created: [] };
   const entity = entityOf(bp, record.entityId);
   if (!entity) return out;
-  for (const raw of rule.actions) {
+  // Which branch runs is read from the record as it was saved, before this rule's own actions change it.
+  const chosen = actionsFor(rule, recordContext(bp, entity, record.data, rows, now));
+  for (const raw of chosen) {
     // Saved automations with the stock field or amount left blank still do what their name says.
     const action = completeAction(bp, rule, raw);
     if (!action) continue;
@@ -133,6 +233,10 @@ export function applyActions(
     const ctx = recordContext(bp, entity, current.data, out.records, now);
     if (action.type === "notify") {
       out.notices.push(fillTemplate(action.message, bp, entity, current.data, out.records, now));
+      continue;
+    }
+    if (action.type === "notify_people") {
+      out.alerts.push(alertOf(bp, action, entity, current, out.records, now));
       continue;
     }
     if (action.type === "send_email") {
@@ -144,12 +248,21 @@ export function applyActions(
       });
       continue;
     }
+    if (action.type === "call_api") {
+      out.calls.push({
+        endpointId: action.endpointId,
+        body: callBody(bp, rule, action, entity, current, out.records, now),
+      });
+      continue;
+    }
     if (action.type === "link_record") {
       const linked = linkFromRule(bp, out.records, action, entity, current, now, depth);
       if (!linked) continue;
       out.records = linked.records;
       out.notices.push(...linked.notices);
       out.emails.push(...linked.emails);
+      out.calls.push(...linked.calls);
+      out.alerts.push(...linked.alerts);
       out.created.push(...linked.created);
       continue;
     }
@@ -167,6 +280,8 @@ export function applyActions(
       out.records = next.records;
       out.notices.push(...next.notices);
       out.emails.push(...next.emails);
+      out.calls.push(...next.calls);
+      out.alerts.push(...next.alerts);
       out.created.push(...next.created);
       continue;
     }
@@ -254,7 +369,7 @@ function linkFromRule(
   if (!link || !target || !field) return undefined;
   const value = matchValue(field, run(action.value, recordContext(bp, source, record.data, rows, now)));
   if (value === undefined) return undefined;
-  const out: RuleOutcome = { records: rows, notices: [], emails: [], created: [] };
+  const out: RuleOutcome = { records: rows, notices: [], emails: [], calls: [], alerts: [], created: [] };
   let match = rows.find((r) => r.entityId === target.id && sameValue(r.data[field.id], value));
   if (!match) {
     if (depth >= MAX_DEPTH) return undefined;
@@ -268,6 +383,8 @@ function linkFromRule(
     out.records = next.records;
     out.notices.push(...next.notices);
     out.emails.push(...next.emails);
+    out.calls.push(...next.calls);
+    out.alerts.push(...next.alerts);
     out.created.push(...next.created);
   }
   const id = match.id;
@@ -289,7 +406,7 @@ export function runSaveRules(
   now: Date,
   depth = 0,
 ): RuleOutcome {
-  const out: RuleOutcome = { records, notices: [], emails: [], created: [] };
+  const out: RuleOutcome = { records, notices: [], emails: [], calls: [], alerts: [], created: [] };
   const entity = entityOf(bp, record.entityId);
   if (!entity) return out;
   for (const rule of bp.rules) {
@@ -301,18 +418,20 @@ export function runSaveRules(
       isOn(rule) &&
       rule.trigger.entityId === record.entityId &&
       SAVE_EVENTS.has(rule.trigger.event) &&
-      rule.actions.some((a) => a.type === "link_record");
+      allActions(rule).some((a) => a.type === "link_record");
     if (!fires && !keepsFiled) continue;
     const current = out.records.find((r) => r.id === record.id) ?? record;
     const ctx = recordContext(bp, entity, current.data, out.records, now);
     if (rule.when && !truthy(run(rule.when, ctx))) continue;
     const only = keepsFiled
-      ? { ...rule, actions: rule.actions.filter((a) => a.type === "link_record") }
+      ? mapActions(rule, (actions) => actions.filter((a) => a.type === "link_record"))
       : rule;
     const done = applyActions(bp, out.records, only, current, now, depth);
     out.records = done.records;
     out.notices.push(...done.notices);
     out.emails.push(...done.emails);
+    out.calls.push(...done.calls);
+    out.alerts.push(...done.alerts);
     out.created.push(...done.created);
   }
   return out;
@@ -321,7 +440,7 @@ export function runSaveRules(
 /** A save as the server sees it: the record before (missing when new) and after. */
 export type SavedChange = { before?: DataRecord; after: DataRecord };
 
-export type SaveRun = { rule: Rule; record: DataRecord; emails: Email[] };
+export type SaveRun = { rule: Rule; record: DataRecord; emails: Email[]; calls: ApiCall[]; alerts: Alert[] };
 
 /**
  * What the server does after a save: for each saved record, the automations that fired on it, with the emails
@@ -345,7 +464,8 @@ export function saveRuns(bp: Blueprint, changes: SavedChange[], records: DataRec
       if (!matchesSave(rule, after, event, changed)) continue;
       const ctx = recordContext(bp, entity, after.data, records, now);
       if (rule.when && !truthy(run(rule.when, ctx))) continue;
-      const emails = rule.actions.flatMap((a) =>
+      const chosen = actionsFor(rule, ctx);
+      const emails = chosen.flatMap((a) =>
         a.type === "send_email"
           ? [
               {
@@ -356,7 +476,15 @@ export function saveRuns(bp: Blueprint, changes: SavedChange[], records: DataRec
             ]
           : [],
       );
-      runs.push({ rule, record: after, emails });
+      const calls = chosen.flatMap((a) =>
+        a.type === "call_api"
+          ? [{ endpointId: a.endpointId, body: callBody(bp, rule, a, entity, after, records, now) }]
+          : [],
+      );
+      const alerts = chosen.flatMap((a) =>
+        a.type === "notify_people" ? [alertOf(bp, a, entity, after, records, now)] : [],
+      );
+      runs.push({ rule, record: after, emails, calls, alerts });
     }
   }
   return runs;
@@ -375,14 +503,14 @@ function dayOf(value: FieldValue | undefined): string | undefined {
 }
 
 const reached = (now: Date, hhmm: string) => {
-  const p = manilaParts(now);
+  const p = zonedParts(now);
   return p.hour * 60 + p.minute >= minutesOf(/^\d{1,2}:\d{2}$/.test(hhmm) ? hhmm : "08:00");
 };
 
 /** Whether a schedule runs today (Manila) and its time has come. */
 export function scheduleDue(schedule: Rule["trigger"]["schedule"], now: Date): boolean {
   if (!schedule) return false;
-  const p = manilaParts(now);
+  const p = zonedParts(now);
   if (schedule.every === "week" && (schedule.weekday ?? 1) !== p.weekday) return false;
   if (schedule.every === "month" && (schedule.monthDay ?? 1) !== p.day) return false;
   return reached(now, schedule.at);
@@ -506,14 +634,23 @@ export function describeTrigger(bp: Blueprint, rule: Rule): string {
 }
 
 /** One line per action: "Email {{email}}: Your booking is tomorrow", "Set Status to …". */
-export function describeActions(bp: Blueprint, rule: Rule): string[] {
+export function describeActions(
+  bp: Blueprint,
+  rule: Rule,
+  endpoints?: Record<string, string>,
+  actions: Rule["actions"] = rule.actions,
+): string[] {
   const source = entityOf(bp, rule.trigger.entityId);
-  return rule.actions.map((a) => {
+  return actions.map((a) => {
     switch (a.type) {
       case "notify":
         return `Show a notice: ${a.message}`;
       case "send_email":
         return `Email ${a.to}: ${a.subject}`;
+      case "notify_people":
+        return `Notify ${a.to}: ${a.title}`;
+      case "call_api":
+        return `Call ${endpoints?.[a.endpointId] ?? "a webhook endpoint"}${a.body?.trim() ? " with a custom message" : " with the record"}`;
       case "create_record":
         return `Add a ${(entityOf(bp, a.entityId)?.name ?? a.entityId).toLowerCase()}`;
       case "link_record": {
@@ -542,6 +679,25 @@ export function describeActions(bp: Blueprint, rule: Rule): string[] {
       }
     }
   });
+}
+
+/** A notify_people action for one record, its placeholders filled in. */
+function alertOf(
+  bp: Blueprint,
+  action: Extract<Rule["actions"][number], { type: "notify_people" }>,
+  entity: Entity,
+  record: DataRecord,
+  records: DataRecord[],
+  now: Date,
+): Alert {
+  const fill = (text: string) => fillTemplate(text, bp, entity, record.data, records, now);
+  return {
+    to: fill(action.to).trim(),
+    title: fill(action.title).trim(),
+    body: fill(action.body ?? "").trim(),
+    email: action.email === true,
+    recordId: record.id,
+  };
 }
 
 /** The record's title for run history. */

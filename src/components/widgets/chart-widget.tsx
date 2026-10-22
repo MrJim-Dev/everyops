@@ -18,7 +18,7 @@ import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } f
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Widget } from "@/lib/blueprint/types";
 import { chartData } from "@/lib/engine/aggregate";
-import { metricFormatter } from "@/lib/engine/metric-format";
+import { measuresDuration, metricFormatter } from "@/lib/engine/metric-format";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { WidgetFrame } from "./widget-frame";
@@ -32,6 +32,10 @@ export function ChartWidget({ widget }: { widget: Widget }) {
   const { blueprint, records } = useWorkspace();
   const { points, series } = chartData(blueprint, widget, records);
   const format = metricFormatter(blueprint, widget);
+  // Time reads in hours on the axis ("4.3 h"); the tooltip keeps the exact "4 h 20 min".
+  const tick = measuresDuration(blueprint, widget)
+    ? (v: number) => `${formatNumber(Math.round(v / 6) / 10)} h`
+    : compact;
   const config: ChartConfig = Object.fromEntries(
     series.map((s, i) => [s.key, { label: s.label, color: color(i) }]),
   );
@@ -72,7 +76,7 @@ export function ChartWidget({ widget }: { widget: Widget }) {
   const axes = horizontal ? (
     <>
       <CartesianGrid horizontal={false} strokeDasharray="0" />
-      <XAxis type="number" tickLine={false} axisLine={false} tickFormatter={compact} />
+      <XAxis type="number" tickLine={false} axisLine={false} tickFormatter={tick} />
       <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} width={110} />
       {tooltip}
     </>
@@ -86,7 +90,7 @@ export function ChartWidget({ widget }: { widget: Widget }) {
         tickMargin={8}
         minTickGap={byCategory ? 4 : 16}
       />
-      <YAxis tickLine={false} axisLine={false} width={44} tickFormatter={compact} />
+      <YAxis tickLine={false} axisLine={false} width={44} tickFormatter={tick} />
       {tooltip}
     </>
   );

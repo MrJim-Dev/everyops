@@ -10,6 +10,7 @@ import type {
   Field,
   FieldValue,
   FormStep,
+  PrintTemplate,
   RecordData,
   Rule,
   System,
@@ -40,6 +41,12 @@ export type ChangeOp =
       patch: Partial<Pick<Widget, "title" | "filter" | "metric" | "calc" | "target">>;
     }
   | { op: "rename_workspace"; name: string }
+  /** The currency the workspace's money reads in. Amounts stay as they are; only how they read changes. */
+  | { op: "set_currency"; currency: string }
+  /** The time zone the workspace's clock runs on. Stored times stay the same instants; how they read changes. */
+  | { op: "set_time_zone"; timeZone: string }
+  /** Who sees a record type's records: by limits staff and viewers to their own (src/lib/engine/access.ts); null lets everyone see all. */
+  | { op: "set_access"; entityId: string; by: string | null }
   | { op: "add_entity"; entity: Entity }
   | { op: "add_system"; system: System }
   /** Adds an automation, or replaces the one with the same id (how an automation is fixed or changed). */
@@ -97,7 +104,10 @@ export type ChangeOp =
       viewId: string;
       blocks: Block[];
       layout?: "standard";
-    };
+    }
+  /** Adds a print template (an invoice, a quote), or replaces the one with the same id. */
+  | { op: "add_print_template"; template: PrintTemplate }
+  | { op: "remove_print_template"; templateId: string };
 
 /** New words for a block. Only the keys its type has are used. */
 export type BlockPatch = Partial<{
@@ -324,6 +334,7 @@ function removeEntity(bp: Blueprint, entityId: string) {
   ))
     removeWidget(bp, w.id);
   bp.rules = bp.rules.filter((r) => r.trigger.entityId !== entityId);
+  if (bp.printTemplates) bp.printTemplates = bp.printTemplates.filter((t) => t.entityId !== entityId);
   for (const e of bp.entities)
     for (const f of e.fields.filter(
       (f) => f.relation?.entityId === entityId || f.rollup?.childEntityId === entityId,
@@ -396,6 +407,20 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "rename_workspace":
         next.workspaceName = op.name;
         break;
+      case "set_currency":
+        next.currency = op.currency;
+        break;
+      case "set_time_zone":
+        next.timeZone = op.timeZone;
+        break;
+      case "set_access": {
+        const entity = next.entities.find((e) => e.id === op.entityId);
+        if (entity) {
+          if (op.by) entity.access = { by: op.by };
+          else delete entity.access;
+        }
+        break;
+      }
       case "add_entity":
         if (!next.entities.some((e) => e.id === op.entity.id)) next.entities.push(op.entity);
         break;
@@ -461,6 +486,18 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         break;
       case "remove_rule":
         next.rules = next.rules.filter((r) => r.id !== op.ruleId);
+        break;
+      case "add_print_template": {
+        const list = [...(next.printTemplates ?? [])];
+        const at = list.findIndex((t) => t.id === op.template.id);
+        if (at >= 0) list[at] = structuredClone(op.template);
+        else list.push(structuredClone(op.template));
+        next.printTemplates = list;
+        break;
+      }
+      case "remove_print_template":
+        if (next.printTemplates)
+          next.printTemplates = next.printTemplates.filter((t) => t.id !== op.templateId);
         break;
       case "remove_block": {
         const view = next.views.find((v) => v.id === op.viewId);

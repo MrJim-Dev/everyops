@@ -10,7 +10,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useCurrency } from "@/components/workspace/currency";
 import { formatMoney } from "@/lib/format";
+import { zone } from "@/lib/time";
 
 export type Receipt = {
   business: string;
@@ -30,14 +32,14 @@ const htmlText = (s: string) =>
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c,
   );
 const when = (d: Date) =>
-  d.toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" });
+  d.toLocaleString("en-PH", { timeZone: zone(), dateStyle: "medium", timeStyle: "short" });
 
 /** A receipt as a small standalone page, sized for 58–80 mm thermal printers. */
-function receiptHtml(r: Receipt) {
+function receiptHtml(r: Receipt, currency: string) {
   const rows = r.items
     .map(
       (i) =>
-        `<tr><td>${htmlText(i.name)}<br><small>${i.qty} × ${htmlText(formatMoney(i.unit))}</small></td><td>${htmlText(formatMoney(i.unit * i.qty))}</td></tr>`,
+        `<tr><td>${htmlText(i.name)}<br><small>${i.qty} × ${htmlText(formatMoney(i.unit, { currency }))}</small></td><td>${htmlText(formatMoney(i.unit * i.qty, { currency }))}</td></tr>`,
     )
     .join("");
   const change = r.cash !== undefined ? Math.max(0, r.cash - r.total) : undefined;
@@ -47,18 +49,19 @@ h1{font-size:14px;text-align:center;margin:0 0 2px}p{margin:0;text-align:center}
 td{padding:3px 0;vertical-align:top}td:last-child{text-align:right;white-space:nowrap}.sum td{border-top:1px dashed #000;font-weight:bold}
 small{color:#444}</style></head><body><h1>${htmlText(r.business)}</h1><p>${htmlText(r.code)} · ${htmlText(when(r.at))}</p>
 ${r.cashier ? `<p>Cashier: ${htmlText(r.cashier)}</p>` : ""}${r.customer ? `<p>Customer: ${htmlText(r.customer)}</p>` : ""}
-<table>${rows}<tr class="sum"><td>Total</td><td>${htmlText(formatMoney(r.total))}</td></tr>
-<tr><td>${htmlText(r.method)}</td><td>${r.cash !== undefined ? htmlText(formatMoney(r.cash)) : ""}</td></tr>
-${change !== undefined ? `<tr><td>Change</td><td>${htmlText(formatMoney(change))}</td></tr>` : ""}</table><p>Thank you!</p>
+<table>${rows}<tr class="sum"><td>Total</td><td>${htmlText(formatMoney(r.total, { currency }))}</td></tr>
+<tr><td>${htmlText(r.method)}</td><td>${r.cash !== undefined ? htmlText(formatMoney(r.cash, { currency })) : ""}</td></tr>
+${change !== undefined ? `<tr><td>Change</td><td>${htmlText(formatMoney(change, { currency }))}</td></tr>` : ""}</table><p>Thank you!</p>
 <script>window.onload=()=>{window.print();}</script></body></html>`;
 }
 
 export function SaleReceipt({ receipt, onClose }: { receipt: Receipt | null; onClose: () => void }) {
+  const currency = useCurrency();
   const print = () => {
     if (!receipt) return;
     const w = window.open("", "_blank", "width=420,height=640");
     if (!w) return;
-    w.document.write(receiptHtml(receipt));
+    w.document.write(receiptHtml(receipt, currency));
     w.document.close();
   };
   const change = receipt?.cash !== undefined ? Math.max(0, receipt.cash - receipt.total) : undefined;
@@ -81,21 +84,25 @@ export function SaleReceipt({ receipt, onClose }: { receipt: Receipt | null; onC
                   <span className="min-w-0 truncate">
                     {i.name} <span className="text-muted-foreground">× {i.qty}</span>
                   </span>
-                  <span className="font-mono tabular">{formatMoney(i.unit * i.qty)}</span>
+                  <span className="font-mono tabular">{formatMoney(i.unit * i.qty, { currency })}</span>
                 </li>
               ))}
             </ul>
             <dl className="grid grid-cols-2 gap-y-1 text-[13px]">
               <dt className="text-muted-foreground">Total</dt>
-              <dd className="text-right font-mono font-semibold tabular">{formatMoney(receipt.total)}</dd>
+              <dd className="text-right font-mono font-semibold tabular">
+                {formatMoney(receipt.total, { currency })}
+              </dd>
               <dt className="text-muted-foreground">{receipt.method}</dt>
               <dd className="text-right font-mono tabular">
-                {receipt.cash !== undefined ? formatMoney(receipt.cash) : "Paid"}
+                {receipt.cash !== undefined ? formatMoney(receipt.cash, { currency }) : "Paid"}
               </dd>
               {change !== undefined ? (
                 <>
                   <dt className="text-muted-foreground">Change</dt>
-                  <dd className="text-right font-mono font-medium tabular">{formatMoney(change)}</dd>
+                  <dd className="text-right font-mono font-medium tabular">
+                    {formatMoney(change, { currency })}
+                  </dd>
                 </>
               ) : null}
             </dl>

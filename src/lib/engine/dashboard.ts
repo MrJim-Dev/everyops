@@ -1,7 +1,7 @@
 import { getEntity } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, FieldValue, Widget } from "@/lib/blueprint/types";
 import { isTimeRange } from "@/lib/format";
-import { addDays, dateKey, isDateKey, manilaParts, todayKey } from "@/lib/time";
+import { addDays, dateKey, isDateKey, todayKey, zonedParts } from "@/lib/time";
 import { metricOf, widgetRows } from "./aggregate";
 
 /** When a record happens: the start of a time range, a date-time, or a plain date. */
@@ -132,7 +132,7 @@ export function heatmapData(bp: Blueprint, widget: Widget, records: DataRecord[]
       const amount = metricOf(widget, [row]);
       const share = widget.metric.op === "count" ? 1 : amount / hours;
       for (let h = 0; h < hours; h++) {
-        const p = manilaParts(new Date(first + h * 3_600_000));
+        const p = zonedParts(new Date(first + h * 3_600_000));
         grid[(p.weekday + 6) % 7][p.hour] += share;
       }
     }

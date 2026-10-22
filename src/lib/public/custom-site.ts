@@ -9,6 +9,7 @@
  * at opacity 0 and 8 px down (never from scale 0) with a short stagger, hover effects only on devices that hover, and
  * reduced motion keeps the fades without the movement.
  */
+
 import type {
   Blueprint,
   BookingLayout,
@@ -17,6 +18,7 @@ import type {
   HtmlPageView,
   LandingView,
 } from "@/lib/blueprint/types";
+import { looksLikeMoney } from "@/lib/format";
 import { withUnit } from "./bindings";
 import { customBookingHtml } from "./booking-page";
 import type { HeroFact } from "./hero-facts";
@@ -229,7 +231,7 @@ function heroCard(hero: Hero | undefined, offer: Records | undefined, cta: strin
   const picks = (offer?.items ?? []).slice(0, 3).flatMap((item) => {
     const { title, rows } = cardParts(item);
     if (!title) return [];
-    const price = rows.find((c) => /₱|php/i.test(c.text)) ?? rows[0];
+    const price = rows.find((c) => looksLikeMoney(c.text)) ?? rows[0];
     return [`<li><span>${esc(title.text)}</span>${price ? `<b>${esc(price.text)}</b>` : ""}</li>`];
   });
   if (!facts.length && !picks.length) return "";

@@ -13,12 +13,18 @@ import type { DataRecord, Entity, KanbanView as KanbanConfig } from "@/lib/bluep
 import { recordContext } from "@/lib/engine/context";
 import { run, truthy } from "@/lib/engine/expr";
 import { applyFilter } from "@/lib/engine/query";
+import { windowDateField } from "@/lib/engine/window";
 import { useFreshStore } from "@/lib/motion/fresh";
+import { loadRecords, useWindowed } from "@/lib/store/server-records";
 import { todayKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
+/** Cards a lane draws before "Show more". */
+const LANE_PAGE = 100;
+
 export function KanbanView({ view }: { view: KanbanConfig }) {
-  const { blueprint, records } = useWorkspace();
+  const ws = useWorkspace();
+  const { blueprint, records } = ws;
   const { openRecord, openCreate } = useRecordPanels();
   const actions = useRecordActions();
   const entity = getEntity(blueprint, view.entityId);
@@ -27,6 +33,32 @@ export function KanbanView({ view }: { view: KanbanConfig }) {
   const fresh = useFreshStore((s) => s.ids);
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  // A lane draws LANE_PAGE cards, then more on request: a lane of thousands froze the board.
+  const [shownIn, setShownIn] = useState<Record<string, number>>({});
+  // Older cards of a windowed type (src/lib/engine/window.ts) are read from the server, a lane at a time.
+  const windowed = useWindowed(ws.id, entity.id);
+  const [older, setOlder] = useState<Record<string, { loaded: number; total: number | null; busy: boolean }>>(
+    {},
+  );
+  const loadOlder = async (laneId: string) => {
+    if (!windowed) return;
+    const was = older[laneId] ?? { loaded: 0, total: null, busy: false };
+    setOlder((o) => ({ ...o, [laneId]: { ...was, busy: true } }));
+    const total = await loadRecords(ws.id, {
+      entityId: entity.id,
+      field: status.id,
+      equals: laneId,
+      dateField: windowDateField(entity),
+      before: windowed.since.slice(0, 10),
+      offset: was.loaded,
+      limit: LANE_PAGE,
+    });
+    setOlder((o) => ({
+      ...o,
+      [laneId]: { loaded: was.loaded + LANE_PAGE, total: total ?? was.total, busy: false },
+    }));
+    setShownIn((s) => ({ ...s, [laneId]: (s[laneId] ?? LANE_PAGE) + LANE_PAGE }));
+  };
 
   const rows = useMemo(
     () => applyFilter(blueprint, entity, records, view.filter),
@@ -68,6 +100,12 @@ export function KanbanView({ view }: { view: KanbanConfig }) {
       <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-5 py-4">
         {lanes.map((lane) => {
           const cards = rows.filter((r) => r.data[status.id] === lane.id);
+          const limit = shownIn[lane.id] ?? LANE_PAGE;
+          const fromServer = older[lane.id];
+          const moreOlder =
+            ws.mode === "live" &&
+            !!windowed &&
+            (!fromServer || fromServer.total === null || fromServer.loaded < fromServer.total);
           return (
             <section
               key={lane.id}
@@ -88,7 +126,7 @@ export function KanbanView({ view }: { view: KanbanConfig }) {
                 <span className="text-[12px] text-muted-foreground tabular">{cards.length}</span>
               </header>
               <div className="flex flex-col gap-2 overflow-y-auto">
-                {cards.map((card) => (
+                {cards.slice(0, limit).map((card) => (
                   <KanbanCard
                     key={card.id}
                     entity={entity}
@@ -106,6 +144,35 @@ export function KanbanView({ view }: { view: KanbanConfig }) {
                   />
                 ))}
               </div>
+              {cards.length > limit ? (
+                <button
+                  type="button"
+                  onClick={() => setShownIn((s) => ({ ...s, [lane.id]: limit + LANE_PAGE }))}
+                  className="h-8 rounded-md px-1.5 text-left text-[12.5px] text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                >
+                  Show {Math.min(LANE_PAGE, cards.length - limit)} more of{" "}
+                  {(cards.length - limit).toLocaleString("en-PH")}
+                </button>
+              ) : moreOlder ? (
+                <button
+                  type="button"
+                  disabled={fromServer?.busy}
+                  onClick={() => void loadOlder(lane.id)}
+                  className="h-8 rounded-md px-1.5 text-left text-[12.5px] text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-60"
+                >
+                  {fromServer?.busy
+                    ? "Loading…"
+                    : fromServer?.total
+                      ? `Show older (${(fromServer.total - fromServer.loaded).toLocaleString("en-PH")} more)`
+                      : "Show older"}
+                </button>
+              ) : fromServer && !fromServer.busy ? (
+                <p className="px-1.5 py-1 text-[12.5px] text-muted-foreground">
+                  {fromServer.total
+                    ? "All older cards loaded"
+                    : `No older ${entity.pluralName.toLowerCase()}`}
+                </p>
+              ) : null}
               <button
                 type="button"
                 onClick={() => openCreate(entity.id, { [status.id]: lane.id })}

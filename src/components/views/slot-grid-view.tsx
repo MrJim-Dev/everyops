@@ -10,7 +10,8 @@ import { getEntity, getField, optionOf, recordsOf, recordTitle } from "@/lib/blu
 import type { SlotGridView as SlotGridConfig, TimeRange } from "@/lib/blueprint/types";
 import { formatDate, formatRange, formatTime, isTimeRange } from "@/lib/format";
 import { useFreshStore } from "@/lib/motion/fresh";
-import { addDays, at, dateKey, hhmm, manilaParts, minutesOf, todayKey } from "@/lib/time";
+import { useLoadRecords, useWindowed } from "@/lib/store/server-records";
+import { addDays, at, dateKey, hhmm, minutesOf, todayKey, zonedParts } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { DateStepper } from "./date-stepper";
 import { ToolbarSummary, ViewToolbar } from "./view-toolbar";
@@ -26,7 +27,8 @@ const TONE_BAR = {
 } as const;
 
 export function SlotGridView({ view }: { view: SlotGridConfig }) {
-  const { blueprint, records } = useWorkspace();
+  const ws = useWorkspace();
+  const { blueprint, records } = ws;
   const { openRecord, openCreate } = useRecordPanels();
   const entity = getEntity(blueprint, view.entityId);
   const booking = entity.booking;
@@ -40,6 +42,15 @@ export function SlotGridView({ view }: { view: SlotGridConfig }) {
   const today = todayKey();
   const [day, setDay] = useState(today);
   useReportView({ viewId: view.id, from: day, to: day, status: "active" });
+  // A day older than this copy's window (src/lib/engine/window.ts): its bookings are read from the server.
+  const windowed = useWindowed(ws.id, entity.id);
+  const older = ws.mode === "live" && !!windowed && day < windowed.since.slice(0, 10);
+  const loadingOlder = useLoadRecords(ws.id, older ? `${entity.id}:${day}` : null, {
+    entityId: entity.id,
+    dateField: booking.timeFieldId,
+    from: day,
+    to: day,
+  });
   const opens = minutesOf(config.opensAt);
   const closes = minutesOf(config.closesAt);
   const step = config.slotMinutes;
@@ -71,12 +82,12 @@ export function SlotGridView({ view }: { view: SlotGridConfig }) {
   const unpaid = bookings.filter((b) => optionOf(status, b.data[status.id])?.tone === "warning").length;
 
   const now = new Date();
-  const nowParts = manilaParts(now);
+  const nowParts = zonedParts(now);
   const nowMinutes = nowParts.hour * 60 + nowParts.minute;
   const isToday = day === today;
   const isPast = (minute: number) => day < today || (isToday && minute + step <= nowMinutes);
   const offset = (iso: string) => {
-    const p = manilaParts(iso);
+    const p = zonedParts(iso);
     return ((p.hour * 60 + p.minute - opens) / step) * ROW;
   };
 
@@ -92,6 +103,7 @@ export function SlotGridView({ view }: { view: SlotGridConfig }) {
         />
         <ToolbarSummary>
           {bookings.length} {bookings.length === 1 ? "booking" : "bookings"}
+          {loadingOlder ? " · loading…" : null}
           {unpaid ? ` · ${unpaid} unpaid` : ""}
         </ToolbarSummary>
       </ViewToolbar>

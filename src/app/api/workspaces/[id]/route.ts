@@ -1,19 +1,37 @@
 import { z } from "zod";
 import { isDemoEmail } from "@/lib/auth/demo";
 import type { Blueprint, DataRecord } from "@/lib/blueprint/types";
-import type { ChangeEntry, Invite, Member } from "@/lib/store/workspace-model";
+import { windowRecords } from "@/lib/engine/window";
+import { blueprintOf, type ChangeEntry, type Invite, type Member } from "@/lib/store/workspace-model";
 import type { WorkspacePatch } from "@/lib/store/workspace-sync";
 import { jsonResponse } from "@/server/json-response";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { loadWorkspace, MAX_PATCH_BYTES, patchWorkspace, removeWorkspace } from "@/server/workspaces";
 
-/** The whole workspace (records, versions, history, page text) with each record's rev, when it opens. */
+/**
+ * The whole workspace (records, versions, history, page text) with each record's rev, when it opens. Large record
+ * types come as a recent window; their tables page on the server (src/lib/engine/window.ts).
+ */
 export async function GET(request: Request, { params }: RouteContext<"/api/workspaces/[id]">) {
   const { user, error } = await apiUser(request);
   if (error) return error;
   const found = await loadWorkspace((await params).id, user.id);
   if (!found) return Response.json({ ok: false, message: "Workspace not found." }, { status: 404 });
-  return jsonResponse(request, { ok: true, workspace: found.workspace, revs: found.revs });
+  const ws = found.workspace;
+  const { rows, windowed } = windowRecords(
+    blueprintOf(ws),
+    ws.records.map((record) => ({ record })),
+    new Date(),
+  );
+  if (!Object.keys(windowed).length)
+    return jsonResponse(request, { ok: true, workspace: ws, revs: found.revs });
+  const records = rows.map((r) => r.record);
+  const kept = new Set(records.map((r) => r.id));
+  return jsonResponse(request, {
+    ok: true,
+    workspace: { ...ws, records, windowed },
+    revs: Object.fromEntries(Object.entries(found.revs).filter(([id]) => kept.has(id))),
+  });
 }
 
 const iso = z.string().refine((v) => !Number.isNaN(Date.parse(v)), "Not a date");

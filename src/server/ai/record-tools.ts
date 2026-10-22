@@ -2,8 +2,11 @@ import "server-only";
 import { type RawBuilder, sql } from "kysely";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, Field } from "@/lib/blueprint/types";
+import type { Viewer } from "@/lib/engine/access";
+import { zone } from "@/lib/time";
+import { accessScope } from "../access";
 import { db } from "../db";
-import { kindOf, MANILA } from "./digest";
+import { kindOf } from "./digest";
 import type { ToolSet } from "./gemini";
 
 /**
@@ -91,7 +94,14 @@ class ToolError extends Error {}
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Read-only lookups over one workspace's records, for Gemini to call while it answers. */
-export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: string) => void): ToolSet {
+export function recordTools(
+  workspaceId: string,
+  bp: Blueprint,
+  onCall?: (text: string) => void,
+  /** Who is asking: members who see only their own records of a type look up only those. */
+  viewer?: Viewer,
+): ToolSet {
+  const scope = accessScope(bp, viewer);
   const entityOf = (id: unknown) => {
     const e = bp.entities.find((x) => x.id === id);
     if (!e)
@@ -127,11 +137,11 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
 
   async function linkedIds(target: Entity, value: string): Promise<string[]> {
     const { rows } = await sql<{ id: string }>`
-      select id from workspace_record where workspace_id = ${workspaceId} and entity_id = ${target.id}
+      select id from workspace_record where workspace_id = ${workspaceId} and ${scope} and entity_id = ${target.id}
         and (id = ${value} or lower(data->>${target.primaryFieldId}) = lower(${value}))`.execute(db);
     if (rows.length) return rows.map((r) => r.id);
     const { rows: like } = await sql<{ id: string }>`
-      select id from workspace_record where workspace_id = ${workspaceId} and entity_id = ${target.id}
+      select id from workspace_record where workspace_id = ${workspaceId} and ${scope} and entity_id = ${target.id}
         and data->>${target.primaryFieldId} ilike ${`%${value}%`} limit 20`.execute(db);
     return like.map((r) => r.id);
   }
@@ -170,8 +180,8 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
     if (kind === "datetime" || kind === "range") {
       if (DATE_ONLY.test(v)) {
         // A whole Manila day: "on" the day is from its midnight to the next.
-        const start = sql`(${v}::date::timestamp at time zone ${MANILA})`;
-        const end = sql`((${v}::date + 1)::timestamp at time zone ${MANILA})`;
+        const start = sql`(${v}::date::timestamp at time zone ${zone()})`;
+        const end = sql`((${v}::date + 1)::timestamp at time zone ${zone()})`;
         if (raw.op === "eq") return sql`(${expr} >= ${start} and ${expr} < ${end})`;
         if (raw.op === "neq") return sql`not (${expr} >= ${start} and ${expr} < ${end})`;
         if (raw.op === "lte") return sql`${expr} < ${end}`;
@@ -213,7 +223,11 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
   }
 
   async function where(e: Entity, filters: unknown, query?: unknown) {
-    const parts: RawBuilder<unknown>[] = [sql`workspace_id = ${workspaceId}`, sql`entity_id = ${e.id}`];
+    const parts: RawBuilder<unknown>[] = [
+      sql`workspace_id = ${workspaceId}`,
+      scope,
+      sql`entity_id = ${e.id}`,
+    ];
     if (Array.isArray(filters) && filters.length > 10)
       throw new ToolError("Use at most 10 filters; no conditions were applied.");
     for (const f of Array.isArray(filters) ? (filters as Filter[]) : []) parts.push(await condition(e, f));
@@ -227,7 +241,7 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
     const unique = [...new Set(ids)].slice(0, 500);
     if (!unique.length) return new Map();
     const { rows } = await sql<{ id: string; entity_id: string; data: DataRecord["data"] }>`
-      select id, entity_id, data from workspace_record where workspace_id = ${workspaceId} and id = any(${unique}::text[])`.execute(
+      select id, entity_id, data from workspace_record where workspace_id = ${workspaceId} and ${scope} and id = any(${unique}::text[])`.execute(
       db,
     );
     return new Map(
@@ -289,7 +303,7 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
           const local =
             kind === "date"
               ? sql`(${sqlValue(f)})::date::timestamp`
-              : sql`(${sqlValue(f)} at time zone ${MANILA})`;
+              : sql`(${sqlValue(f)} at time zone ${zone()})`;
           key = sql`to_char(date_trunc(${bucket}, ${local}), ${bucket === "month" ? "YYYY-MM" : "YYYY-MM-DD"})`;
         } else if (args.groupBy) {
           const f = fieldOf(e, args.groupBy);
@@ -346,7 +360,7 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
       if (name === "get_record") {
         const id = String(args.id ?? "");
         const { rows } = await sql<RecordRow>`
-          select id, entity_id, data, created_at from workspace_record where workspace_id = ${workspaceId} and id = ${id}`.execute(
+          select id, entity_id, data, created_at from workspace_record where workspace_id = ${workspaceId} and ${scope} and id = ${id}`.execute(
           db,
         );
         const row = rows[0];
@@ -363,7 +377,7 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
         for (const l of links.slice(0, 6)) {
           const { rows: kids } = await sql<RecordRow & { total: number }>`
             select id, entity_id, data, created_at, count(*) over ()::int as total from workspace_record
-            where workspace_id = ${workspaceId} and entity_id = ${l.entity.id} and data->>${l.field.id} = ${id}
+            where workspace_id = ${workspaceId} and ${scope} and entity_id = ${l.entity.id} and data->>${l.field.id} = ${id}
             order by seq limit 30`.execute(db);
           if (kids.length)
             linked[`${l.entity.id} (by ${l.field.id})`] = {

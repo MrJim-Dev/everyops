@@ -23,6 +23,7 @@ import type { CalendarView as CalendarConfig, DataRecord, FieldValue } from "@/l
 import { applyFilter } from "@/lib/engine/query";
 import { formatDate, formatMonth, formatRange, formatTime, isTimeRange } from "@/lib/format";
 import { useFreshStore } from "@/lib/motion/fresh";
+import { useLoadRecords, useWindowed } from "@/lib/store/server-records";
 import { useViewPref } from "@/lib/store/view-prefs";
 import { canEdit } from "@/lib/store/workspaces";
 import { addDays, at, dateKey, daysBetween, startOfMonthKey, todayKey } from "@/lib/time";
@@ -151,6 +152,21 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
   const rangeTo =
     mode === "month" ? addDays(monthShift(month, 1), -1) : mode === "week" ? addDays(week, 6) : cursor;
   useReportView({ viewId: view.id, from: rangeFrom, to: rangeTo, status: statusFilter });
+  // Bookings older than this copy's window (src/lib/engine/window.ts) are read from the server for the dates shown.
+  const windowed = useWindowed(ws.id, entity.id);
+  const shownFrom = shown[0];
+  const shownTo = shown[shown.length - 1];
+  const older = ws.mode === "live" && !!windowed && shownFrom < windowed.since.slice(0, 10);
+  const loadingOlder = useLoadRecords(
+    ws.id,
+    older ? `${entity.id}:${dateField.id}:${shownFrom}:${shownTo}` : null,
+    {
+      entityId: entity.id,
+      dateField: dateField.id,
+      from: shownFrom,
+      to: shownTo,
+    },
+  );
   const count = shown.filter(inRange).reduce((n, d) => n + (byDay.get(d)?.length ?? 0), 0);
 
   const step = (dir: 1 | -1) =>
@@ -162,11 +178,12 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
       ? formatMonth(month)
       : mode === "week"
         ? `${formatDate(week)} – ${formatDate(addDays(week, 6))}`
-        : new Date(`${cursor}T12:00:00+08:00`).toLocaleDateString("en-PH", {
+        : // A calendar day: read at noon UTC in UTC, so it's the same day in every zone.
+          new Date(`${cursor}T12:00:00Z`).toLocaleDateString("en-PH", {
             weekday: "long",
             month: "short",
             day: "numeric",
-            timeZone: "Asia/Manila",
+            timeZone: "UTC",
           });
   const isCurrent =
     mode === "month"
@@ -239,6 +256,11 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
           onToday={() => setCursor(today)}
           isToday={isCurrent}
         />
+        {loadingOlder ? (
+          <span className="text-[12px] text-muted-foreground">
+            Loading older {entity.pluralName.toLowerCase()}…
+          </span>
+        ) : null}
         <fieldset
           aria-label="Calendar range"
           className="ml-2 flex border-0 items-center rounded-md bg-muted p-0.5"

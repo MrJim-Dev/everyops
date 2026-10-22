@@ -9,6 +9,7 @@ import {
   GlobeSimpleIcon,
   LightningIcon,
   PlugsConnectedIcon,
+  PrinterIcon,
   UsersThreeIcon,
   WebhooksLogoIcon,
 } from "@phosphor-icons/react";
@@ -30,6 +31,7 @@ export function SettingsLayout({ children }: { children: ReactNode }) {
     { id: "assistant", href: `${base}/assistant`, label: "Assistant", icon: BrainIcon },
     { id: "ai-usage", href: `${base}/ai-usage`, label: "AI use", icon: ChartBarIcon },
     { id: "automations", href: `${base}/automations`, label: "Automations", icon: LightningIcon },
+    { id: "print-templates", href: `${base}/print-templates`, label: "Print templates", icon: PrinterIcon },
     ...(canManage(ws.role)
       ? [
           { id: "publish", href: `${base}/publish`, label: "Publish", icon: GlobeHemisphereWestIcon },

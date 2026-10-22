@@ -1,7 +1,7 @@
 import { findRecord, getEntity, recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, FieldValue, Widget, WidgetTerm } from "@/lib/blueprint/types";
 import { isTimeRange } from "@/lib/format";
-import { addDays, dateKey, manilaParts, startOfMonthKey, todayKey } from "@/lib/time";
+import { addDays, dateKey, startOfMonthKey, todayKey, zonedParts } from "@/lib/time";
 import { run } from "./expr";
 import { applyFilter } from "./query";
 
@@ -10,7 +10,11 @@ const numberOf = (v: FieldValue | undefined) => (typeof v === "number" ? v : Num
 export function metricOf(widget: Pick<Widget, "metric">, rows: DataRecord[]): number {
   const { op, fieldId } = widget.metric;
   if (op === "count") return rows.length;
-  const values = rows.map((r) => numberOf(fieldId ? r.data[fieldId] : 0));
+  // An average skips blanks, like a spreadsheet's: a job nobody rated yet isn't a zero-star job.
+  const filled = (v: FieldValue | undefined) => v !== undefined && v !== null && v !== "";
+  const values = (op === "avg" && fieldId ? rows.filter((r) => filled(r.data[fieldId])) : rows).map((r) =>
+    numberOf(fieldId ? r.data[fieldId] : 0),
+  );
   const sum = values.reduce((a, b) => a + b, 0);
   return op === "sum" ? sum : values.length ? sum / values.length : 0;
 }
@@ -145,7 +149,7 @@ export function chartData(
   const today = todayKey(now);
   const buckets: { bucket: string; label: string }[] = [];
   if (chart.bucket === "month") {
-    const p = manilaParts(now);
+    const p = zonedParts(now);
     for (let i = 5; i >= 0; i--) {
       const d = new Date(Date.UTC(p.year, p.month - i, 1));
       const key = d.toISOString().slice(0, 7);

@@ -9,7 +9,9 @@
  * EveryOps.mine() and EveryOps.attach(fieldId, file) read and add a picture to the visitor's own booking when the page
  * was opened from its manage link (?manage=TOKEN, see src/server/manage.ts).
  */
+
 import type { Blueprint, FieldValue, HtmlPageView } from "@/lib/blueprint/types";
+import { formatRating, parseDuration, parseRating, stripMoney } from "@/lib/format";
 import { at } from "@/lib/time";
 import type { PublicField, PublicForm } from "./resolve";
 
@@ -243,8 +245,18 @@ export function formValues(form: PublicForm, raw: RawFormValues): Record<string,
       case "number":
       case "money":
       case "percent": {
-        const n = Number(v.replace(/[₱,\s]/g, ""));
+        const n = Number(stripMoney(v));
         if (v && Number.isFinite(n)) out[f.id] = n;
+        break;
+      }
+      case "rating": {
+        const n = parseRating(v);
+        if (n !== null) out[f.id] = n;
+        break;
+      }
+      case "duration": {
+        const n = parseDuration(v);
+        if (n !== null) out[f.id] = n;
         break;
       }
       case "checkbox":
@@ -305,6 +317,10 @@ export function formSnippet(form: PublicForm): string {
       case "money":
       case "percent":
         return `  <label>${label}<input type="number" name="${f.id}" step="any"${req}></label>`;
+      case "rating":
+        return `  <label>${label}<select name="${f.id}"${req}><option value="">Choose…</option>${[5, 4, 3, 2, 1].map((n) => `<option value="${n}">${formatRating(n)}</option>`).join("")}</select></label>`;
+      case "duration":
+        return `  <label>${label}<input type="text" name="${f.id}" placeholder="1:30, 90 or 1h 30m"${req}></label>`;
       case "date":
         return `  <label>${label}<input type="date" name="${f.id}"${req}></label>`;
       case "datetime":
@@ -327,6 +343,9 @@ export function formSnippet(form: PublicForm): string {
           .join("\n");
       case "relation":
         return `  <label>${label}<select name="${f.id}"${req}>\n      <option value="">Choose…</option>\n${options((form.choices[f.id] ?? []).map((c) => ({ id: c.id, label: c.title })))}\n    </select></label>`;
+      case "signature":
+        // Custom pages can't draw signatures yet: point visitors to the standard form for this one.
+        return `  <!-- ${label}: signatures are signed on the standard form (${form.viewId}), not on custom pages -->`;
       default: {
         const type =
           f.type === "email" || /email/i.test(f.name)

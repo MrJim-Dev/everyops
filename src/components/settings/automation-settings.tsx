@@ -1,12 +1,14 @@
 "use client";
 
 import {
+  BellIcon,
   CalendarCheckIcon,
   ClockIcon,
   EnvelopeSimpleIcon,
   LightningIcon,
   PlayIcon,
   PlusCircleIcon,
+  WebhooksLogoIcon,
 } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -16,9 +18,11 @@ import { Switch } from "@/components/ui/switch";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Rule } from "@/lib/blueprint/types";
 import { describeActions, describeTrigger, isOn, isTimed } from "@/lib/engine/automations";
+import { allActions } from "@/lib/engine/branches";
 import { formatDateTime } from "@/lib/format";
 import { canManage } from "@/lib/store/workspace-model";
 import { useWorkspaces } from "@/lib/store/workspaces";
+import { zone, zoneName } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { SettingsPage, SettingsSection } from "./settings-section";
 
@@ -59,12 +63,34 @@ function TriggerIcon({ rule }: { rule: Rule }) {
   return <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />;
 }
 
+/** An automation's steps, one line each with its icon. */
+function ActionLines({ lines }: { lines: string[] }) {
+  return (
+    <ul className="flex flex-col gap-1">
+      {lines.map((line, i) => (
+        <li
+          // biome-ignore lint/suspicious/noArrayIndexKey: actions have no ids and never reorder here
+          key={i}
+          className="flex items-center gap-2 text-[12.5px] text-foreground/85"
+        >
+          <ActionIcon line={line} />
+          <span className="truncate">{line}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function ActionIcon({ line }: { line: string }) {
   const Icon = line.startsWith("Email")
     ? EnvelopeSimpleIcon
-    : line.startsWith("Add a")
-      ? PlusCircleIcon
-      : null;
+    : line.startsWith("Notify")
+      ? BellIcon
+      : line.startsWith("Add a")
+        ? PlusCircleIcon
+        : line.startsWith("Call")
+          ? WebhooksLogoIcon
+          : null;
   return Icon ? (
     <Icon className="size-3.5 shrink-0" />
   ) : (
@@ -81,7 +107,30 @@ export function AutomationSettings() {
   const applyChange = useWorkspaces((s) => s.applyChange);
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [running, setRunning] = useState<string | null>(null);
+  // Webhook endpoints by id, so a Call step names where it goes ("Call Slack #bookings"). Owners and admins only.
+  const [endpoints, setEndpoints] = useState<Record<string, string>>({});
   const rules = ws.blueprint.rules;
+
+  useEffect(() => {
+    if (!manager || !rules.some((r) => allActions(r).some((a) => a.type === "call_api"))) return;
+    fetch(`/api/workspaces/${ws.id}/webhooks`)
+      .then(
+        (res) =>
+          res.json() as Promise<{
+            ok: boolean;
+            endpoints?: { id: string; url: string; description: string | null }[];
+          }>,
+      )
+      .then((body) => {
+        if (!body.ok) return;
+        setEndpoints(
+          Object.fromEntries(
+            (body.endpoints ?? []).map((e) => [e.id, e.description || new URL(e.url).hostname]),
+          ),
+        );
+      })
+      .catch(() => {});
+  }, [manager, rules, ws.id]);
 
   const load = useCallback(async () => {
     try {
@@ -141,7 +190,7 @@ export function AutomationSettings() {
         description="What happens by itself when records are saved, at set times, or as dates come up. Ask EveryOps to add or change one; turn one off here to pause it."
         footer={
           rules.length
-            ? `${rules.filter(isOn).length} of ${rules.length} on. Timed automations run every 15 minutes, Manila time.`
+            ? `${rules.filter(isOn).length} of ${rules.length} on. Timed automations run every 15 minutes, on ${zoneName(zone())} time.`
             : undefined
         }
       >
@@ -168,18 +217,30 @@ export function AutomationSettings() {
                           <span className="font-mono text-[11.5px]"> · if {rule.when}</span>
                         ) : null}
                       </span>
-                      <ul className="flex flex-col gap-1">
-                        {describeActions(ws.blueprint, rule).map((line, i) => (
-                          <li
-                            // biome-ignore lint/suspicious/noArrayIndexKey: actions have no ids and never reorder here
-                            key={i}
-                            className="flex items-center gap-2 text-[12.5px] text-foreground/85"
-                          >
-                            <ActionIcon line={line} />
-                            <span className="truncate">{line}</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <ActionLines lines={describeActions(ws.blueprint, rule, endpoints)} />
+                      {rule.branches?.map((branch, i) => (
+                        <div
+                          // biome-ignore lint/suspicious/noArrayIndexKey: branches have no ids and never reorder here
+                          key={i}
+                          className="flex flex-col gap-1"
+                        >
+                          <span className="text-[12px] font-medium text-muted-foreground">
+                            {branch.when?.trim() ? (
+                              <>
+                                {i === 0 ? "If" : "Else if"}{" "}
+                                <span className="font-mono text-[11.5px] font-normal">{branch.when}</span>
+                              </>
+                            ) : (
+                              "Otherwise"
+                            )}
+                          </span>
+                          <div className="border-l border-border pl-3">
+                            <ActionLines
+                              lines={describeActions(ws.blueprint, rule, endpoints, branch.actions)}
+                            />
+                          </div>
+                        </div>
+                      ))}
                       {recent ? (
                         <span className="text-[12px] text-muted-foreground">
                           Last ran {formatDateTime(recent.createdAt)} ·{" "}
@@ -220,7 +281,7 @@ export function AutomationSettings() {
 
       <SettingsSection
         title="Recent runs"
-        description="What each automation did, on which record, and whether its emails went out."
+        description="What each automation did, on which record, and whether its emails and calls went out."
       >
         {runs === null ? (
           <div className="flex flex-col gap-2">

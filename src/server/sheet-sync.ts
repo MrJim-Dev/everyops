@@ -10,6 +10,7 @@ import { db } from "./db";
 import { readGoogleSheet, sheetLink } from "./spreadsheet-import";
 import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, putRecords, readRecords } from "./workspace-data";
+import { enterZone } from "./zone";
 
 /**
  * Google Sheets sync: each run reads the sheet, previews it as an import that updates matching records (by the sync's
@@ -101,6 +102,7 @@ export async function createSync(
 ): Promise<{ ok: true; sync: SyncInfo } | { ok: false; message: string }> {
   if (!validSource(input.url)) return { ok: false, message: "Sync works with a Google Sheets link." };
   const bp = await currentBlueprint(db, workspaceId);
+  enterZone(bp);
   const entity = bp?.entities.find((e) => e.id === input.entityId);
   if (!entity) return { ok: false, message: "That record type doesn't exist." };
   if (!input.mapping.some((m) => m.fieldId === input.matchFieldId))
@@ -171,6 +173,7 @@ export async function runSync(workspaceId: string, id: string, now = new Date())
   const result = await db.transaction().execute(async (trx): Promise<SyncResult> => {
     await sql`select 1 from workspace where id = ${workspaceId} for update`.execute(trx);
     const bp = await currentBlueprint(trx, workspaceId);
+    enterZone(bp);
     if (!bp?.entities.some((e) => e.id === row.entity_id))
       return failed("The record type this sheet fills is gone.");
     const stored = await readRecords(trx, workspaceId);
@@ -197,7 +200,11 @@ export async function runSync(workspaceId: string, id: string, now = new Date())
       return sameData(was.record.data, r.data) ? [] : [{ record: r, rev: was.rev }];
     });
     if (puts.length) {
-      const put = await putRecords(trx, workspaceId, puts);
+      const put = await putRecords(trx, workspaceId, puts, {
+        type: "sheet_sync",
+        id: row.id,
+        name: "Google Sheets sync",
+      });
       if (put.conflicts.length) throw new Error(`sheet sync conflicted on ${put.conflicts.join(", ")}`);
       await sql`update workspace set updated_at = now() where id = ${workspaceId}`.execute(trx);
       await logActivity(

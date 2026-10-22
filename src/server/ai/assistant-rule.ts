@@ -14,6 +14,28 @@ type AssistantRule = z.infer<typeof assistantRule>;
  * validation to name, so the repair round fixes it.
  */
 export function toAssistantRule(r: AssistantRule): Rule {
+  // if / else_if / else steps split the actions into branches (the schema has no room for nested actions).
+  const marks = r.actions.map((a) =>
+    a.type
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_"),
+  );
+  const first = marks.findIndex((m) => m === "if" || m === "else_if" || m === "else" || m === "otherwise");
+  if (first >= 0) {
+    const plain = toAssistantRule({ ...r, actions: r.actions.slice(0, first) });
+    const branches: NonNullable<Rule["branches"]> = [];
+    let start = first;
+    for (let i = first + 1; i <= r.actions.length; i++) {
+      if (i < r.actions.length && !["if", "else_if", "else", "otherwise"].includes(marks[i])) continue;
+      const condition =
+        marks[start] === "else" || marks[start] === "otherwise" ? "" : (r.actions[start].value ?? "").trim();
+      const actions = toAssistantRule({ ...r, actions: r.actions.slice(start + 1, i) }).actions;
+      branches.push({ ...(condition ? { when: condition } : {}), actions });
+      start = i;
+    }
+    return { ...plain, branches };
+  }
   // Unknown events pass through as written; validation reports them.
   const event = r.trigger.event as Rule["trigger"]["event"];
   const timed = event === "schedule" || event === "date_reached";
@@ -42,6 +64,13 @@ export function toAssistantRule(r: AssistantRule): Rule {
         const body = a.message?.trim() ? a.message : rest.join("\n").trim() || first;
         return { type: "send_email", to: a.fieldId ?? "", subject: first.trim(), body };
       }
+      // notify_people: fieldId is who (owner, admins, team, staff, addresses, {{fields}}), value the title on its
+      // first line and the message after it.
+      if (a.type === "notify_people") {
+        const [first = "", ...rest] = (a.value ?? "").split("\n");
+        const body = a.message?.trim() ? a.message : rest.join("\n").trim();
+        return { type: "notify_people", to: a.fieldId ?? "", title: first.trim(), ...(body ? { body } : {}) };
+      }
       if (a.type === "create_record") {
         let values: Record<string, string> = {};
         try {
@@ -59,6 +88,13 @@ export function toAssistantRule(r: AssistantRule): Rule {
           target: { kind: "relation", fieldId: a.target?.fieldId ?? "" },
           fieldId: a.fieldId ?? "",
           value: a.value ?? "",
+        };
+      // call_api: fieldId is the webhook endpoint, value the JSON to post (empty sends the record).
+      if (a.type === "call_api")
+        return {
+          type: "call_api",
+          endpointId: a.fieldId ?? "",
+          ...(a.value?.trim() ? { body: a.value } : {}),
         };
       if (a.type !== "set_field" && a.type !== "adjust_number" && a.type !== "notify")
         return { type: "notify", message: "" };

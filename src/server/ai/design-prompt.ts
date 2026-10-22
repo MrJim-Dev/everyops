@@ -28,6 +28,8 @@ const FIELD_TYPES = [
   "number",
   "money",
   "percent",
+  "rating",
+  "duration",
   "date",
   "datetime",
   "time_range",
@@ -56,10 +58,12 @@ export const field = z.object({
   required: z.boolean().optional(),
   description: z.string().optional(),
   options: z.array(option).optional().describe("Required for select, multi_select and status"),
+  // A described string, not an enum: the schema sits near Gemini's limit, and these two values paid for rating and
+  // duration in the type list. validateBlueprint names anything else.
   range: z
-    .enum(["dates", "times"])
+    .string()
     .optional()
-    .describe("time_range only: whole days (stays, leave) or clock times (bookings)"),
+    .describe('time_range only: "dates" for whole days (stays, leave) or "times" for clock times (bookings)'),
   relation: z.object({ entityId: z.string() }).optional().describe("relation only: the linked record type"),
   formula: z
     .object({
@@ -618,6 +622,16 @@ Rules for a valid blueprint:
 - Contact details and documents have their own types: email (an email address), phone (a phone number), url (a
   website or link) and file (a document such as a PDF receipt, contract or ID scan; the team uploads it). Use
   them instead of text for those, and keep names plain (Email, Phone, Website, Contract).
+- Things people scan (products in a shop or POS, stock items, equipment, parcels, books) get a text field named
+  Barcode, SKU, Serial number, Asset tag, Tracking number or ISBN; EveryOps scans it with the camera or a handheld
+  scanner, to find the record and at the register.
+- rating is a score from 1 to 5 shown as stars (a customer review, service quality, a lead's priority); sample
+  values are whole numbers 1-5. duration is a length of time in minutes shown as "1 h 30 min" (a session, a
+  repair, time spent); sample values are minutes (90, not 1.5). Use number only for counts and other quantities.
+- A signature someone draws (waivers, rental agreements, proof of delivery) is a file field named Signature (or
+  Customer signature, Renter signature); it becomes a signature pad people sign on screen, on public forms too.
+- When the team needs to see who added or last changed a record (approvals, shared logs), add a text field named
+  exactly "Created by" or "Last edited by"; the app fills it in on every save. Leave it out of forms and samples.
 - Kanban boards use a status field. Calendars use a date, datetime or time_range field.
 - Bookings of courts, rooms, tables or similar: always a resource record type (courts) with resource hours, and a
   booking record type with booking settings: resourceFieldId (a required relation to the resource), timeFieldId (a

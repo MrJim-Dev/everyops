@@ -1,7 +1,15 @@
 "use client";
 
-import { DotsThreeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
-import { useState } from "react";
+import {
+  ArrowsClockwiseIcon,
+  DotsThreeIcon,
+  PencilSimpleIcon,
+  PlusIcon,
+  PrinterIcon,
+  TrashIcon,
+} from "@phosphor-icons/react";
+import { useEffect, useMemo, useState } from "react";
+import { PrintDialog } from "@/components/print/print-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
@@ -9,8 +17,11 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -25,14 +36,22 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useAssistant } from "@/lib/assistant/panel-store";
 import { editableFields, statusField } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
-import type { DataRecord, Entity, RecordData } from "@/lib/blueprint/types";
+import type { DataRecord, Entity, PrintTemplate, RecordData } from "@/lib/blueprint/types";
+import { findDuplicates } from "@/lib/engine/duplicates";
+import { renderPrint, starterTemplate, templatesFor } from "@/lib/engine/print";
 import type { FieldError } from "@/lib/engine/records";
+import { repeatText, seriesOf } from "@/lib/engine/recurrence";
 import { formatDateTime } from "@/lib/format";
-import { canEdit } from "@/lib/store/workspaces";
+import { loadAll } from "@/lib/store/server-records";
+import { canEdit, useWorkspaces } from "@/lib/store/workspaces";
 import { FieldValue } from "./field-value";
+import { MergeDialog } from "./merge-dialog";
 import { RecordFieldsForm } from "./record-fields-form";
 import { useRecordPanels } from "./record-panels";
 import { StatusMenu } from "./status-menu";
+
+/** Line items a panel lists before "Show more". */
+const LINES_SHOWN = 50;
 
 /**
  * One record: properties, its line items, and the next sensible action. A drawer from the right; while the
@@ -72,8 +91,8 @@ function RecordSheetBody({
   entity: Entity;
   onClose: () => void;
 }) {
-  const { blueprint, records, role } = useWorkspace();
-  const { openCreate } = useRecordPanels();
+  const { blueprint, records, role, id: workspaceId, mode } = useWorkspace();
+  const { openCreate, openRecord } = useRecordPanels();
   const editable = canEdit(role);
   const actions = useRecordActions();
   const [editing, setEditing] = useState(false);
@@ -81,11 +100,48 @@ function RecordSheetBody({
   // The record as it was when editing started; only fields that differ from it are saved.
   const [base, setBase] = useState<RecordData>(record.data);
   const [errors, setErrors] = useState<FieldError[]>([]);
+  // Another record with this phone or email: the same customer added twice.
+  const twins = useMemo(
+    () => findDuplicates(entity, record.data, records, record.id),
+    [entity, record, records],
+  );
+  const [merging, setMerging] = useState<DataRecord | null>(null);
+  // A record of a series (src/lib/engine/recurrence.ts): where it falls, and whether an edit goes to the rest too.
+  const series = useMemo(() => seriesOf(records, record, entity), [records, record, entity]);
+  const [scope, setScope] = useState<"one" | "following">("one");
+  const [printing, setPrinting] = useState<PrintTemplate | null>(null);
+  // Line items drawn per type before "Show more": a player with 1,700 bookings would draw them all.
+  const [linesShown, setLinesShown] = useState<Record<string, number>>({});
+  // The record type's print templates; without any, one built from its fields so every record can print.
+  const printables = useMemo(() => {
+    const own = templatesFor(blueprint, entity.id);
+    return own.length
+      ? own
+      : [{ id: "default", entityId: entity.id, name: entity.name, body: starterTemplate(blueprint, entity) }];
+  }, [blueprint, entity]);
   const status = statusField(entity);
   const current = status ? optionOf(status, record.data[status.id]) : undefined;
   // The next sensible step is the first "success" option the record isn't in yet (e.g. Paid, Approved).
   const next = status?.options?.find((o) => o.tone === "success" && o.id !== current?.id);
   const children = blueprint.entities.filter((e) => e.parent?.entityId === entity.id);
+  // Line items of a windowed type (src/lib/engine/window.ts) that are older than this copy's window: read from the
+  // server when the record opens, so the panel lists all of them.
+  const windowed = useWorkspaces((s) => s.workspaces[workspaceId]?.windowed);
+  const windowedChildren =
+    mode === "live"
+      ? children
+          .filter((c) => windowed?.[c.id])
+          .map((c) => c.id)
+          .join(",")
+      : "";
+  useEffect(() => {
+    if (!windowedChildren) return;
+    for (const id of windowedChildren.split(",")) {
+      const child = blueprint.entities.find((e) => e.id === id);
+      if (child?.parent)
+        void loadAll(workspaceId, { entityId: id, field: child.parent.fieldId, equals: record.id });
+    }
+  }, [windowedChildren, workspaceId, record.id, blueprint]);
 
   const startEditing = () => {
     setDraft(record.data);
@@ -100,7 +156,10 @@ function RecordSheetBody({
     const edited = Object.fromEntries(
       Object.entries(draft).filter(([id, value]) => JSON.stringify(value) !== JSON.stringify(base[id])),
     );
-    const result = actions.update(record.id, edited);
+    const result =
+      scope === "following" && series?.following.length
+        ? actions.updateFollowing(record.id, edited)
+        : actions.update(record.id, edited);
     if (result.ok) {
       setEditing(false);
       setErrors([]);
@@ -120,32 +179,96 @@ function RecordSheetBody({
       </SheetHeader>
 
       <div className="flex-1 overflow-y-auto px-5 py-4">
+        {!editing && twins.length ? (
+          <div
+            aria-live="polite"
+            className="mb-4 flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-[12.5px]"
+          >
+            {twins.slice(0, 3).map((t) => (
+              <div key={t.record.id} className="flex items-center justify-between gap-2">
+                <span className="min-w-0">
+                  Possible duplicate:{" "}
+                  <button
+                    type="button"
+                    className="font-medium underline-offset-2 hover:underline"
+                    onClick={() => openRecord(t.record.id)}
+                  >
+                    {recordTitle(entity, t.record)}
+                  </button>{" "}
+                  <span className="text-muted-foreground">has the same {t.field.name.toLowerCase()}</span>
+                </span>
+                {editable ? (
+                  <Button size="sm" variant="outline" onClick={() => setMerging(t.record)}>
+                    Merge…
+                  </Button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
         {editing ? (
-          <RecordFieldsForm
-            entity={entity}
-            values={draft}
-            errors={errors}
-            idPrefix={`edit-${record.id}`}
-            onChange={(fieldId, value) => setDraft((d) => ({ ...d, [fieldId]: value }))}
-          />
+          <>
+            <RecordFieldsForm
+              entity={entity}
+              values={draft}
+              errors={errors}
+              idPrefix={`edit-${record.id}`}
+              onChange={(fieldId, value) => setDraft((d) => ({ ...d, [fieldId]: value }))}
+            />
+            {series?.following.length ? (
+              <Field className="mt-4">
+                <FieldLabel htmlFor={`scope-${record.id}`}>Save changes to</FieldLabel>
+                <NativeSelect
+                  id={`scope-${record.id}`}
+                  className="w-full"
+                  value={scope}
+                  onChange={(e) => setScope(e.target.value as "one" | "following")}
+                >
+                  <NativeSelectOption value="one">This {entity.name.toLowerCase()} only</NativeSelectOption>
+                  <NativeSelectOption value="following">
+                    This and the {series.following.length} after it
+                  </NativeSelectOption>
+                </NativeSelect>
+              </Field>
+            ) : null}
+            {errors.some((e) => !e.fieldId) ? (
+              <p role="alert" className="mt-3 text-[13px] text-destructive">
+                {errors.find((e) => !e.fieldId)?.message}
+              </p>
+            ) : null}
+          </>
         ) : (
-          // Values wrap (long notes keep their line breaks) instead of widening the panel past its edge.
-          <dl className="grid grid-cols-[minmax(96px,32%)_minmax(0,1fr)] gap-x-4 gap-y-3 text-[13px]">
-            {entity.fields
-              .filter((f) => f.id !== entity.primaryFieldId && f.id !== status?.id)
-              .map((field) => (
-                <div key={field.id} className="contents">
-                  <dt className="text-muted-foreground">{field.name}</dt>
-                  <dd className="min-w-0 [overflow-wrap:anywhere] [&_.truncate]:whitespace-pre-line">
-                    <FieldValue
-                      field={field}
-                      value={record.data[field.id]}
-                      className={field.type === "image" ? "size-40" : undefined}
-                    />
-                  </dd>
-                </div>
-              ))}
-          </dl>
+          <>
+            {series ? (
+              <p className="mb-4 flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-[12.5px]">
+                <ArrowsClockwiseIcon className="size-4 text-muted-foreground" aria-hidden />
+                <span>
+                  Repeats {series.repeat ? repeatText(series.repeat) : ""}
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {series.index + 1} of {series.members.length}
+                  </span>
+                </span>
+              </p>
+            ) : null}
+            {/* Values wrap (long notes keep their line breaks) instead of widening the panel past its edge. */}
+            <dl className="grid grid-cols-[minmax(96px,32%)_minmax(0,1fr)] gap-x-4 gap-y-3 text-[13px]">
+              {entity.fields
+                .filter((f) => f.id !== entity.primaryFieldId && f.id !== status?.id)
+                .map((field) => (
+                  <div key={field.id} className="contents">
+                    <dt className="text-muted-foreground">{field.name}</dt>
+                    <dd className="min-w-0 [overflow-wrap:anywhere] [&_.truncate]:whitespace-pre-line">
+                      <FieldValue
+                        field={field}
+                        value={record.data[field.id]}
+                        className={field.type === "image" ? "size-40" : undefined}
+                      />
+                    </dd>
+                  </div>
+                ))}
+            </dl>
+          </>
         )}
 
         {!editing &&
@@ -169,6 +292,11 @@ function RecordSheetBody({
               <section key={child.id} className="mt-6">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <h3 className="text-[12px] font-medium text-muted-foreground">{child.pluralName}</h3>
+                  {lines.length > LINES_SHOWN ? (
+                    <span className="text-[12px] text-muted-foreground tabular">
+                      {lines.length.toLocaleString("en-PH")}
+                    </span>
+                  ) : null}
                   {editable ? (
                     <Button
                       size="sm"
@@ -184,7 +312,7 @@ function RecordSheetBody({
                 </div>
                 {lines.length ? (
                   <ul className="divide-y rounded-md border">
-                    {lines.map((line) => (
+                    {lines.slice(0, linesShown[child.id] ?? LINES_SHOWN).map((line) => (
                       <li key={line.id} className="flex items-center gap-3 px-3 py-2 text-[13px]">
                         {shown.map((f, i) => (
                           <span key={f.id} className={i === 0 ? "min-w-0 flex-1 truncate" : "shrink-0"}>
@@ -193,6 +321,24 @@ function RecordSheetBody({
                         ))}
                       </li>
                     ))}
+                    {lines.length > (linesShown[child.id] ?? LINES_SHOWN) ? (
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLinesShown((s) => ({
+                              ...s,
+                              [child.id]: (s[child.id] ?? LINES_SHOWN) + LINES_SHOWN * 4,
+                            }))
+                          }
+                          className="w-full px-3 py-2 text-left text-[12.5px] text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:bg-muted"
+                        >
+                          Show more (
+                          {(lines.length - (linesShown[child.id] ?? LINES_SHOWN)).toLocaleString("en-PH")}{" "}
+                          left)
+                        </button>
+                      </li>
+                    ) : null}
                   </ul>
                 ) : (
                   <p className="rounded-md border border-dashed px-3 py-2.5 text-[12.5px] text-muted-foreground">
@@ -251,7 +397,7 @@ function RecordSheetBody({
               >
                 <DotsThreeIcon />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" className="min-w-60">
                 <DropdownMenuGroup>
                   {status?.options
                     ?.filter((o) => o.id !== current?.id && o.id !== next?.id)
@@ -263,6 +409,43 @@ function RecordSheetBody({
                         Mark as {o.label.toLowerCase()}
                       </DropdownMenuItem>
                     ))}
+                  {printables.map((t) => (
+                    <DropdownMenuItem key={t.id} onClick={() => setPrinting(t)}>
+                      <PrinterIcon />
+                      Print {t.name.toLowerCase()}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  {series?.following.length ? (
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => {
+                        actions.removeMany(
+                          [record.id, ...series.following.map((r) => r.id)],
+                          entity.pluralName.toLowerCase(),
+                        );
+                        onClose();
+                      }}
+                    >
+                      <TrashIcon />
+                      Delete this and the {series.following.length} after it
+                    </DropdownMenuItem>
+                  ) : null}
+                  {series && series.members.length > 1 && series.index > 0 ? (
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => {
+                        actions.removeMany(
+                          series.members.map((r) => r.id),
+                          entity.pluralName.toLowerCase(),
+                        );
+                        onClose();
+                      }}
+                    >
+                      <TrashIcon />
+                      Delete the whole series ({series.members.length})
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem
                     variant="destructive"
                     onClick={() => {
@@ -279,6 +462,26 @@ function RecordSheetBody({
           </>
         )}
       </SheetFooter>
+      {merging ? (
+        <MergeDialog
+          entity={entity}
+          records={[record, merging]}
+          onClose={() => setMerging(null)}
+          onMerged={(keptId) => {
+            setMerging(null);
+            openRecord(keptId);
+          }}
+        />
+      ) : null}
+      {printing ? (
+        <PrintDialog
+          open
+          title={`${printing.name} ${recordTitle(entity, record)}`}
+          markdown={renderPrint(blueprint, printing, record, records)}
+          paper={printing.paper}
+          onClose={() => setPrinting(null)}
+        />
+      ) : null}
     </>
   );
 }

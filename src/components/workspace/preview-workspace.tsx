@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { ShellSkeleton } from "@/components/shell/shell-skeleton";
 import type { WorkspaceData } from "@/lib/blueprint/types";
 import { useCatalogLoaded, useCatalogSystem } from "@/lib/community/use-catalog";
+import { setPartialTypes } from "@/lib/engine/compute";
 import type { PageDoc } from "@/lib/store/workspace-model";
 import { WorkspaceProvider } from "./workspace-context";
 import { WorkspaceMissing } from "./workspace-missing";
@@ -13,6 +14,7 @@ import { WorkspaceMissing } from "./workspace-missing";
  * around and try it; nothing is saved.
  */
 export function PreviewWorkspace({ systemId, children }: { systemId: string; children: ReactNode }) {
+  setPartialTypes([]);
   const system = useCatalogSystem(systemId);
   // Community systems load from the server; wait for them before deciding a system doesn't exist.
   const checked = useCatalogLoaded();

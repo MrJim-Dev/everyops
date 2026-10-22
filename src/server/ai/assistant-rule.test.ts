@@ -67,4 +67,73 @@ describe("toAssistantRule", () => {
       to: "paid",
     });
   });
+  it("reads call_api: the webhook endpoint in fieldId, the JSON to post in value", () => {
+    const rule = toAssistantRule({
+      id: "ping",
+      name: "Tell Slack",
+      trigger: { entityId: "player", event: "created" },
+      actions: [{ type: "call_api", fieldId: "ep_9", value: '{"text": "{{name}} joined"}' }],
+    });
+    expect(rule.actions).toEqual([
+      { type: "call_api", endpointId: "ep_9", body: '{"text": "{{name}} joined"}' },
+    ]);
+    const plain = toAssistantRule({
+      id: "ping",
+      name: "Send the record",
+      trigger: { entityId: "player", event: "created" },
+      actions: [{ type: "call_api", fieldId: "ep_9", value: "" }],
+    });
+    expect(plain.actions).toEqual([{ type: "call_api", endpointId: "ep_9" }]);
+  });
+  it("reads notify_people: who in fieldId, the title then the message in value", () => {
+    const rule = toAssistantRule({
+      id: "n",
+      name: "N",
+      trigger: { entityId: "bookings", event: "created" },
+      actions: [
+        {
+          type: "notify_people",
+          fieldId: "owner, {{email}}",
+          value: "New booking\n{{name}} booked {{court}}",
+        },
+      ],
+    });
+    expect(rule.actions).toEqual([
+      {
+        type: "notify_people",
+        to: "owner, {{email}}",
+        title: "New booking",
+        body: "{{name}} booked {{court}}",
+      },
+    ]);
+  });
+
+  it("reads if / else_if / else steps as branches", () => {
+    const rule = toAssistantRule({
+      id: "follow_up",
+      name: "Follow up",
+      trigger: { entityId: "bookings", event: "updated" },
+      actions: [
+        { type: "notify", message: "Saved" },
+        { type: "if", value: "status == 'paid'" },
+        { type: "send_email", fieldId: "{{email}}", value: "Thanks\n\nSee you" },
+        { type: "else if", value: "status == 'unpaid'" },
+        { type: "set_field", fieldId: "note", value: "'chase'" },
+        { type: "else" },
+        { type: "notify", message: "Nothing to do" },
+      ],
+    });
+    expect(rule.actions).toEqual([{ type: "notify", message: "Saved" }]);
+    expect(rule.branches).toEqual([
+      {
+        when: "status == 'paid'",
+        actions: [{ type: "send_email", to: "{{email}}", subject: "Thanks", body: "See you" }],
+      },
+      {
+        when: "status == 'unpaid'",
+        actions: [{ type: "set_field", target: { kind: "self" }, fieldId: "note", value: "'chase'" }],
+      },
+      { actions: [{ type: "notify", message: "Nothing to do" }] },
+    ]);
+  });
 });

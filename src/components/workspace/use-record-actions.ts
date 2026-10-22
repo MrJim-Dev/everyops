@@ -10,6 +10,7 @@ import {
   type MutationResult,
   updateRecord,
 } from "@/lib/engine/records";
+import { createSeries, type Repeat, type SeriesResult, updateFollowing } from "@/lib/engine/recurrence";
 import { markFresh } from "@/lib/motion/fresh";
 import { canEdit } from "@/lib/store/workspaces";
 import { useWorkspace } from "./workspace-context";
@@ -64,6 +65,48 @@ export function useRecordActions() {
       (parentEntityId: string, parent: RecordData, lineEntityId: string, lines: RecordData[]) =>
         settle(createWithLines(data, parentEntityId, parent, lineEntityId, lines)),
       [data, settle],
+    ),
+    /** A record, or a series of them when it repeats (src/lib/engine/recurrence.ts). Days that clash are skipped. */
+    createSeries: useCallback(
+      (entityId: string, input: RecordData, repeat: Repeat | null, noun: { one: string; many: string }) => {
+        const result: SeriesResult = createSeries(data, entityId, input, repeat);
+        // One record (or a refusal) goes through the usual path: view-only check, commit, notices.
+        if (readOnly || !result.ok || result.ids.length < 2) {
+          const settled = settle(result);
+          return settled.ok && result.ok ? result : settled;
+        }
+        const before = data;
+        commit(result.data);
+        markFresh(result.ids);
+        for (const notice of result.notices) toast.info(notice);
+        toast.success(`Created ${result.ids.length} ${noun.many}`, {
+          description: result.skipped.length
+            ? `Skipped ${result.skipped.length} that clashed with another ${noun.one}.`
+            : undefined,
+          action: { label: "Undo", onClick: () => commit(before) },
+          duration: 10_000,
+        });
+        return result;
+      },
+      [data, commit, settle, readOnly],
+    ),
+    /** An edit to a record and the rest of its series after it, saved together. */
+    updateFollowing: useCallback(
+      (id: string, patch: RecordData) => {
+        const record = data.records.find((r) => r.id === id);
+        if (readOnly || !record) return settle(updateRecord(data, id, patch));
+        const result = updateFollowing(data, record, patch);
+        if (!result.ok) return result;
+        const before = data;
+        commit(result.data);
+        markFresh(result.ids);
+        for (const notice of result.notices) toast.info(notice);
+        toast.success(`Updated ${result.ids.length} in this series`, {
+          action: { label: "Undo", onClick: () => commit(before) },
+        });
+        return result;
+      },
+      [data, commit, settle, readOnly],
     ),
     /** The same change on several records, saved together. Stops at the first record that fails its checks. */
     updateMany: useCallback(

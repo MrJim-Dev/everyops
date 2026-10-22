@@ -24,6 +24,7 @@ import { Markdown } from "@/components/editor/markdown";
 import { Reveal } from "@/components/landing/reveal";
 import { StatusBadge } from "@/components/records/status-badge";
 import { Button } from "@/components/ui/button";
+import { looksLikeMoney } from "@/lib/format";
 import type { HeroFact } from "@/lib/public/hero-facts";
 import type { Cell, ResolvedBlock } from "@/lib/public/resolve";
 import { cn } from "@/lib/utils";
@@ -517,7 +518,7 @@ function CopyValue({ text, label }: { text: string; label: string }) {
 function Card({ cells }: { cells: Cell[] }) {
   const [title, ...rest] = cells;
   const image = rest.find((c) => c.kind === "image" && c.text);
-  const price = rest.find((c) => /₱|PHP|\$/.test(c.text) && c.kind !== "markdown" && c.kind !== "image");
+  const price = rest.find((c) => looksLikeMoney(c.text) && c.kind !== "markdown" && c.kind !== "image");
   // A tag that only repeats the name ("GCash" on the GCash card) is left out.
   const tags = rest.filter((c) => c.kind === "tag" && c.text);
   const shownTags = tags.filter((c) => c.text.toLowerCase() !== title?.text.toLowerCase());

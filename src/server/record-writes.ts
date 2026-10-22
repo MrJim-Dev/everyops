@@ -1,15 +1,19 @@
 import "server-only";
 import { sql } from "kysely";
 import type { DataRecord, RecordData } from "@/lib/blueprint/types";
+import { canSee } from "@/lib/engine/access";
+import { mergeInto } from "@/lib/engine/duplicates";
 import { newId } from "@/lib/engine/ids";
 import { applyRecordOps, createRecord, updateRecord } from "@/lib/engine/records";
 import { autoReferenceFields, nextReference } from "@/lib/engine/references";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
-import { type Actor, logActivity } from "./activity";
+import { viewerIn } from "./access";
+import { type Actor, logActivity, recordActor } from "./activity";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, deleteRecords, putRecords, readRecords, writePages } from "./workspace-data";
+import { enterZone } from "./zone";
 
 /**
  * Record writes from outside the app (MCP tools, the REST API): one record at a time, through the same engine as
@@ -25,7 +29,9 @@ export type WriteResult =
 type Change =
   | { kind: "create"; entityId: string; data: RecordData }
   | { kind: "update"; id: string; patch: RecordData; rev?: number }
-  | { kind: "delete"; id: string; rev?: number };
+  | { kind: "delete"; id: string; rev?: number }
+  /** Merges dropId into id (src/lib/engine/duplicates.ts): over every record, so links the browser hasn't loaded move too. */
+  | { kind: "merge"; id: string; dropId: string; rev?: number };
 
 export async function writeRecord(
   slug: string,
@@ -41,11 +47,20 @@ export async function writeRecord(
     const done = await (async (): Promise<WriteResult> => {
       await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
       const bp = await currentBlueprint(trx, slug);
+      enterZone(bp);
       if (!bp) return { ok: false, status: 404, message: "Workspace not found." };
       const stored = await readRecords(trx, slug);
       const before = new Map(stored.map((s) => [s.record.id, s]));
       const ws = { blueprint: bp, records: stored.map((s) => s.record) };
       const target = change.kind === "create" ? undefined : before.get(change.id);
+      // Records the caller can't see (record-level access) aren't there for them.
+      const dropped = change.kind === "merge" ? before.get(change.dropId) : undefined;
+      if (actor.userId && (target || dropped)) {
+        const viewer = await viewerIn(trx, slug, actor.userId);
+        for (const s of [target, dropped])
+          if (s && viewer && !canSee(bp, viewer, s.record))
+            return { ok: false, status: 404, message: `No record "${s.record.id}".` };
+      }
       if (target) entityId = target.record.entityId;
       if (change.kind !== "create") {
         if (!target) return { ok: false, status: 404, message: `No record "${change.id}".` };
@@ -58,6 +73,8 @@ export async function writeRecord(
             current: target,
           };
       }
+      if (change.kind === "merge" && !dropped)
+        return { ok: false, status: 404, message: `No record "${change.dropId}".` };
       let next: DataRecord[];
       let saved: DataRecord | null = null;
       let notices: string[] = [];
@@ -82,6 +99,14 @@ export async function writeRecord(
         next = made.data.records;
         saved = made.record;
         notices = made.notices;
+      } else if (change.kind === "merge") {
+        const made = mergeInto(ws, change.id, change.dropId, now);
+        if (!made.ok) return { ok: false, status: 400, message: made.message };
+        next = made.data.records;
+        saved = made.record;
+        notices = [
+          made.moved ? `Moved ${made.moved} linked ${made.moved === 1 ? "record" : "records"}.` : "",
+        ].filter(Boolean);
       } else {
         const done = applyRecordOps(ws, [{ op: "delete_record", recordId: change.id }], now);
         if (done.errors.length) return { ok: false, status: 400, message: done.errors.join("; ") };
@@ -95,7 +120,7 @@ export async function writeRecord(
       });
       const gone = stored.filter((s) => !kept.has(s.record.id)).map((s) => ({ id: s.record.id, rev: s.rev }));
       removed = gone.map((g) => g.id);
-      const put = await putRecords(trx, slug, puts);
+      const put = await putRecords(trx, slug, puts, await recordActor(trx, actor));
       const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, gone))];
       if (conflicts.length) throw new Error(`record write conflicted on ${conflicts.join(", ")}`);
       hooks = await queueChanges(trx, slug, bp, [
@@ -130,10 +155,12 @@ export async function writeRecord(
         ids:
           change.kind === "delete" && done.ok
             ? removed
-            : [done.ok && done.record ? done.record.id : change.kind === "create" ? "" : change.id].filter(
-                Boolean,
-              ),
-        count: 1,
+            : change.kind === "merge"
+              ? [change.id, change.dropId]
+              : [done.ok && done.record ? done.record.id : change.kind === "create" ? "" : change.id].filter(
+                  Boolean,
+                ),
+        count: change.kind === "merge" ? 2 : 1,
         result: done.ok ? "ok" : done.status === 409 ? "conflict" : "error",
         detail: done.ok ? done.notices.join(" ") || null : done.message,
       });

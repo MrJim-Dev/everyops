@@ -67,6 +67,12 @@ export async function askEveryOps(ctx: Ctx, message: string, screen: Screen) {
         canDesign,
         canEditRecords,
         userId: ctx.caller.user.id,
+        viewer: {
+          userId: ctx.caller.user.id,
+          role: found.role,
+          name: ctx.caller.user.name,
+          email: ctx.caller.user.email,
+        },
         workspaceId: ctx.workspaceId,
         team,
         workspaceName: found.workspace.name,

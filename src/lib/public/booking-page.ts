@@ -165,6 +165,8 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
   }
   @keyframes fadeonly { from { opacity: 0; } to { opacity: 1; } }
   @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } aside.summary { position: static; } }
+  .sign { display: block; width: 100%; max-width: 420px; height: 140px; border: 1px solid #d4d4d8; border-radius: 10px; background: #fff; touch-action: none; cursor: crosshair; }
+  .signed { display: flex; align-items: center; gap: 12px; font-size: 14px; }
 </style>
 </head>
 <body ${BOOKING_PAGE_MARK}="${esc(o.formId)}">
@@ -185,6 +187,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
 (function () {
   var FORM = ${JSON.stringify(o.formId)};
   var HOME = ${JSON.stringify(o.homeHref)};
+  // The workspace's clock, from the form once it loads (pages written before workspaces had a zone say Manila).
   var TZ = "Asia/Manila";
   var panel = document.getElementById("panel");
   var summary = document.getElementById("summary");
@@ -205,12 +208,16 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     (kids || []).forEach(function (c) { if (c) n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
     return n;
   }
+  // Today is read on the workspace's clock; calendar days are plain dates (noon UTC), so arithmetic and labels on
+  // them never slip a day in far-off zones.
   function dayKey(d) { return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d); }
-  function fromKey(k) { return new Date(k + "T12:00:00+08:00"); }
-  function addDays(k, n) { return dayKey(new Date(fromKey(k).getTime() + n * 86400000)); }
+  function plainKey(d) { return d.toISOString().slice(0, 10); }
+  function fromKey(k) { return new Date(k + "T12:00:00Z"); }
+  function addDays(k, n) { return plainKey(new Date(fromKey(k).getTime() + n * 86400000)); }
   function fmt(d, opts) { return new Intl.DateTimeFormat("en-PH", Object.assign({ timeZone: TZ }, opts)).format(d); }
+  function fmtDay(d, opts) { return new Intl.DateTimeFormat("en-PH", Object.assign({ timeZone: "UTC" }, opts)).format(d); }
   function timeOf(iso) { return fmt(new Date(iso), { hour: "numeric", minute: "2-digit" }); }
-  function dayLabel(k) { return fmt(fromKey(k), { weekday: "short", month: "short", day: "numeric" }); }
+  function dayLabel(k) { return fmtDay(fromKey(k), { weekday: "short", month: "short", day: "numeric" }); }
   function booking() { return form && form.booking; }
   function payField() {
     if (!form || !form.payments) return null;
@@ -348,7 +355,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     for (var i = 0; i < 21; i++) (function (k) {
       var d = fromKey(k);
       strip.appendChild(el("button", { type: "button", class: "day", "aria-pressed": String(k === state.day), "aria-label": dayLabel(k), onclick: function () { state.day = k; loadSlots(); } },
-        [el("small", { text: fmt(d, { weekday: "short" }) }), el("b", { text: fmt(d, { day: "numeric" }) }), el("small", { text: fmt(d, { month: "short" }) })]));
+        [el("small", { text: fmtDay(d, { weekday: "short" }) }), el("b", { text: fmtDay(d, { day: "numeric" }) }), el("small", { text: fmtDay(d, { month: "short" }) })]));
     })(addDays(today, i));
     box.appendChild(strip);
     if (!state.day) return;
@@ -380,10 +387,10 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     state.days.forEach(function (d) { free[d.day] = d.free; });
     var first = fromKey(state.days[0].day.slice(0, 7) + "-15");
     var shown = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + state.month, 15, 4));
-    var monthKey = dayKey(shown).slice(0, 7);
+    var monthKey = plainKey(shown).slice(0, 7);
     box.appendChild(el("div", { class: "monthbar" }, [
       el("button", { type: "button", "aria-label": "Previous month", disabled: state.month === 0, onclick: function () { state.month--; draw(); } }, ["\u2039"]),
-      el("span", { text: fmt(shown, { month: "long", year: "numeric" }) }),
+      el("span", { text: fmtDay(shown, { month: "long", year: "numeric" }) }),
       el("button", { type: "button", "aria-label": "Next month", disabled: state.month >= 2, onclick: function () { state.month++; draw(); } }, ["\u203a"])
     ]));
     var grid = el("div", { class: "month" });
@@ -392,7 +399,8 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     for (var i = 0; i < pad; i++) grid.appendChild(el("span"));
     for (var d = 1; d <= 31; d++) {
       var k = monthKey + "-" + (d < 10 ? "0" + d : d);
-      if (dayKey(fromKey(k)).slice(0, 7) !== monthKey) break;
+      // Past the month's last day (Feb 30 becomes Mar 2) the month ends.
+      if (plainKey(fromKey(k)).slice(0, 7) !== monthKey) break;
       (function (k) {
         var s = state.stay, inRange = s.start && s.end && k > s.start && k < s.end, edge = k === s.start || k === s.end;
         var usable = k in free && (free[k] || (s.start && !s.end && k > s.start));
@@ -432,6 +440,8 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     switch (f.type) {
       case "long_text": return el("textarea", Object.assign({ rows: "3", oninput: on }, common), [v || ""]);
       case "number": case "money": case "percent": return el("input", Object.assign({ type: "number", step: "any", value: v || "", oninput: on }, common));
+      case "rating": return el("select", Object.assign({ value: v || "", onchange: on }, common), [el("option", { value: "" }, ["Choose…"])].concat([5, 4, 3, 2, 1].map(function (n) { return el("option", { value: String(n), selected: String(n) === String(v) || null }, ["★★★★★".slice(0, n) + "☆☆☆☆☆".slice(n)]); })));
+      case "duration": return el("input", Object.assign({ type: "text", placeholder: "1:30, 90 or 1h 30m", value: v || "", oninput: on }, common));
       case "date": return el("input", Object.assign({ type: "date", value: v || "", oninput: on }, common));
       case "datetime": return el("input", Object.assign({ type: "datetime-local", value: v || "", oninput: on }, common));
       case "checkbox": return el("input", Object.assign({ type: "checkbox", checked: v === "on" || null, onchange: on }, common));
@@ -449,6 +459,38 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
             set(onNow ? list.filter(function (x) { return x !== o.id; }) : list.concat(o.id)); draw();
           } }, [o.label]);
         }));
+      }
+      case "signature": {
+        // Once saved, the page says so (the drawing is the team's); a redraw of the panel never loses it.
+        if (v) return el("div", { class: "signed", id: "f_" + f.id }, [el("span", { text: "\u2713 Signed" }), el("button", { type: "button", class: "button", onclick: function () { set(""); draw(); } }, ["Sign again"])]);
+        var pad = el("canvas", { class: "sign", id: "f_" + f.id, role: "img", "aria-label": "Signature pad for " + f.name + ". Draw your signature with a finger, pen or mouse." });
+        var note = el("p", { class: "hint", text: "Sign in the box." });
+        var ink = false, lastPt = null;
+        var pt = function (e) { var b = pad.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
+        requestAnimationFrame(function () {
+          var r = window.devicePixelRatio || 1, b = pad.getBoundingClientRect();
+          pad.width = Math.round(b.width * r); pad.height = Math.round(b.height * r);
+          var c = pad.getContext("2d"); c.scale(r, r); c.lineWidth = 2.2; c.lineCap = "round"; c.lineJoin = "round"; c.strokeStyle = "#111";
+        });
+        pad.addEventListener("pointerdown", function (e) { pad.setPointerCapture(e.pointerId); ink = true; lastPt = pt(e); });
+        pad.addEventListener("pointermove", function (e) {
+          if (!ink || !lastPt) return;
+          var c = pad.getContext("2d"), n = pt(e);
+          c.beginPath(); c.moveTo(lastPt.x, lastPt.y); c.lineTo(n.x, n.y); c.stroke(); lastPt = n;
+        });
+        var end = function () {
+          if (!ink) return;
+          ink = false; lastPt = null; note.textContent = "Saving signature\u2026";
+          pad.toBlob(function (blob) {
+            if (!blob) return;
+            EveryOps.upload(FORM, new File([blob], "Signature.png", { type: "image/png" })).then(function (r) {
+              if (r && r.ok) { state.values[f.id] = r.url; delete state.errors[f.id]; note.textContent = "Signed. Keep drawing to change it."; }
+              else note.textContent = (r && r.message) || "That didn't save. Sign again.";
+            });
+          }, "image/png");
+        };
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (t) { pad.addEventListener(t, end); });
+        return el("div", {}, [pad, note]);
       }
       case "image": return el("input", Object.assign({}, common, { type: "file", accept: "image/*", required: f.required && !v ? true : null, onchange: function (e) {
         var file = e.target.files && e.target.files[0];
@@ -588,6 +630,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
   EveryOps.form(FORM).then(function (r) {
     if (!r || !r.ok) { panel.innerHTML = '<p class="muted">Booking is closed right now. Please check back soon.</p>'; return; }
     form = r.form;
+    if (form && form.timeZone) TZ = form.timeZone;
     var b = booking();
     if (b && b.resources.length === 1) state.resource = b.resources[0].id;
     buildSteps();

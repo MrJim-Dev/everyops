@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>Offline · EveryOps</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100dvh; display: grid; place-items: center; background: #0a0a0a; color: #ededed;
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; padding: 24px; }
+  main { max-width: 380px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  img { width: 56px; height: 56px; border-radius: 14px; }
+  h1 { font-size: 19px; font-weight: 600; margin: 4px 0 0; }
+  p { margin: 0; color: #a1a1a1; font-size: 14px; }
+  button { margin-top: 6px; height: 36px; padding: 0 16px; border-radius: 8px; border: 0; background: #2dd4bf; color: #04201c;
+    font: inherit; font-weight: 500; cursor: pointer; }
+  button:focus-visible { outline: 2px solid #5eead4; outline-offset: 2px; }
+  .status { font-size: 12.5px; color: #737373; }
+</style>
+</head>
+<body>
+<main>
+  <img src="/icon-192.png" alt="">
+  <h1>You're offline</h1>
+  <p>EveryOps needs a connection to load your workspace. Nothing you saved is lost; this page opens it again as soon as you're back online.</p>
+  <button type="button" onclick="location.reload()">Try again</button>
+  <p class="status" id="status" aria-live="polite">Waiting for a connection…</p>
+</main>
+<script>
+  addEventListener("online", () => {
+    document.getElementById("status").textContent = "Back online. Opening…";
+    location.reload();
+  });
+</script>
+</body>
+</html>

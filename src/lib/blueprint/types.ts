@@ -30,6 +30,10 @@ export type FieldType =
   | "number"
   | "money"
   | "percent"
+  /** A score from 1 to 5, shown as stars (a review, a service rating, a lead's priority). */
+  | "rating"
+  /** A length of time in minutes, shown as "1 h 30 min" (a session, a repair, time on a task). */
+  | "duration"
   | "date"
   | "datetime"
   | "time_range"
@@ -47,8 +51,17 @@ export type FieldType =
   | "url"
   /** An uploaded document (a PDF receipt, a contract): the app path, with its name, served only to the team. */
   | "file"
+  /**
+   * A drawn signature (a waiver, a rental agreement, a delivery receipt): a PNG in the workspace's private documents,
+   * like a file field's, served only to the team. Signed on a pad in the app or on a public form.
+   */
+  | "signature"
   | "formula"
-  | "rollup";
+  | "rollup"
+  /** Who added the record (a person, a public form, an automation, an API key), stamped by EveryOps. */
+  | "created_by"
+  /** Who changed the record last, stamped by EveryOps on every save. */
+  | "edited_by";
 
 export type FieldOption = { id: string; label: string; tone: Tone };
 
@@ -96,6 +109,12 @@ export type Entity = {
     closesAt: string;
     slotMinutes: 15 | 30 | 60 | 90 | 120;
   };
+  /**
+   * Staff and viewers see only their own records of this type: by is the field naming them (a person or email field
+   * holding their name or email), or "created_by" for the records they added (src/lib/engine/access.ts).
+   * Without it everyone in the workspace sees every record.
+   */
+  access?: { by: string };
 };
 
 export type Sort = { fieldId: string; dir: "asc" | "desc" };
@@ -436,6 +455,13 @@ export type Action =
    */
   | { type: "send_email"; to: string; subject: string; body: string }
   /**
+   * Notifies people: to is a list of who, separated by commas: owner, admins (owner and admins), team (everyone in
+   * the workspace), staff, an email address, or a {{field}} holding one ({{player.email}}). Workspace members get it
+   * in the app (the bell), and by email too when email is true; anyone else gets an email. title and body are text
+   * with {{field}} placeholders. Sent by the server after the save, like emails.
+   */
+  | { type: "notify_people"; to: string; title: string; body?: string; email?: boolean }
+  /**
    * Adds a record of another type, e.g. an invoice when a booking is confirmed. values maps its field ids to
    * formulas read on the triggering record; a link back to the triggering record's type is filled in by itself.
    */
@@ -446,7 +472,14 @@ export type Action =
    * on this record to fill, fieldId the field of the linked type to match, and value a formula on this record for
    * what it must equal (date). The linked type's rollups then count through that link.
    */
-  | { type: "link_record"; target: { kind: "relation"; fieldId: string }; fieldId: string; value: string };
+  | { type: "link_record"; target: { kind: "relation"; fieldId: string }; fieldId: string; value: string }
+  /**
+   * Calls an outside service: posts to one of the workspace's webhook endpoints (Settings → Webhooks, where its URL
+   * and signing secret stay, out of the blueprint). body is JSON with {{field}} placeholders inside its strings,
+   * e.g. {"text": "New booking: {{name}} at {{time}}"}; without one it sends the record. Sent by the server, with
+   * the endpoint's retries, like emails.
+   */
+  | { type: "call_api"; endpointId: string; body?: string };
 
 /** When a timed automation runs, in Manila time. */
 export type RuleSchedule = {
@@ -481,7 +514,15 @@ export type Rule = {
   };
   when?: string;
   actions: Action[];
+  /**
+   * If / else: after actions, the first branch whose when holds runs its actions too; a last branch without a when
+   * is the otherwise (src/lib/engine/branches.ts). Older rules have none.
+   */
+  branches?: RuleBranch[];
 };
+
+/** One way an automation can go: its condition (a formula on the record) and what it does then. */
+export type RuleBranch = { when?: string; actions: Action[] };
 
 export type System = {
   id: string;
@@ -503,6 +544,27 @@ export type Blueprint = {
   views: View[];
   widgets: Widget[];
   rules: Rule[];
+  /** ISO 4217 code money reads in (PHP, USD, SGD). Amounts are plain numbers; older blueprints mean PHP. */
+  currency?: string;
+  /** The IANA time zone the workspace's dates, schedules and "today" are read in. Older blueprints mean Asia/Manila. */
+  timeZone?: string;
+  /** Printable documents (invoices, quotes, agreements). Older blueprints have none. */
+  printTemplates?: PrintTemplate[];
+};
+
+/** Paper a print template is laid out for: A4, US Letter, or an 80 mm receipt roll. */
+export type PaperSize = "a4" | "letter" | "receipt";
+
+/**
+ * A printable document for one record type, written in markdown with {{placeholders}}: {{field}}, {{link.field}},
+ * {{business}}, {{today}}, and {{lines}} (or {{lines:child}}) for a table of the record's line items.
+ */
+export type PrintTemplate = {
+  id: string;
+  entityId: string;
+  name: string;
+  body: string;
+  paper?: PaperSize;
 };
 
 /* ---------- Records ---------- */
@@ -519,7 +581,13 @@ export type DataRecord = {
   data: RecordData;
   createdAt: string;
   updatedAt: string;
+  /** Who added it and who changed it last, as the server stamped them. Older records have none. */
+  createdBy?: RecordActor;
+  updatedBy?: RecordActor;
 };
+
+/** Who wrote a record: its kind (person, form, automation, api, agent, sync, visitor), its id, and how it reads. */
+export type RecordActor = { type: string; id?: string | null; name: string };
 
 export type WorkspaceData = {
   blueprint: Blueprint;

@@ -1,11 +1,12 @@
 import type { Blueprint, Entity, Rule } from "@/lib/blueprint/types";
+import { mapActions } from "./branches";
 import { stockFieldOf } from "./register";
 
 type Action = Rule["actions"][number];
 
 const QTY = /qty|quantity|received|count|pcs|units/i;
 const STOCK_IN = /restock|receiv|purchase|deliver|stock.?in|incoming|replenish/i;
-const NUMERIC = new Set(["number", "money", "percent"]);
+const NUMERIC = new Set(["number", "money", "percent", "rating", "duration"]);
 
 /**
  * Generated automations sometimes arrive with the field or amount left out, which the designer fills with "" and
@@ -19,6 +20,8 @@ export function completeAction(bp: Blueprint, rule: Rule, action: Action): Actio
   if (!source) return undefined;
   if (action.type === "notify") return action.message.trim() ? action : undefined;
   if (action.type === "send_email") return action.to.trim() && action.subject.trim() ? action : undefined;
+  if (action.type === "call_api") return action.endpointId?.trim() ? action : undefined;
+  if (action.type === "notify_people") return action.to.trim() && action.title.trim() ? action : undefined;
   if (action.type === "create_record")
     return bp.entities.some((e) => e.id === action.entityId) ? action : undefined;
   if (action.type === "link_record") {
@@ -120,9 +123,8 @@ export function completeTrigger(bp: Blueprint, rule: Rule): Rule["trigger"] {
 export function completeRule(bp: Blueprint, rule: Rule): Rule {
   rule = qualifyLinked(bp, rule);
   return fullReceipt(bp, {
-    ...rule,
+    ...mapActions(rule, (actions) => actions.map((a) => completeAction(bp, rule, a) ?? a)),
     trigger: completeTrigger(bp, rule),
-    actions: rule.actions.map((a) => completeAction(bp, rule, a) ?? a),
   });
 }
 
@@ -154,14 +156,22 @@ export function qualifyLinked(bp: Blueprint, rule: Rule): Rule {
             }),
       )
       .join("");
-  const actions = rule.actions.map((a) =>
-    a.type === "set_field"
-      ? { ...a, value: fix(a.value) }
-      : a.type === "adjust_number"
-        ? { ...a, delta: fix(a.delta) }
-        : a,
+  const fixed = mapActions(rule, (actions) =>
+    actions.map((a) =>
+      a.type === "set_field"
+        ? { ...a, value: fix(a.value) }
+        : a.type === "adjust_number"
+          ? { ...a, delta: fix(a.delta) }
+          : a,
+    ),
   );
-  return { ...rule, ...(rule.when ? { when: fix(rule.when) } : {}), actions };
+  return {
+    ...fixed,
+    ...(rule.when ? { when: fix(rule.when) } : {}),
+    ...(fixed.branches
+      ? { branches: fixed.branches.map((b) => (b.when ? { ...b, when: fix(b.when) } : b)) }
+      : {}),
+  };
 }
 
 const RECEIVED = /receiv|delivered|arrived/i;
@@ -255,9 +265,19 @@ export function repairRules(bp: Blueprint): Rule[] {
   for (const rule of bp.rules) {
     if (!bp.entities.some((e) => e.id === rule.trigger.entityId)) continue;
     const qualified = qualifyLinked(bp, rule);
-    const actions = qualified.actions.flatMap((a) => completeAction(bp, qualified, a) ?? []);
-    if (actions.length)
-      out.push(fullReceipt(bp, { ...qualified, trigger: completeTrigger(bp, qualified), actions }));
+    const done = mapActions(qualified, (actions) =>
+      actions.flatMap((a) => completeAction(bp, qualified, a) ?? []),
+    );
+    // Branches left with nothing to do are dropped; an otherwise stays last.
+    const branches = done.branches?.filter((b) => b.actions.length);
+    if (done.actions.length || branches?.length)
+      out.push(
+        fullReceipt(bp, {
+          ...done,
+          ...(done.branches ? { branches: branches?.length ? branches : undefined } : {}),
+          trigger: completeTrigger(bp, qualified),
+        }),
+      );
   }
   return out;
 }
