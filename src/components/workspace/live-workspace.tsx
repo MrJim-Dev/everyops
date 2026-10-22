@@ -3,6 +3,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { ShellSkeleton } from "@/components/shell/shell-skeleton";
 import type { WorkspaceData } from "@/lib/blueprint/types";
+import { setPartialTypes } from "@/lib/engine/compute";
 import { useHydrated } from "@/lib/store/use-hydrated";
 import { blueprintOf, roleOf, useWorkspaces } from "@/lib/store/workspaces";
 import { WorkspaceProvider } from "./workspace-context";
@@ -51,6 +52,8 @@ export function LiveWorkspace({ slug, children }: { slug: string; children: Reac
   }, [hydrated, slug, refresh]);
 
   const commit = useCallback((next: WorkspaceData) => setRecords(slug, next.records), [setRecords, slug]);
+  // Totals over record types this copy has only a window of stay the server's (src/lib/engine/window.ts).
+  setPartialTypes(Object.keys(workspace?.windowed ?? {}));
   const saveDoc = useCallback((viewId: string, body: string) => setDoc(slug, viewId, body), [setDoc, slug]);
 
   const value = useMemo(() => {

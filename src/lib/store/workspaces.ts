@@ -5,7 +5,7 @@ import { create } from "zustand";
 import type { DataRecord, RecordActor, WorkspaceData } from "@/lib/blueprint/types";
 import { stampChanged } from "@/lib/engine/actors";
 import type { ChangePlan } from "@/lib/engine/changes";
-import { computeAll } from "@/lib/engine/compute";
+import { computeAll, setPartialTypes } from "@/lib/engine/compute";
 import { markFresh } from "@/lib/motion/fresh";
 import { applyPlan, type RevertResult, redoPlan, revertChanges, undoPlan } from "./apply-plan";
 import {
@@ -28,6 +28,7 @@ import {
   type PatchResult,
   pullInto,
   type RecordChanges,
+  type StoredRecord,
   type WorkspacePatch,
 } from "./workspace-sync";
 
@@ -56,6 +57,11 @@ type State = {
   open: (slug: string) => void;
   createWorkspace: (input: NewWorkspace) => string;
   setRecords: (slug: string, records: DataRecord[]) => void;
+  /**
+   * Records read from the server for a table that pages there (src/lib/engine/window.ts): added to this copy, with
+   * their revs, so they can be opened and edited like the rest. Records already here stay as they are.
+   */
+  absorb: (slug: string, stored: StoredRecord[]) => void;
   setDoc: (slug: string, viewId: string, body: string) => void;
   /** Pulls in records others saved since this copy was read (public bookings, teammates). */
   refresh: (slug: string) => Promise<void>;
@@ -225,6 +231,7 @@ function ensureLoaded(slug: string, force = false): Promise<boolean> {
       : null;
     if (!body) return false;
     baselines.set(slug, baselineOf(body.workspace, body.revs));
+    setPartialTypes(Object.keys(body.workspace.windowed ?? {}));
     useWorkspaces.setState((s) => {
       const local = s.workspaces[slug];
       if (!local) return s;
@@ -428,6 +435,23 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
         ...ws,
         records: stampChanged(blueprintOf(ws), ws.records, records, get().me),
       })),
+
+    absorb: (slug, stored) =>
+      rawSet((s) => {
+        const ws = s.workspaces[slug];
+        if (!ws || ws.loaded === false) return s;
+        const have = new Set(ws.records.map((r) => r.id));
+        const add = stored.filter((x) => !have.has(x.record.id));
+        if (!add.length) return s;
+        const base = baselines.get(slug);
+        for (const x of add) base?.records?.set(x.record.id, x);
+        return {
+          workspaces: {
+            ...s.workspaces,
+            [slug]: { ...ws, records: [...ws.records, ...add.map((x) => x.record)] },
+          },
+        };
+      }),
 
     refresh: (slug) => pull(slug),
 
