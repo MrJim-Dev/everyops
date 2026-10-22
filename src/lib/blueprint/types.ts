@@ -57,7 +57,11 @@ export type FieldType =
    */
   | "signature"
   | "formula"
-  | "rollup";
+  | "rollup"
+  /** Who added the record (a person, a public form, an automation, an API key), stamped by EveryOps. */
+  | "created_by"
+  /** Who changed the record last, stamped by EveryOps on every save. */
+  | "edited_by";
 
 export type FieldOption = { id: string; label: string; tone: Tone };
 
@@ -552,7 +556,13 @@ export type DataRecord = {
   data: RecordData;
   createdAt: string;
   updatedAt: string;
+  /** Who added it and who changed it last, as the server stamped them. Older records have none. */
+  createdBy?: RecordActor;
+  updatedBy?: RecordActor;
 };
+
+/** Who wrote a record: its kind (person, form, automation, api, agent, sync, visitor), its id, and how it reads. */
+export type RecordActor = { type: string; id?: string | null; name: string };
 
 export type WorkspaceData = {
   blueprint: Blueprint;

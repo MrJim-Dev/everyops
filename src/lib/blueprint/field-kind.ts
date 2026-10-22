@@ -49,17 +49,23 @@ export function displayKind(bp: Blueprint, field: Field): DisplayKind {
       return "number";
     }
     default:
-      return field.type;
+      // Who added or changed a record reads as their name.
+      return field.type === "created_by" || field.type === "edited_by" ? "text" : field.type;
   }
 }
 
 export const isNumericKind = (kind: DisplayKind) =>
   kind === "money" || kind === "number" || kind === "percent" || kind === "rating" || kind === "duration";
 
-/** Fields a person can type into (formulas, rollups and parent links are computed). */
+/** Fields a person can type into (formulas, rollups, parent links and who-made-it stamps are computed). */
 export function editableFields(entity: Entity): Field[] {
   return entity.fields.filter(
-    (f) => f.type !== "formula" && f.type !== "rollup" && f.id !== entity.parent?.fieldId,
+    (f) =>
+      f.type !== "formula" &&
+      f.type !== "rollup" &&
+      f.type !== "created_by" &&
+      f.type !== "edited_by" &&
+      f.id !== entity.parent?.fieldId,
   );
 }
 

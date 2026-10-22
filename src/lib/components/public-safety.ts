@@ -47,7 +47,9 @@ export function personalField(bp: Blueprint, field: Field): boolean {
     field.type === "email" ||
     field.type === "phone" ||
     field.type === "file" ||
-    field.type === "signature"
+    field.type === "signature" ||
+    field.type === "created_by" ||
+    field.type === "edited_by"
   )
     return true;
   if (CONTACT.test(words(field)) || PEOPLE.test(words(field))) return true;

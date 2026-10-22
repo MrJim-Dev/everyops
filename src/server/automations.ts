@@ -326,7 +326,16 @@ export async function runTimedAutomations(
             : [{ record: r, rev: was.rev }];
         });
         if (writes.length) {
-          const saved = await putRecords(trx, id, writes);
+          // One rule's writes read as that rule; a pass where several ran reads "Automations".
+          const rules = [...ran.entries()];
+          const saved = await putRecords(
+            trx,
+            id,
+            writes,
+            rules.length === 1
+              ? { type: "automation", id: rules[0][0], name: `Automation · ${rules[0][1].name}` }
+              : { type: "automation", name: "Automations" },
+          );
           if (saved.conflicts.length)
             throw new Error(`automation write conflicted on ${saved.conflicts.join(", ")}`);
           await sql`update workspace set updated_at = now() where id = ${id}`.execute(trx);

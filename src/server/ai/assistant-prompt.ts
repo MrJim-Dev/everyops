@@ -462,6 +462,8 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   "track how long each job took". Redefining a number field that holds ratings or minutes is the same change.
 - A signature someone draws (a waiver, a rental agreement, proof of delivery) is a file field named Signature (or
   "Customer signature", "Renter signature"): it becomes a signature pad, on public forms too.
+- Who added or last changed a record: add a text field named exactly "Created by" or "Last edited by". The app
+  fills it in itself on every save (the person, public form, automation or API key), so don't add rules for it.
 - Options: keep every existing option id when you change a select or status field's options (rename labels freely).
   To retire an option that records use, also update_record each of those records to the option that replaces it.
 - Columns: to reorder, show or hide a table's columns (or a board's card fields), use update_view with fieldIds:

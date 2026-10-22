@@ -7,6 +7,7 @@ import {
   type ActorType,
   RETENTION_DAYS,
 } from "@/lib/activity";
+import type { RecordActor } from "@/lib/blueprint/types";
 import { type Database, db } from "./db";
 
 /**
@@ -70,6 +71,20 @@ export async function logActivity(ex: Ex, actor: Actor, entries: Entry | Entry[]
 
 /** A person acting in the app. */
 export const personActor = (userId: string): Actor => ({ type: "person", id: userId, userId });
+
+/**
+ * How a write is stamped on the records it touches (Created by / Last edited by): the actor's kind, id and name,
+ * with a person's name looked up from their account (their email when they haven't set one).
+ */
+export async function recordActor(ex: Ex, actor: Actor): Promise<RecordActor> {
+  let name = actor.name ?? null;
+  if (!name && actor.userId) {
+    const { rows } = await sql<{ name: string | null; email: string | null }>`
+      select name, email from "user" where id = ${actor.userId}`.execute(ex);
+    name = rows[0]?.name?.trim() || rows[0]?.email || null;
+  }
+  return { type: actor.type, id: actor.id ?? actor.userId ?? null, name: name ?? "Someone" };
+}
 
 type Row = {
   id: string;

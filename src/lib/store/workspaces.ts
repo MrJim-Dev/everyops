@@ -2,7 +2,8 @@
 
 import { toast } from "sonner";
 import { create } from "zustand";
-import type { DataRecord, WorkspaceData } from "@/lib/blueprint/types";
+import type { DataRecord, RecordActor, WorkspaceData } from "@/lib/blueprint/types";
+import { stampChanged } from "@/lib/engine/actors";
 import type { ChangePlan } from "@/lib/engine/changes";
 import { computeAll } from "@/lib/engine/compute";
 import { markFresh } from "@/lib/motion/fresh";
@@ -37,6 +38,9 @@ type State = {
   workspaces: Record<string, Workspace>;
   /** undefined until loaded from the server; null when signed out. */
   owner: string | null | undefined;
+  /** How the signed-in person's edits read in Created by / Last edited by until the server's stamps arrive. */
+  me: RecordActor | null;
+  setMe: (me: RecordActor | null) => void;
   /** "error" when the last load failed; the shell offers a retry. */
   status: "idle" | "loading" | "ready" | "error";
   load: (owner: string | null) => Promise<void>;
@@ -307,6 +311,8 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
   return {
     workspaces: {},
     owner: undefined,
+    me: null,
+    setMe: (me) => rawSet({ me }),
     status: "idle",
 
     load: async (owner) => {
@@ -417,7 +423,11 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
       return slug;
     },
 
-    setRecords: (slug, records) => update(slug, (ws) => ({ ...ws, records })),
+    setRecords: (slug, records) =>
+      update(slug, (ws) => ({
+        ...ws,
+        records: stampChanged(blueprintOf(ws), ws.records, records, get().me),
+      })),
 
     refresh: (slug) => pull(slug),
 

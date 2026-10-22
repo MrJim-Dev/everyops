@@ -429,7 +429,12 @@ export async function submitPublicForm(
       if (!was) return [{ record: r, rev: null }];
       return sameValue(was.record, r) ? [] : [{ record: r, rev: was.rev }];
     });
-    const saved = await putRecords(trx, slug, writes);
+    // Rows the form added read "Public form · <form name>"; totals it recalculated on other rows are its edits too.
+    const saved = await putRecords(trx, slug, writes, {
+      type: "public_form",
+      id: view.id,
+      name: `Public form · ${view.name}`,
+    });
     if (saved.conflicts.length)
       throw new Error(`public submission conflicted on ${saved.conflicts.join(", ")}`);
     hooks = await queueChanges(

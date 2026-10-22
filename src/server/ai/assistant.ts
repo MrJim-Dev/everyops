@@ -38,6 +38,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { requestGuide } from "@/lib/catalog/playbooks";
 import { parseLayout } from "@/lib/components/registry";
 import type { OutsideAction } from "@/lib/connections";
+import { actorTypeFor } from "@/lib/engine/actors";
 import { widgetValue } from "@/lib/engine/aggregate";
 import {
   applyOps,
@@ -391,12 +392,16 @@ export function toDesignOps(
       case "add_field":
         if (o.entityId && o.field) {
           const owner = bp.entities.find((e) => e.id === o.entityId)?.name ?? o.entityId;
-          // A file field named Signature is a signature pad (the schema has no signature type of its own).
-          const field = o.field as Field;
+          // The schema has no signature or created_by / edited_by type: a file field named Signature is a signature
+          // pad, and a text field named Created by / Last edited by is stamped by the app.
+          const asked = o.field as Field;
+          const actorType = asked.type === "text" ? actorTypeFor(asked.name) : null;
           const typed =
-            field.type === "file" && SIGNATURE_NAME.test(field.name.trim())
-              ? { ...field, type: "signature" as const }
-              : field;
+            asked.type === "file" && SIGNATURE_NAME.test(asked.name.trim())
+              ? { ...asked, type: "signature" as const }
+              : actorType
+                ? { ...asked, type: actorType }
+                : asked;
           ops.push({
             op: "add_field",
             entityId: o.entityId,

@@ -197,7 +197,11 @@ export async function runSync(workspaceId: string, id: string, now = new Date())
       return sameData(was.record.data, r.data) ? [] : [{ record: r, rev: was.rev }];
     });
     if (puts.length) {
-      const put = await putRecords(trx, workspaceId, puts);
+      const put = await putRecords(trx, workspaceId, puts, {
+        type: "sheet_sync",
+        id: row.id,
+        name: "Google Sheets sync",
+      });
       if (put.conflicts.length) throw new Error(`sheet sync conflicted on ${put.conflicts.join(", ")}`);
       await sql`update workspace set updated_at = now() where id = ${workspaceId}`.execute(trx);
       await logActivity(
