@@ -2,6 +2,7 @@ import { displayKind } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Field, FieldValue } from "@/lib/blueprint/types";
 import {
+  currencyOf,
   formatDate,
   formatDateTime,
   formatMoney,
@@ -21,7 +22,7 @@ export function valueText(
   if (value === undefined || value === null || value === "") return "";
   switch (displayKind(bp, field)) {
     case "money":
-      return formatMoney(Number(value));
+      return formatMoney(Number(value), { currency: currencyOf(bp) });
     case "number":
       return formatNumber(Number(value));
     case "percent":

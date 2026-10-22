@@ -52,7 +52,7 @@ import type { DataRecord, Field, Sort, TableView as TableViewConfig } from "@/li
 import { downloadText, fileSlug } from "@/lib/download";
 import { applyFilter, searchRecords, sortRecords } from "@/lib/engine/query";
 import { toCsv, toSheet, valueText } from "@/lib/engine/value-text";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { currencyOf, currencySymbol, formatMoney, formatNumber } from "@/lib/format";
 import { useFreshStore } from "@/lib/motion/fresh";
 import { useViewPref } from "@/lib/store/view-prefs";
 import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
@@ -165,7 +165,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
     const res = await fetch("/api/export/xlsx", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, ...sheet }),
+      body: JSON.stringify({ name, ...sheet, currencySymbol: currencySymbol(currencyOf(blueprint)) }),
     }).catch(() => null);
     if (!res?.ok) return void toast.error("The Excel file couldn't be made. Try CSV instead.");
     const url = URL.createObjectURL(await res.blob());
@@ -191,7 +191,9 @@ export function TableView({ view }: { view: TableViewConfig }) {
   const total = (f: Field, list: DataRecord[]) =>
     list.reduce((sum, r) => sum + (Number(r.data[f.id]) || 0), 0);
   const formatTotal = (f: Field, value: number) =>
-    displayKind(blueprint, f) === "money" ? formatMoney(value) : formatNumber(value);
+    displayKind(blueprint, f) === "money"
+      ? formatMoney(value, { currency: currencyOf(blueprint) })
+      : formatNumber(value);
 
   const toggleSort = (fieldId: string) =>
     setSort((s) =>

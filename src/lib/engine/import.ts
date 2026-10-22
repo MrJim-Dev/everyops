@@ -13,6 +13,7 @@ import type {
   View,
   WorkspaceData,
 } from "@/lib/blueprint/types";
+import { looksLikeMoney, stripMoney } from "@/lib/format";
 import type { ChangeOp, ChangePlan, RecordOp } from "./changes";
 import { newId } from "./ids";
 import { validateRecord } from "./records";
@@ -218,12 +219,9 @@ export function parseDateTime(text: string): string | null {
   return new Date(`${date}T${pad(Math.floor(time / 60))}:${pad(time % 60)}:00+08:00`).toISOString();
 }
 
-/** "₱1,250.50", "1 250", "(300)", "12%": the number in it, or null. */
+/** "₱1,250.50", "S$1,250", "1 250", "(300)", "12%": the number in it, or null. */
 export function parseNumber(text: string): number | null {
-  let t = text
-    .trim()
-    .replace(/^(php|₱|p)\s*/i, "")
-    .replace(/[₱,\s%]/g, "");
+  let t = stripMoney(text.trim().replace(/^p(?=\s*\d)/i, "")).replace(/%/g, "");
   const negative = /^\(.*\)$/.test(t);
   t = t.replace(/[()]/g, "");
   if (!/^-?\d*\.?\d+$/.test(t)) return null;
@@ -636,10 +634,7 @@ export function sniffType(header: string, values: string[]): { type: Field["type
   )
     return { type: "checkbox" };
   if (all((v) => parseNumber(v) !== null) && !/phone|mobile|contact|tel/.test(h)) {
-    if (
-      vs.some((v) => /₱|php/i.test(v)) ||
-      /price|amount|cost|rate|fee|total|salary|balance|paid|payment/.test(h)
-    )
+    if (vs.some(looksLikeMoney) || /price|amount|cost|rate|fee|total|salary|balance|paid|payment/.test(h))
       return { type: "money" };
     if (vs.some((v) => v.includes("%"))) return { type: "percent" };
     if (!/date|day/.test(h) || !all((v) => parseDate(v) !== null)) return { type: "number" };

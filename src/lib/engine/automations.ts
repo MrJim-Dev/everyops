@@ -10,6 +10,7 @@ import type {
   Rule,
 } from "@/lib/blueprint/types";
 import {
+  currencyOf,
   formatDate,
   formatDateTime,
   formatMoney,
@@ -61,7 +62,7 @@ function readable(bp: Blueprint, field: Field | undefined, value: FieldValue, re
   const option = field.options?.find((o) => o.id === value);
   if (option) return option.label;
   if (typeof value === "number") {
-    if (type === "money") return formatMoney(value);
+    if (type === "money") return formatMoney(value, { currency: currencyOf(bp) });
     if (type === "percent") return formatPercent(value);
     return formatNumber(value);
   }

@@ -1,9 +1,10 @@
 "use client";
 
-import { createContext, useContext } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import type { PageDoc } from "@/lib/store/workspace-model";
 import type { Role } from "@/lib/store/workspaces";
+import { CurrencyProvider } from "./currency";
 
 /**
  * Everything a view needs to render and edit a workspace. Saved workspaces
@@ -33,7 +34,14 @@ export type WorkspaceApi = {
 
 const WorkspaceContext = createContext<WorkspaceApi | null>(null);
 
-export const WorkspaceProvider = WorkspaceContext.Provider;
+/** A workspace for the screens below it, with its currency for the money they show. */
+export function WorkspaceProvider({ value, children }: { value: WorkspaceApi; children: ReactNode }) {
+  return (
+    <WorkspaceContext.Provider value={value}>
+      <CurrencyProvider currency={value.blueprint.currency}>{children}</CurrencyProvider>
+    </WorkspaceContext.Provider>
+  );
+}
 
 export function useWorkspace(): WorkspaceApi {
   const value = useContext(WorkspaceContext);

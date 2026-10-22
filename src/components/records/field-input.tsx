@@ -12,9 +12,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useCurrency } from "@/components/workspace/currency";
 import { normalizeUrl } from "@/lib/blueprint/contact";
 import type { Field, FieldValue, TimeRange } from "@/lib/blueprint/types";
-import { isTimeRange } from "@/lib/format";
+import { currencySymbol, isTimeRange } from "@/lib/format";
 import { at, dateKey, manilaParts } from "@/lib/time";
 import { FileInput } from "./file-input";
 import { ImageInput } from "./image-input";
@@ -37,6 +38,7 @@ type Props = {
 
 /** One input for every field type, so every form in EveryOps behaves the same. */
 export function FieldInput({ id, field, value, onChange, invalid }: Props) {
+  const currency = useCurrency();
   const common = { id, "aria-invalid": invalid || undefined, "aria-required": field.required || undefined };
 
   switch (field.type) {
@@ -64,7 +66,7 @@ export function FieldInput({ id, field, value, onChange, invalid }: Props) {
       return (
         <InputGroup>
           <InputGroupAddon>
-            <InputGroupText>₱</InputGroupText>
+            <InputGroupText>{currencySymbol(currency)}</InputGroupText>
           </InputGroupAddon>
           <InputGroupInput
             {...common}

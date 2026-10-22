@@ -9,7 +9,9 @@
  * EveryOps.mine() and EveryOps.attach(fieldId, file) read and add a picture to the visitor's own booking when the page
  * was opened from its manage link (?manage=TOKEN, see src/server/manage.ts).
  */
+
 import type { Blueprint, FieldValue, HtmlPageView } from "@/lib/blueprint/types";
+import { stripMoney } from "@/lib/format";
 import { at } from "@/lib/time";
 import type { PublicField, PublicForm } from "./resolve";
 
@@ -243,7 +245,7 @@ export function formValues(form: PublicForm, raw: RawFormValues): Record<string,
       case "number":
       case "money":
       case "percent": {
-        const n = Number(v.replace(/[₱,\s]/g, ""));
+        const n = Number(stripMoney(v));
         if (v && Number.isFinite(n)) out[f.id] = n;
         break;
       }

@@ -8,7 +8,9 @@
  * here, so the frame never needs to know the shape of a layout, landing or table result. Every value is text a
  * visitor may already read; nothing here reaches records the source didn't publish.
  */
+
 import { publicHref } from "@/lib/domains";
+import { looksLikeMoney } from "@/lib/format";
 import type { Cell, PublicItem, ResolvedBlock } from "./resolve";
 
 /** One row as the bindings read it: fields by id, by lower-case name and by role (@title, @price, @1 …). */
@@ -74,7 +76,7 @@ export function boundFromCells(id: string, cells: Cell[]): BoundItem {
   const about = rest.find((c) => c.kind === "markdown");
   const rows = rest.filter((c) => c.kind === "number" || c.kind === "text").map(withUnit);
   const tags = rest.filter((c) => c.kind === "tag" || c.kind === "status");
-  const price = rows.find((c) => /₱|php/i.test(c.text)) ?? rows[0];
+  const price = rows.find((c) => looksLikeMoney(c.text)) ?? rows[0];
   fields["@title"] = title?.text ?? "";
   fields["@image"] = image?.text ?? "";
   fields["@about"] = about ? plain(about.text) : "";

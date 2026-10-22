@@ -7,10 +7,11 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { CATALOG } from "@/lib/catalog";
 import { downloadText, fileSlug } from "@/lib/download";
-import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
+import { CURRENCIES, currencyOf, formatDate, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import { canManage, useWorkspaces } from "@/lib/store/workspaces";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
 import { SettingsPage, SettingsSection } from "./settings-section";
@@ -101,6 +102,8 @@ export function WorkspaceSettings() {
           />
         </SettingsSection>
       </form>
+
+      <CurrencySetting manager={manager} />
 
       <SettingsSection
         title="Workspace link"
@@ -213,5 +216,74 @@ function ExportRow({ title, detail, onDownload }: { title: string; detail: strin
         Download JSON
       </Button>
     </div>
+  );
+}
+
+/**
+ * The currency the workspace's money reads in. Amounts don't change; ₱1,250 becomes S$1,250, so it's for setting
+ * the right currency, not converting. Versioned like a rename, so History can undo it.
+ */
+function CurrencySetting({ manager }: { manager: boolean }) {
+  const ws = useWorkspace();
+  const applyChange = useWorkspaces((s) => s.applyChange);
+  const current = currencyOf(ws.blueprint);
+  const [picked, setPicked] = useState<string>(current);
+  const changed = picked !== current;
+  const name = (code: string) => CURRENCIES.find((c) => c.code === code)?.name ?? code;
+
+  const save = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!changed) return;
+    const entry = applyChange(ws.id, {
+      request: `Show money in ${name(picked)}`,
+      title: `Currency changed to ${picked}`,
+      facts: [],
+      steps: [{ kind: "change", label: "Currency", detail: `${current} → ${picked}` }],
+      ops: [{ op: "set_currency", currency: picked }],
+    });
+    if (entry)
+      toast.success(`Money now reads in ${name(picked)}`, { description: "You can undo it from History." });
+    else toast.error("Couldn't change the currency");
+  };
+
+  return (
+    <form onSubmit={save}>
+      <SettingsSection
+        title="Currency"
+        description="How prices, totals and payments read across the workspace, its public pages, emails and prints."
+        footer={
+          manager
+            ? "Amounts stay the same numbers; only their currency changes. Undo it from History."
+            : "Only the owner or an admin can change the currency."
+        }
+        action={
+          manager ? (
+            <Button type="submit" size="sm" variant={changed ? "default" : "outline"} disabled={!changed}>
+              Save
+            </Button>
+          ) : null
+        }
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <NativeSelect
+            id="workspace-currency"
+            aria-label="Currency"
+            className="w-[280px]"
+            value={picked}
+            disabled={!manager}
+            onChange={(e) => setPicked(e.target.value)}
+          >
+            {CURRENCIES.map((c) => (
+              <NativeSelectOption key={c.code} value={c.code}>
+                {c.name} ({c.code})
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <span className="font-mono text-[13px] text-muted-foreground tabular">
+            {formatMoney(1250.5, { currency: picked })}
+          </span>
+        </div>
+      </SettingsSection>
+    </form>
   );
 }

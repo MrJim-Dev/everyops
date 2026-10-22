@@ -79,7 +79,7 @@ export const openapi = {
     title: "EveryOps API",
     version: API_VERSION,
     description:
-      "Read and write the records in your EveryOps workspaces. Every write is checked like the app checks it (required fields, valid choices, free booking slots) and runs the workspace's save automations. Times are in Asia/Manila; money is in PHP.",
+      "Read and write the records in your EveryOps workspaces. Every write is checked like the app checks it (required fields, valid choices, free booking slots) and runs the workspace's save automations. Times are in Asia/Manila; money is in the workspace's currency (the schema's currency, PHP unless the owner set another).",
   },
   servers: [{ url: "https://everyops.app/api/v1" }],
   security: [{ apiKey: [] }],

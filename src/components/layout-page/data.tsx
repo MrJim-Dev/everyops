@@ -18,6 +18,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Sparkline } from "@/components/widgets/stat-strip";
+import { useCurrency } from "@/components/workspace/currency";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { displayKind, isNumericKind } from "@/lib/blueprint/field-kind";
 import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
@@ -67,6 +68,7 @@ export function Trend({ change, against }: { change: number | null; against: str
 
 /** One key number in the stat strip's look: label, the number with its sparkline, and the change under it. */
 export function StatCell({ data, className }: { data: StatData; className?: string }) {
+  const currency = useCurrency();
   return (
     <div className={cn("flex h-full min-w-0 flex-1 flex-col gap-1 bg-background px-5 py-4", className)}>
       <span className="truncate text-[12.5px] text-muted-foreground">{data.title}</span>
@@ -77,7 +79,7 @@ export function StatCell({ data, className }: { data: StatData; className?: stri
             data.value < 0 && "text-destructive",
           )}
         >
-          <AnimatedValue value={formatValue(data.kind, data.value)} />
+          <AnimatedValue value={formatValue(data.kind, data.value, currency)} />
         </span>
         {data.comparison?.spark.some((v) => v !== 0) ? <Sparkline values={data.comparison.spark} /> : null}
       </span>
@@ -96,15 +98,16 @@ export function StatPart({ props }: P<StatProps>) {
 }
 
 export function GoalBarView({ data }: { data: GoalData }) {
+  const currency = useCurrency();
   const pct = Math.max(0, Math.min(100, (data.value / data.target) * 100));
   return (
     <PartCard
       title={data.title}
-      description={`${Math.round(pct)}% of ${formatValue(data.kind, data.target)}`}
+      description={`${Math.round(pct)}% of ${formatValue(data.kind, data.target, currency)}`}
     >
       <div className="flex flex-col gap-2.5">
         <span className="text-[22px] font-semibold tracking-[-0.02em] tabular-nums">
-          {formatValue(data.kind, data.value)}
+          {formatValue(data.kind, data.value, currency)}
         </span>
         <Progress value={pct} aria-label={data.title} />
       </div>

@@ -1,3 +1,4 @@
+import { currencyOf } from "@/lib/format";
 import "server-only";
 import { sql } from "kysely";
 import { allowedIn } from "@/lib/api-keys";
@@ -143,7 +144,7 @@ const CORE_TOOLS: Tool[] = [
         id: ctx.workspaceId,
         name: ctx.bp.workspaceName,
         timeZone: "Asia/Manila",
-        currency: "PHP",
+        currency: currencyOf(ctx.bp),
         recordTypes: ctx.bp.entities.map((e) => ({
           id: e.id,
           name: e.name,

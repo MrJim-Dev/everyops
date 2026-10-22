@@ -1,6 +1,7 @@
 import { isEmail, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, Field, FieldValue, RecordData } from "@/lib/blueprint/types";
+import { stripMoney } from "@/lib/format";
 
 /**
  * Values an agent or script sends (JSON) as a record's stored values: fields named by id or by name, choices by id or
@@ -40,7 +41,7 @@ function one(
     case "number":
     case "money":
     case "percent": {
-      const n = typeof value === "number" ? value : Number(text.replace(/[₱,\s%]/g, ""));
+      const n = typeof value === "number" ? value : Number(stripMoney(text).replace(/%/g, ""));
       return Number.isFinite(n) ? { value: n } : { error: `needs a number, not "${text}"` };
     }
     case "checkbox":
