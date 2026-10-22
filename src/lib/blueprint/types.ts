@@ -507,6 +507,23 @@ export type Blueprint = {
   views: View[];
   widgets: Widget[];
   rules: Rule[];
+  /** Printable documents (invoices, quotes, agreements). Older blueprints have none. */
+  printTemplates?: PrintTemplate[];
+};
+
+/** Paper a print template is laid out for: A4, US Letter, or an 80 mm receipt roll. */
+export type PaperSize = "a4" | "letter" | "receipt";
+
+/**
+ * A printable document for one record type, written in markdown with {{placeholders}}: {{field}}, {{link.field}},
+ * {{business}}, {{today}}, and {{lines}} (or {{lines:child}}) for a table of the record's line items.
+ */
+export type PrintTemplate = {
+  id: string;
+  entityId: string;
+  name: string;
+  body: string;
+  paper?: PaperSize;
 };
 
 /* ---------- Records ---------- */

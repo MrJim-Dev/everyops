@@ -55,7 +55,12 @@ export const sendsEmail = (rule: Rule) => rule.actions.some((a) => a.type === "s
 const entityOf = (bp: Blueprint, id: string) => bp.entities.find((e) => e.id === id);
 
 /** A value as people read it: ₱1,200.00, Oct 16, the option's label, the linked record's name. */
-function readable(bp: Blueprint, field: Field | undefined, value: FieldValue, records: DataRecord[]): string {
+export function readable(
+  bp: Blueprint,
+  field: Field | undefined,
+  value: FieldValue,
+  records: DataRecord[],
+): string {
   if (Array.isArray(value))
     return value.map((v) => field?.options?.find((o) => o.id === v)?.label ?? v).join(", ");
   if (isTimeRange(value)) return `${formatDate(value.start)} · ${formatRange(value)}`;
