@@ -501,7 +501,15 @@ export type Rule = {
   };
   when?: string;
   actions: Action[];
+  /**
+   * If / else: after actions, the first branch whose when holds runs its actions too; a last branch without a when
+   * is the otherwise (src/lib/engine/branches.ts). Older rules have none.
+   */
+  branches?: RuleBranch[];
 };
+
+/** One way an automation can go: its condition (a formula on the record) and what it does then. */
+export type RuleBranch = { when?: string; actions: Action[] };
 
 export type System = {
   id: string;

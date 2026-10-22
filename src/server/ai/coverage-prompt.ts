@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Blueprint } from "@/lib/blueprint/types";
+import { allActions } from "@/lib/engine/branches";
 import { applyOps, type ChangePlan } from "@/lib/engine/changes";
 
 export const coverageAnswer = z.object({
@@ -84,7 +85,7 @@ export function coverageEvidence(bp: Blueprint, plan: ChangePlan): Record<string
   // A rule that files records (link_record) runs on every save, whatever its trigger says; the reviewer reads the
   // trigger alone otherwise and asks for "created" to become "updated" round after round.
   for (const r of bp.rules)
-    refs[`rule:${r.id}`] = r.actions.some((a) => a.type === "link_record")
+    refs[`rule:${r.id}`] = allActions(r).some((a) => a.type === "link_record")
       ? { ...r, runs: "on every save of the record (created or changed) while its when holds" }
       : r;
   return refs;

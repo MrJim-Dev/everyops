@@ -1,4 +1,5 @@
 import type { Blueprint, Entity, Field } from "@/lib/blueprint/types";
+import { allActions } from "@/lib/engine/branches";
 import type { BlockPatch, ChangeOp, DocOp, PlanStep } from "@/lib/engine/changes";
 
 /*
@@ -46,7 +47,7 @@ export function fieldUsage(bp: Blueprint, maxChars = 6000): string {
         )
           places.push(`card "${w.title}"`);
       for (const r of bp.rules)
-        if (r.trigger.entityId === e.id ? re.test(settingsText(r)) : re.test(JSON.stringify(r.actions)))
+        if (r.trigger.entityId === e.id ? re.test(settingsText(r)) : re.test(JSON.stringify(allActions(r))))
           places.push(`automation "${r.name}"`);
       for (const other of e.fields)
         if (other.id !== f.id && formulaUses(other, re)) places.push(`formula "${other.name}"`);

@@ -1,4 +1,5 @@
 import type { Blueprint, Entity, Rule } from "@/lib/blueprint/types";
+import { mapActions } from "./branches";
 import { stockFieldOf } from "./register";
 
 type Action = Rule["actions"][number];
@@ -121,9 +122,8 @@ export function completeTrigger(bp: Blueprint, rule: Rule): Rule["trigger"] {
 export function completeRule(bp: Blueprint, rule: Rule): Rule {
   rule = qualifyLinked(bp, rule);
   return fullReceipt(bp, {
-    ...rule,
+    ...mapActions(rule, (actions) => actions.map((a) => completeAction(bp, rule, a) ?? a)),
     trigger: completeTrigger(bp, rule),
-    actions: rule.actions.map((a) => completeAction(bp, rule, a) ?? a),
   });
 }
 
@@ -155,14 +155,22 @@ export function qualifyLinked(bp: Blueprint, rule: Rule): Rule {
             }),
       )
       .join("");
-  const actions = rule.actions.map((a) =>
-    a.type === "set_field"
-      ? { ...a, value: fix(a.value) }
-      : a.type === "adjust_number"
-        ? { ...a, delta: fix(a.delta) }
-        : a,
+  const fixed = mapActions(rule, (actions) =>
+    actions.map((a) =>
+      a.type === "set_field"
+        ? { ...a, value: fix(a.value) }
+        : a.type === "adjust_number"
+          ? { ...a, delta: fix(a.delta) }
+          : a,
+    ),
   );
-  return { ...rule, ...(rule.when ? { when: fix(rule.when) } : {}), actions };
+  return {
+    ...fixed,
+    ...(rule.when ? { when: fix(rule.when) } : {}),
+    ...(fixed.branches
+      ? { branches: fixed.branches.map((b) => (b.when ? { ...b, when: fix(b.when) } : b)) }
+      : {}),
+  };
 }
 
 const RECEIVED = /receiv|delivered|arrived/i;
@@ -256,9 +264,19 @@ export function repairRules(bp: Blueprint): Rule[] {
   for (const rule of bp.rules) {
     if (!bp.entities.some((e) => e.id === rule.trigger.entityId)) continue;
     const qualified = qualifyLinked(bp, rule);
-    const actions = qualified.actions.flatMap((a) => completeAction(bp, qualified, a) ?? []);
-    if (actions.length)
-      out.push(fullReceipt(bp, { ...qualified, trigger: completeTrigger(bp, qualified), actions }));
+    const done = mapActions(qualified, (actions) =>
+      actions.flatMap((a) => completeAction(bp, qualified, a) ?? []),
+    );
+    // Branches left with nothing to do are dropped; an otherwise stays last.
+    const branches = done.branches?.filter((b) => b.actions.length);
+    if (done.actions.length || branches?.length)
+      out.push(
+        fullReceipt(bp, {
+          ...done,
+          ...(done.branches ? { branches: branches?.length ? branches : undefined } : {}),
+          trigger: completeTrigger(bp, qualified),
+        }),
+      );
   }
   return out;
 }

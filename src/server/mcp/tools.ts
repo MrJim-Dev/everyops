@@ -189,6 +189,7 @@ const CORE_TOOLS: Tool[] = [
           trigger: r.trigger,
           ...(r.when ? { when: r.when } : {}),
           actions: r.actions,
+          ...(r.branches?.length ? { branches: r.branches } : {}),
         })),
       };
     },

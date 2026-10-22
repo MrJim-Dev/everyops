@@ -42,7 +42,9 @@ export const assistantRule = rule.extend({
     rule.shape.actions.element.extend({
       type: z
         .string()
-        .describe("set_field, adjust_number, notify, send_email, create_record, link_record or call_api"),
+        .describe(
+          "set_field, adjust_number, notify, send_email, create_record, link_record or call_api; if, else_if, else start a branch",
+        ),
       fieldId: z
         .string()
         .optional()
@@ -53,7 +55,7 @@ export const assistantRule = rule.extend({
         .string()
         .optional()
         .describe(
-          'set_field: formula for the new value. adjust_number: leave empty; the amount goes in delta (qty, -qty). send_email: the email, its subject on the first line and the message after it. create_record: JSON of field id to formula on the trigger record, e.g. {"amount":"price"}. link_record: formula for what to match, e.g. date. call_api: the JSON to post, or empty to send the record',
+          'set_field: formula for the new value. adjust_number: leave empty; the amount goes in delta (qty, -qty). send_email: the email, its subject on the first line and the message after it. create_record: JSON of field id to formula on the trigger record, e.g. {"amount":"price"}. link_record: formula for what to match, e.g. date. call_api: the JSON to post, or empty to send the record. if/else_if: the condition',
         ),
     }),
   ),
@@ -527,6 +529,11 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   at {{time}}"} for Slack, or empty to send the whole record. Use only an endpoint that's listed; when none is (or
   none accepts automation calls), don't plan it: say to add one in Settings → Webhooks with "An automation calls
   it" ticked, then ask again. URLs and secrets stay in Settings, never in the automation.
+- If / else: one automation can do different things depending on the record ("when a booking is saved: if it's paid,
+  thank them; otherwise remind them to pay"). In actions, an action of type if (value: the condition, a formula like
+  when) starts the branch; the actions after it run when it holds. else_if (value: its condition) starts the next
+  branch, and else starts the one that runs when none held. Actions before the first if always run. Use this
+  instead of two automations with opposite whens. A record takes one branch, read as it was saved.
 - Pages: each sidebar page is a system; its views are the tabs on that page. A new page for something that already
   exists ("a separate page for courts", "give the calendar its own page") is add_system plus add_view (a new view
   of that record type) or move_view (move an existing tab there; the old page keeps its other tabs). Give every

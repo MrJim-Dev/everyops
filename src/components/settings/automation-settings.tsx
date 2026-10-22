@@ -17,6 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { Rule } from "@/lib/blueprint/types";
 import { describeActions, describeTrigger, isOn, isTimed } from "@/lib/engine/automations";
+import { allActions } from "@/lib/engine/branches";
 import { formatDateTime } from "@/lib/format";
 import { canManage } from "@/lib/store/workspace-model";
 import { useWorkspaces } from "@/lib/store/workspaces";
@@ -61,6 +62,24 @@ function TriggerIcon({ rule }: { rule: Rule }) {
   return <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />;
 }
 
+/** An automation's steps, one line each with its icon. */
+function ActionLines({ lines }: { lines: string[] }) {
+  return (
+    <ul className="flex flex-col gap-1">
+      {lines.map((line, i) => (
+        <li
+          // biome-ignore lint/suspicious/noArrayIndexKey: actions have no ids and never reorder here
+          key={i}
+          className="flex items-center gap-2 text-[12.5px] text-foreground/85"
+        >
+          <ActionIcon line={line} />
+          <span className="truncate">{line}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function ActionIcon({ line }: { line: string }) {
   const Icon = line.startsWith("Email")
     ? EnvelopeSimpleIcon
@@ -90,7 +109,7 @@ export function AutomationSettings() {
   const rules = ws.blueprint.rules;
 
   useEffect(() => {
-    if (!manager || !rules.some((r) => r.actions.some((a) => a.type === "call_api"))) return;
+    if (!manager || !rules.some((r) => allActions(r).some((a) => a.type === "call_api"))) return;
     fetch(`/api/workspaces/${ws.id}/webhooks`)
       .then(
         (res) =>
@@ -195,18 +214,30 @@ export function AutomationSettings() {
                           <span className="font-mono text-[11.5px]"> · if {rule.when}</span>
                         ) : null}
                       </span>
-                      <ul className="flex flex-col gap-1">
-                        {describeActions(ws.blueprint, rule, endpoints).map((line, i) => (
-                          <li
-                            // biome-ignore lint/suspicious/noArrayIndexKey: actions have no ids and never reorder here
-                            key={i}
-                            className="flex items-center gap-2 text-[12.5px] text-foreground/85"
-                          >
-                            <ActionIcon line={line} />
-                            <span className="truncate">{line}</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <ActionLines lines={describeActions(ws.blueprint, rule, endpoints)} />
+                      {rule.branches?.map((branch, i) => (
+                        <div
+                          // biome-ignore lint/suspicious/noArrayIndexKey: branches have no ids and never reorder here
+                          key={i}
+                          className="flex flex-col gap-1"
+                        >
+                          <span className="text-[12px] font-medium text-muted-foreground">
+                            {branch.when?.trim() ? (
+                              <>
+                                {i === 0 ? "If" : "Else if"}{" "}
+                                <span className="font-mono text-[11.5px] font-normal">{branch.when}</span>
+                              </>
+                            ) : (
+                              "Otherwise"
+                            )}
+                          </span>
+                          <div className="border-l border-border pl-3">
+                            <ActionLines
+                              lines={describeActions(ws.blueprint, rule, endpoints, branch.actions)}
+                            />
+                          </div>
+                        </div>
+                      ))}
                       {recent ? (
                         <span className="text-[12px] text-muted-foreground">
                           Last ran {formatDateTime(recent.createdAt)} ·{" "}

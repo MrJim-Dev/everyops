@@ -85,4 +85,32 @@ describe("toAssistantRule", () => {
     });
     expect(plain.actions).toEqual([{ type: "call_api", endpointId: "ep_9" }]);
   });
+  it("reads if / else_if / else steps as branches", () => {
+    const rule = toAssistantRule({
+      id: "follow_up",
+      name: "Follow up",
+      trigger: { entityId: "bookings", event: "updated" },
+      actions: [
+        { type: "notify", message: "Saved" },
+        { type: "if", value: "status == 'paid'" },
+        { type: "send_email", fieldId: "{{email}}", value: "Thanks\n\nSee you" },
+        { type: "else if", value: "status == 'unpaid'" },
+        { type: "set_field", fieldId: "note", value: "'chase'" },
+        { type: "else" },
+        { type: "notify", message: "Nothing to do" },
+      ],
+    });
+    expect(rule.actions).toEqual([{ type: "notify", message: "Saved" }]);
+    expect(rule.branches).toEqual([
+      {
+        when: "status == 'paid'",
+        actions: [{ type: "send_email", to: "{{email}}", subject: "Thanks", body: "See you" }],
+      },
+      {
+        when: "status == 'unpaid'",
+        actions: [{ type: "set_field", target: { kind: "self" }, fieldId: "note", value: "'chase'" }],
+      },
+      { actions: [{ type: "notify", message: "Nothing to do" }] },
+    ]);
+  });
 });

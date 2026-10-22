@@ -1,5 +1,6 @@
 import type { Blueprint, Entity, Field, Rule } from "@/lib/blueprint/types";
 import { validateBlueprint } from "@/lib/blueprint/validate";
+import { allActions } from "./branches";
 import { stockFieldOf } from "./register";
 
 /**
@@ -198,7 +199,7 @@ export function impliedRules(
       const covered = after.rules.some(
         (r) =>
           r.trigger.entityId === source.id &&
-          r.actions.some(
+          allActions(r).some(
             (a) => a.type === "adjust_number" && (a.fieldId === total.field.id || a.fieldId === ""),
           ),
       );
@@ -365,7 +366,9 @@ export function linePriceRules(bp: Blueprint): Rule[] {
       const filled = bp.rules.some(
         (r) =>
           r.trigger.entityId === line.id &&
-          r.actions.some((a) => a.type === "set_field" && a.target.kind === "self" && a.fieldId === price.id),
+          allActions(r).some(
+            (a) => a.type === "set_field" && a.target.kind === "self" && a.fieldId === price.id,
+          ),
       );
       if (filled) continue;
       const word = (PRICE_WORD.exec(text(price.id, price.name))?.[0] ?? "price").toLowerCase();
