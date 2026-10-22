@@ -5,7 +5,7 @@ type Action = Rule["actions"][number];
 
 const QTY = /qty|quantity|received|count|pcs|units/i;
 const STOCK_IN = /restock|receiv|purchase|deliver|stock.?in|incoming|replenish/i;
-const NUMERIC = new Set(["number", "money", "percent"]);
+const NUMERIC = new Set(["number", "money", "percent", "rating", "duration"]);
 
 /**
  * Generated automations sometimes arrive with the field or amount left out, which the designer fills with "" and

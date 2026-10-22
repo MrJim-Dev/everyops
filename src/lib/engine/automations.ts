@@ -13,10 +13,12 @@ import type {
 import {
   formatDate,
   formatDateTime,
+  formatDuration,
   formatMoney,
   formatNumber,
   formatPercent,
   formatRange,
+  formatRating,
   isTimeRange,
 } from "@/lib/format";
 import { addDays, dateKey, manilaParts, minutesOf, todayKey } from "@/lib/time";
@@ -63,7 +65,7 @@ export function readable(
     return value.map((v) => field?.options?.find((o) => o.id === v)?.label ?? v).join(", ");
   if (isTimeRange(value)) return `${formatDate(value.start)} · ${formatRange(value)}`;
   if (!field) return String(value);
-  // A rollup of money (an order's total) reads as money too, not as a bare number.
+  // A rollup reads as what it adds up: an order's total as money, hours worked as time.
   const type =
     field.type === "rollup"
       ? displayKind(bp, field)
@@ -75,6 +77,8 @@ export function readable(
   if (typeof value === "number") {
     if (type === "money") return formatMoney(value);
     if (type === "percent") return formatPercent(value);
+    if (type === "rating") return formatRating(value);
+    if (type === "duration") return formatDuration(value);
     return formatNumber(value);
   }
   if (typeof value === "boolean") return value ? "Yes" : "No";

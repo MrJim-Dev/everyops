@@ -52,6 +52,8 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
         errors.push({ path, message: `${field.name} links to a missing entity` });
       if ((field.type === "select" || field.type === "status") && !field.options?.length)
         errors.push({ path, message: `${field.name} needs options` });
+      if (field.range !== undefined && field.range !== "dates" && field.range !== "times")
+        errors.push({ path, message: `${field.name}: range is "dates" or "times", not "${field.range}"` });
       if (field.type === "formula") {
         if (!field.formula) errors.push({ path, message: `${field.name} has no formula` });
         else {
@@ -299,7 +301,7 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
   return errors;
 }
 
-const NUMERIC = new Set(["number", "money", "percent"]);
+const NUMERIC = new Set(["number", "money", "percent", "rating", "duration"]);
 const list = (items: { id: string }[]) => items.map((f) => f.id).join(", ") || "none";
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const resolvesPath = (bp: Blueprint, entity: Entity, ref: string) =>

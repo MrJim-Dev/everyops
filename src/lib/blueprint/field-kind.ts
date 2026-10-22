@@ -7,6 +7,8 @@ export type DisplayKind =
   | "number"
   | "money"
   | "percent"
+  | "rating"
+  | "duration"
   | "date"
   | "datetime"
   | "time_range"
@@ -38,7 +40,12 @@ export function displayKind(bp: Blueprint, field: Field): DisplayKind {
       if (!spec || spec.op === "count" || !spec.fieldId) return "number";
       const child = bp.entities.find((e) => e.id === spec.childEntityId);
       const target = child?.fields.find((f) => f.id === spec.fieldId);
-      return target ? (displayKind(bp, target) === "money" ? "money" : "number") : "number";
+      if (!target) return "number";
+      const kind = displayKind(bp, target);
+      // Durations added up or averaged are still time (hours worked, the average session); an average rating
+      // reads as a plain number (4.3).
+      if (kind === "money" || kind === "duration") return kind;
+      return "number";
     }
     default:
       return field.type;
@@ -46,7 +53,7 @@ export function displayKind(bp: Blueprint, field: Field): DisplayKind {
 }
 
 export const isNumericKind = (kind: DisplayKind) =>
-  kind === "money" || kind === "number" || kind === "percent";
+  kind === "money" || kind === "number" || kind === "percent" || kind === "rating" || kind === "duration";
 
 /** Fields a person can type into (formulas, rollups and parent links are computed). */
 export function editableFields(entity: Entity): Field[] {
