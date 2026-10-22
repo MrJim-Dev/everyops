@@ -5,7 +5,7 @@ type Action = Rule["actions"][number];
 
 const QTY = /qty|quantity|received|count|pcs|units/i;
 const STOCK_IN = /restock|receiv|purchase|deliver|stock.?in|incoming|replenish/i;
-const NUMERIC = new Set(["number", "money", "percent"]);
+const NUMERIC = new Set(["number", "money", "percent", "rating", "duration"]);
 
 /**
  * Generated automations sometimes arrive with the field or amount left out, which the designer fills with "" and
@@ -19,6 +19,7 @@ export function completeAction(bp: Blueprint, rule: Rule, action: Action): Actio
   if (!source) return undefined;
   if (action.type === "notify") return action.message.trim() ? action : undefined;
   if (action.type === "send_email") return action.to.trim() && action.subject.trim() ? action : undefined;
+  if (action.type === "call_api") return action.endpointId?.trim() ? action : undefined;
   if (action.type === "create_record")
     return bp.entities.some((e) => e.id === action.entityId) ? action : undefined;
   if (action.type === "link_record") {

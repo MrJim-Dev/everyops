@@ -13,6 +13,7 @@ import type {
   View,
   WorkspaceData,
 } from "@/lib/blueprint/types";
+import { parseDuration, parseRating } from "@/lib/format";
 import type { ChangeOp, ChangePlan, RecordOp } from "./changes";
 import { newId } from "./ids";
 import { validateRecord } from "./records";
@@ -276,6 +277,14 @@ export function convertCell(
       if (n === null) return bad(`"${t}" isn't a number`);
       // "12%" in a percent field is 12; a spreadsheet's 0.12 stays 0.12 (the field shows it as 0.12%).
       return { value: n };
+    }
+    case "rating": {
+      const n = parseRating(t);
+      return n === null ? bad(`"${t}" isn't 1 to 5 stars`) : { value: n };
+    }
+    case "duration": {
+      const n = parseDuration(t);
+      return n === null ? bad(`"${t}" isn't a length of time like 1:30`) : { value: n };
     }
     case "checkbox":
       if (YES.test(t)) return { value: true };

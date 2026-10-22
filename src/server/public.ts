@@ -1,3 +1,4 @@
+import { parseDuration, parseRating } from "@/lib/format";
 import "server-only";
 import { sql } from "kysely";
 import { normalizeUrl } from "@/lib/blueprint/contact";
@@ -173,6 +174,14 @@ function draftFromVisitor(
       case "money":
       case "percent":
         value = typeof v === "number" && Number.isFinite(v) ? v : undefined;
+        break;
+      case "rating":
+        value = typeof v === "number" ? v : typeof v === "string" ? (parseRating(v) ?? undefined) : undefined;
+        break;
+      case "duration":
+        // Kept as typed when it doesn't read as a time, so the record check names it instead of dropping it.
+        value =
+          typeof v === "number" ? v : typeof v === "string" ? (parseDuration(v) ?? text(v, 40)) : undefined;
         break;
       case "date":
         value = typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;

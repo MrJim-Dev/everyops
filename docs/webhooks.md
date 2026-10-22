@@ -10,6 +10,7 @@ Owners and admins add endpoints in Settings → Webhooks (up to 10 per workspace
 | `record.status_changed` | A status field changes (also sends `record.updated`) | `field`, `from`/`to` (choice ids), `fromLabel`/`toLabel` |
 | `public_form.submitted` | A public form is submitted | `form`, `formName`, `record` |
 | `change.applied` | The design moves to another version | `fromVersion`, `toVersion` |
+| `automation.call` | An automation's Call step names this endpoint (`docs/automation-call-api.md`) | the automation's body as written, not wrapped in the envelope |
 | `webhook.test` | Send test is pressed | a message |
 
 Body: `{ id: "evt_…", type, workspace, occurredAt, data }`. Endpoints can be limited to some record types.

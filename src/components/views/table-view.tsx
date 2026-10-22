@@ -52,7 +52,7 @@ import type { DataRecord, Field, Sort, TableView as TableViewConfig } from "@/li
 import { downloadText, fileSlug } from "@/lib/download";
 import { applyFilter, searchRecords, sortRecords } from "@/lib/engine/query";
 import { toCsv, toSheet, valueText } from "@/lib/engine/value-text";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatDuration, formatMoney, formatNumber } from "@/lib/format";
 import { useFreshStore } from "@/lib/motion/fresh";
 import { useViewPref } from "@/lib/store/view-prefs";
 import { canEdit, canManage, useWorkspaces } from "@/lib/store/workspaces";
@@ -92,7 +92,9 @@ export function TableView({ view }: { view: TableViewConfig }) {
   const groupable = entity.fields.filter((f) => GROUPABLE.has(displayKind(blueprint, f)));
   const groupField = groupable.find((f) => f.id === groupBy);
   const numeric = (f: Field) => isNumericKind(displayKind(blueprint, f));
-  const summable = (f: Field) => ["money", "number"].includes(displayKind(blueprint, f));
+  // Columns with a total: amounts and counts add up, time adds up as time, and ratings show their average.
+  const summable = (f: Field) =>
+    ["money", "number", "duration", "rating"].includes(displayKind(blueprint, f));
 
   const moveColumn = (fieldId: string, to: number) => {
     const from = view.fieldIds.indexOf(fieldId);
@@ -188,10 +190,19 @@ export function TableView({ view }: { view: TableViewConfig }) {
     else toast.error("Couldn't update all of them", { description: result.message });
   };
 
-  const total = (f: Field, list: DataRecord[]) =>
-    list.reduce((sum, r) => sum + (Number(r.data[f.id]) || 0), 0);
-  const formatTotal = (f: Field, value: number) =>
-    displayKind(blueprint, f) === "money" ? formatMoney(value) : formatNumber(value);
+  const total = (f: Field, list: DataRecord[]) => {
+    if (displayKind(blueprint, f) !== "rating")
+      return list.reduce((sum, r) => sum + (Number(r.data[f.id]) || 0), 0);
+    const rated = list.map((r) => Number(r.data[f.id])).filter((n) => n > 0);
+    return rated.length ? rated.reduce((a, b) => a + b, 0) / rated.length : 0;
+  };
+  const formatTotal = (f: Field, value: number) => {
+    const kind = displayKind(blueprint, f);
+    if (kind === "money") return formatMoney(value);
+    if (kind === "duration") return formatDuration(value);
+    if (kind === "rating") return value ? `${formatNumber(Math.round(value * 10) / 10)} avg` : "";
+    return formatNumber(value);
+  };
 
   const toggleSort = (fieldId: string) =>
     setSort((s) =>

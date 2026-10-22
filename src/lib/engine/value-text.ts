@@ -4,11 +4,13 @@ import type { Blueprint, DataRecord, Field, FieldValue } from "@/lib/blueprint/t
 import {
   formatDate,
   formatDateTime,
+  formatDuration,
   formatMoney,
   formatNumber,
   formatPercent,
   formatRange,
   isTimeRange,
+  RATING_MAX,
 } from "@/lib/format";
 
 /** A field's value as plain text, the way it reads on screen: for CSV exports and summaries. */
@@ -26,6 +28,10 @@ export function valueText(
       return formatNumber(Number(value));
     case "percent":
       return formatPercent(Number(value));
+    case "rating":
+      return `${Number(value)}/${RATING_MAX}`;
+    case "duration":
+      return formatDuration(Number(value));
     case "checkbox":
       return value ? "Yes" : "No";
     case "date":
@@ -81,6 +87,8 @@ export function toSheet(
   const formats = fields.map((f): SheetColumn["format"] => {
     const kind = displayKind(bp, f);
     if (kind === "money" || kind === "number" || kind === "percent") return kind;
+    // A rating sums and sorts as the number it is; a duration reads as one ("1 h 30 min").
+    if (kind === "rating") return "number";
     if (kind === "date" || kind === "datetime") return kind;
     return "text";
   });
