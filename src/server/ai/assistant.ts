@@ -1078,6 +1078,8 @@ export async function assistantTurn(input: {
   memory?: WorkspaceMemory;
   /** The one-line description setup wrote for the workspace. */
   summary?: string;
+  /** Owners and admins: the workspace's webhook endpoints a call_api automation can post to. */
+  endpoints?: { id: string; label: string; acceptsCalls: boolean }[];
   signal?: AbortSignal;
 }): Promise<AssistantResult> {
   const { blueprint: bp, records } = input;
@@ -1102,6 +1104,17 @@ export async function assistantTurn(input: {
             ...input.team.members.map((m) => `- ${m.name} <${m.email}>: ${m.role}`),
             ...input.team.invites.map((i) => `- invited <${i.email}>: ${i.role}, not joined yet`),
           ].join("\n") || "- nobody besides the owner"
+        }`
+      : "";
+  // The endpoints a call_api automation can post to, by id and name only (URLs and secrets stay in Settings).
+  const endpointsText =
+    input.canDesign && input.endpoints
+      ? `\n\nWebhook endpoints (call_api posts to one by its id; only those that accept automation calls can be used):\n${
+          input.endpoints
+            .map(
+              (e) => `- ${e.id}: ${e.label}${e.acceptsCalls ? "" : " (doesn't accept automation calls yet)"}`,
+            )
+            .join("\n") || "- none yet"
         }`
       : "";
   const today = todayKey();
@@ -1212,7 +1225,7 @@ ${written}`
 Today in Manila: ${weekday}, ${today}
 Coming days: ${comingDays(today)}
 
-${permissions}${team}
+${permissions}${team}${endpointsText}
 
 What the person is looking at:
 ${screen.text}

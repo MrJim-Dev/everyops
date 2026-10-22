@@ -67,4 +67,22 @@ describe("toAssistantRule", () => {
       to: "paid",
     });
   });
+  it("reads call_api: the webhook endpoint in fieldId, the JSON to post in value", () => {
+    const rule = toAssistantRule({
+      id: "ping",
+      name: "Tell Slack",
+      trigger: { entityId: "player", event: "created" },
+      actions: [{ type: "call_api", fieldId: "ep_9", value: '{"text": "{{name}} joined"}' }],
+    });
+    expect(rule.actions).toEqual([
+      { type: "call_api", endpointId: "ep_9", body: '{"text": "{{name}} joined"}' },
+    ]);
+    const plain = toAssistantRule({
+      id: "ping",
+      name: "Send the record",
+      trigger: { entityId: "player", event: "created" },
+      actions: [{ type: "call_api", fieldId: "ep_9", value: "" }],
+    });
+    expect(plain.actions).toEqual([{ type: "call_api", endpointId: "ep_9" }]);
+  });
 });

@@ -32,10 +32,14 @@ import { completeAction } from "./rule-repair";
 
 export type Email = { to: string; subject: string; body: string };
 
+/** A call to a webhook endpoint an automation makes: which endpoint, and the JSON it posts. */
+export type ApiCall = { endpointId: string; body: unknown };
+
 export type RuleOutcome = {
   records: DataRecord[];
   notices: string[];
   emails: Email[];
+  calls: ApiCall[];
   /** Ids of records added by create_record and link_record actions. */
   created: string[];
 };
@@ -48,6 +52,42 @@ export const isOn = (rule: Rule) => rule.enabled !== false;
 export const isTimed = (rule: Rule) =>
   rule.trigger.event === "schedule" || rule.trigger.event === "date_reached";
 export const sendsEmail = (rule: Rule) => rule.actions.some((a) => a.type === "send_email");
+export const callsApi = (rule: Rule) => rule.actions.some((a) => a.type === "call_api");
+
+/**
+ * What a call_api action posts for a record. With a body template, its {{placeholders}} are filled as JSON string
+ * content (quotes and line breaks escaped), so they belong inside quotes: {"text": "Booked by {{name}}"}. A
+ * template that still isn't JSON is sent as {"text": …}. Without one, the record itself, shaped like a webhook
+ * event's: its type and its fields' stored values (numbers stay numbers, choices are their ids).
+ */
+export function callBody(
+  bp: Blueprint,
+  rule: Rule,
+  action: { body?: string },
+  entity: Entity,
+  record: DataRecord,
+  records: DataRecord[],
+  now: Date,
+): unknown {
+  if (!action.body?.trim())
+    return { automation: rule.name, recordType: entity.id, record: { id: record.id, ...record.data } };
+  const ctx = recordContext(bp, entity, record.data, records, now);
+  const filled = action.body.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, path: string) => {
+    const parts = path.split(".");
+    const value = ctx.get(parts);
+    if (value === undefined || value === null) return "";
+    const steps = walkPath(bp, entity, parts).steps;
+    return JSON.stringify(readable(bp, steps[steps.length - 1]?.field, value as FieldValue, records)).slice(
+      1,
+      -1,
+    );
+  });
+  try {
+    return JSON.parse(filled);
+  } catch {
+    return { text: filled };
+  }
+}
 
 const entityOf = (bp: Blueprint, id: string) => bp.entities.find((e) => e.id === id);
 
@@ -122,7 +162,7 @@ export function applyActions(
   now: Date,
   depth = 0,
 ): RuleOutcome {
-  const out: RuleOutcome = { records: rows, notices: [], emails: [], created: [] };
+  const out: RuleOutcome = { records: rows, notices: [], emails: [], calls: [], created: [] };
   const entity = entityOf(bp, record.entityId);
   if (!entity) return out;
   for (const raw of rule.actions) {
@@ -144,12 +184,20 @@ export function applyActions(
       });
       continue;
     }
+    if (action.type === "call_api") {
+      out.calls.push({
+        endpointId: action.endpointId,
+        body: callBody(bp, rule, action, entity, current, out.records, now),
+      });
+      continue;
+    }
     if (action.type === "link_record") {
       const linked = linkFromRule(bp, out.records, action, entity, current, now, depth);
       if (!linked) continue;
       out.records = linked.records;
       out.notices.push(...linked.notices);
       out.emails.push(...linked.emails);
+      out.calls.push(...linked.calls);
       out.created.push(...linked.created);
       continue;
     }
@@ -167,6 +215,7 @@ export function applyActions(
       out.records = next.records;
       out.notices.push(...next.notices);
       out.emails.push(...next.emails);
+      out.calls.push(...next.calls);
       out.created.push(...next.created);
       continue;
     }
@@ -254,7 +303,7 @@ function linkFromRule(
   if (!link || !target || !field) return undefined;
   const value = matchValue(field, run(action.value, recordContext(bp, source, record.data, rows, now)));
   if (value === undefined) return undefined;
-  const out: RuleOutcome = { records: rows, notices: [], emails: [], created: [] };
+  const out: RuleOutcome = { records: rows, notices: [], emails: [], calls: [], created: [] };
   let match = rows.find((r) => r.entityId === target.id && sameValue(r.data[field.id], value));
   if (!match) {
     if (depth >= MAX_DEPTH) return undefined;
@@ -268,6 +317,7 @@ function linkFromRule(
     out.records = next.records;
     out.notices.push(...next.notices);
     out.emails.push(...next.emails);
+    out.calls.push(...next.calls);
     out.created.push(...next.created);
   }
   const id = match.id;
@@ -289,7 +339,7 @@ export function runSaveRules(
   now: Date,
   depth = 0,
 ): RuleOutcome {
-  const out: RuleOutcome = { records, notices: [], emails: [], created: [] };
+  const out: RuleOutcome = { records, notices: [], emails: [], calls: [], created: [] };
   const entity = entityOf(bp, record.entityId);
   if (!entity) return out;
   for (const rule of bp.rules) {
@@ -313,6 +363,7 @@ export function runSaveRules(
     out.records = done.records;
     out.notices.push(...done.notices);
     out.emails.push(...done.emails);
+    out.calls.push(...done.calls);
     out.created.push(...done.created);
   }
   return out;
@@ -321,7 +372,7 @@ export function runSaveRules(
 /** A save as the server sees it: the record before (missing when new) and after. */
 export type SavedChange = { before?: DataRecord; after: DataRecord };
 
-export type SaveRun = { rule: Rule; record: DataRecord; emails: Email[] };
+export type SaveRun = { rule: Rule; record: DataRecord; emails: Email[]; calls: ApiCall[] };
 
 /**
  * What the server does after a save: for each saved record, the automations that fired on it, with the emails
@@ -356,7 +407,12 @@ export function saveRuns(bp: Blueprint, changes: SavedChange[], records: DataRec
             ]
           : [],
       );
-      runs.push({ rule, record: after, emails });
+      const calls = rule.actions.flatMap((a) =>
+        a.type === "call_api"
+          ? [{ endpointId: a.endpointId, body: callBody(bp, rule, a, entity, after, records, now) }]
+          : [],
+      );
+      runs.push({ rule, record: after, emails, calls });
     }
   }
   return runs;
@@ -506,7 +562,7 @@ export function describeTrigger(bp: Blueprint, rule: Rule): string {
 }
 
 /** One line per action: "Email {{email}}: Your booking is tomorrow", "Set Status to …". */
-export function describeActions(bp: Blueprint, rule: Rule): string[] {
+export function describeActions(bp: Blueprint, rule: Rule, endpoints?: Record<string, string>): string[] {
   const source = entityOf(bp, rule.trigger.entityId);
   return rule.actions.map((a) => {
     switch (a.type) {
@@ -514,6 +570,8 @@ export function describeActions(bp: Blueprint, rule: Rule): string[] {
         return `Show a notice: ${a.message}`;
       case "send_email":
         return `Email ${a.to}: ${a.subject}`;
+      case "call_api":
+        return `Call ${endpoints?.[a.endpointId] ?? "a webhook endpoint"}${a.body?.trim() ? " with a custom message" : " with the record"}`;
       case "create_record":
         return `Add a ${(entityOf(bp, a.entityId)?.name ?? a.entityId).toLowerCase()}`;
       case "link_record": {

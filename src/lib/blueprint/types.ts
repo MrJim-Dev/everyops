@@ -446,7 +446,14 @@ export type Action =
    * on this record to fill, fieldId the field of the linked type to match, and value a formula on this record for
    * what it must equal (date). The linked type's rollups then count through that link.
    */
-  | { type: "link_record"; target: { kind: "relation"; fieldId: string }; fieldId: string; value: string };
+  | { type: "link_record"; target: { kind: "relation"; fieldId: string }; fieldId: string; value: string }
+  /**
+   * Calls an outside service: posts to one of the workspace's webhook endpoints (Settings → Webhooks, where its URL
+   * and signing secret stay, out of the blueprint). body is JSON with {{field}} placeholders inside its strings,
+   * e.g. {"text": "New booking: {{name}} at {{time}}"}; without one it sends the record. Sent by the server, with
+   * the endpoint's retries, like emails.
+   */
+  | { type: "call_api"; endpointId: string; body?: string };
 
 /** When a timed automation runs, in Manila time. */
 export type RuleSchedule = {

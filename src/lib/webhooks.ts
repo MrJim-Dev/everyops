@@ -13,6 +13,7 @@ export const WEBHOOK_EVENTS = [
   "record.status_changed",
   "public_form.submitted",
   "change.applied",
+  "automation.call",
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
@@ -23,6 +24,7 @@ export const EVENT_LABELS: Record<WebhookEvent, string> = {
   "record.status_changed": "A record's status changes",
   "public_form.submitted": "A public form is submitted",
   "change.applied": "A design change is applied",
+  "automation.call": "An automation calls it (its Call step)",
 };
 
 /** One event before it's addressed to endpoints. recordType is null for events about the whole workspace. */
