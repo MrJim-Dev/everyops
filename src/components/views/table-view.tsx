@@ -2,6 +2,7 @@
 
 import {
   ArrowsOutSimpleIcon,
+  BarcodeIcon,
   CaretDownIcon,
   CaretLeftIcon,
   CaretRightIcon,
@@ -18,6 +19,7 @@ import { SheetSyncBar } from "@/components/import/sheet-sync-bar";
 import { FieldValue } from "@/components/records/field-value";
 import { useRecordPanels } from "@/components/records/record-panels";
 import { StatusMenu } from "@/components/records/status-menu";
+import { ScanDialog } from "@/components/scan/scan-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -49,6 +51,7 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useReportView } from "@/lib/assistant/screen-store";
 import { displayKind, isNumericKind, statusField } from "@/lib/blueprint/field-kind";
 import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
+import { sameCode, scannableFields } from "@/lib/blueprint/scannable";
 import type { DataRecord, Field, Sort, TableView as TableViewConfig } from "@/lib/blueprint/types";
 import { downloadText, fileSlug } from "@/lib/download";
 import { applyFilter, searchRecords, sortRecords } from "@/lib/engine/query";
@@ -81,6 +84,21 @@ export function TableView({ view }: { view: TableViewConfig }) {
   const actions = useRecordActions();
   const applyChange = useWorkspaces((s) => s.applyChange);
   const entity = getEntity(blueprint, view.entityId);
+  // Records with a code field (Barcode, SKU, Serial number) can be found by scanning it.
+  const codes = scannableFields(entity);
+  const [scanning, setScanning] = useState(false);
+  const onScan = (code: string) => {
+    const found = records.find(
+      (r) => r.entityId === entity.id && codes.some((f) => sameCode(r.data[f.id], code)),
+    );
+    if (found) return openRecord(found.id);
+    const one = entity.name.toLowerCase();
+    toast.info(`No ${one} with ${codes[0].name.toLowerCase()} ${code}`, {
+      ...(editable
+        ? { action: { label: `Add ${one}`, onClick: () => openCreate(entity.id, { [codes[0].id]: code }) } }
+        : {}),
+    });
+  };
   const fields = view.fieldIds.map((id) => getField(entity, id));
   const fresh = useFreshStore((s) => s.ids);
   const [query, setQuery] = useState("");
@@ -341,6 +359,12 @@ export function TableView({ view }: { view: TableViewConfig }) {
         ) : (
           <>
             <SearchInput value={query} onChange={setQuery} placeholder={`Search ${plural}`} />
+            {codes.length ? (
+              <Button variant="outline" size="sm" onClick={() => setScanning(true)}>
+                <BarcodeIcon data-icon="inline-start" />
+                Scan
+              </Button>
+            ) : null}
             {groupable.length ? (
               <Select
                 value={groupBy}
@@ -406,6 +430,15 @@ export function TableView({ view }: { view: TableViewConfig }) {
       </ViewToolbar>
       {editable && ws.mode === "live" ? (
         <ImportDialog open={importing} onOpenChange={setImporting} entityId={entity.id} />
+      ) : null}
+      {codes.length ? (
+        <ScanDialog
+          open={scanning}
+          onOpenChange={setScanning}
+          title={`Find a ${entity.name.toLowerCase()}`}
+          description={`Scan its ${codes[0].name.toLowerCase()} with the camera or a handheld scanner to open it.`}
+          onScan={onScan}
+        />
       ) : null}
       {ws.mode === "live" ? <SheetSyncBar entityId={entity.id} /> : null}
       {rows.length === 0 ? (
