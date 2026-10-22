@@ -32,6 +32,7 @@ export const ACTIONS = {
   "record.create": "Added",
   "record.update": "Changed",
   "record.delete": "Deleted",
+  "record.merge": "Merged",
   "page.update": "Edited page",
   "design.version": "Changed the design",
   "change.propose": "Proposed a change",
@@ -74,6 +75,7 @@ const TRIED: Partial<Record<Action, string>> = {
   "record.create": "Tried to add",
   "record.update": "Tried to change",
   "record.delete": "Tried to delete",
+  "record.merge": "Tried to merge",
 };
 
 /**

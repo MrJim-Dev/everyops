@@ -37,6 +37,7 @@ import { useAssistant } from "@/lib/assistant/panel-store";
 import { editableFields, statusField } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { DataRecord, Entity, PrintTemplate, RecordData } from "@/lib/blueprint/types";
+import { findDuplicates } from "@/lib/engine/duplicates";
 import { renderPrint, starterTemplate, templatesFor } from "@/lib/engine/print";
 import type { FieldError } from "@/lib/engine/records";
 import { repeatText, seriesOf } from "@/lib/engine/recurrence";
@@ -44,6 +45,7 @@ import { formatDateTime } from "@/lib/format";
 import { loadAll } from "@/lib/store/server-records";
 import { canEdit, useWorkspaces } from "@/lib/store/workspaces";
 import { FieldValue } from "./field-value";
+import { MergeDialog } from "./merge-dialog";
 import { RecordFieldsForm } from "./record-fields-form";
 import { useRecordPanels } from "./record-panels";
 import { StatusMenu } from "./status-menu";
@@ -90,7 +92,7 @@ function RecordSheetBody({
   onClose: () => void;
 }) {
   const { blueprint, records, role, id: workspaceId, mode } = useWorkspace();
-  const { openCreate } = useRecordPanels();
+  const { openCreate, openRecord } = useRecordPanels();
   const editable = canEdit(role);
   const actions = useRecordActions();
   const [editing, setEditing] = useState(false);
@@ -98,6 +100,12 @@ function RecordSheetBody({
   // The record as it was when editing started; only fields that differ from it are saved.
   const [base, setBase] = useState<RecordData>(record.data);
   const [errors, setErrors] = useState<FieldError[]>([]);
+  // Another record with this phone or email: the same customer added twice.
+  const twins = useMemo(
+    () => findDuplicates(entity, record.data, records, record.id),
+    [entity, record, records],
+  );
+  const [merging, setMerging] = useState<DataRecord | null>(null);
   // A record of a series (src/lib/engine/recurrence.ts): where it falls, and whether an edit goes to the rest too.
   const series = useMemo(() => seriesOf(records, record, entity), [records, record, entity]);
   const [scope, setScope] = useState<"one" | "following">("one");
@@ -171,6 +179,33 @@ function RecordSheetBody({
       </SheetHeader>
 
       <div className="flex-1 overflow-y-auto px-5 py-4">
+        {!editing && twins.length ? (
+          <div
+            aria-live="polite"
+            className="mb-4 flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-[12.5px]"
+          >
+            {twins.slice(0, 3).map((t) => (
+              <div key={t.record.id} className="flex items-center justify-between gap-2">
+                <span className="min-w-0">
+                  Possible duplicate:{" "}
+                  <button
+                    type="button"
+                    className="font-medium underline-offset-2 hover:underline"
+                    onClick={() => openRecord(t.record.id)}
+                  >
+                    {recordTitle(entity, t.record)}
+                  </button>{" "}
+                  <span className="text-muted-foreground">has the same {t.field.name.toLowerCase()}</span>
+                </span>
+                {editable ? (
+                  <Button size="sm" variant="outline" onClick={() => setMerging(t.record)}>
+                    Merge…
+                  </Button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
         {editing ? (
           <>
             <RecordFieldsForm
@@ -427,6 +462,17 @@ function RecordSheetBody({
           </>
         )}
       </SheetFooter>
+      {merging ? (
+        <MergeDialog
+          entity={entity}
+          records={[record, merging]}
+          onClose={() => setMerging(null)}
+          onMerged={(keptId) => {
+            setMerging(null);
+            openRecord(keptId);
+          }}
+        />
+      ) : null}
       {printing ? (
         <PrintDialog
           open

@@ -13,8 +13,9 @@ import {
 import { useRecordActions } from "@/components/workspace/use-record-actions";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { statusField } from "@/lib/blueprint/field-kind";
-import { getEntity } from "@/lib/blueprint/lookup";
+import { getEntity, recordTitle } from "@/lib/blueprint/lookup";
 import type { RecordData } from "@/lib/blueprint/types";
+import { findDuplicates } from "@/lib/engine/duplicates";
 import type { FieldError } from "@/lib/engine/records";
 import { dayOfValue, planSeries, seriesField } from "@/lib/engine/recurrence";
 import { RecordFieldsForm } from "./record-fields-form";
@@ -31,7 +32,7 @@ export function RecordFormDialog({
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
-  const { blueprint, data } = useWorkspace();
+  const { blueprint, data, records } = useWorkspace();
   const actions = useRecordActions();
   const entity = getEntity(blueprint, entityId);
   const status = statusField(entity);
@@ -41,6 +42,9 @@ export function RecordFormDialog({
   }));
   const [errors, setErrors] = useState<FieldError[]>([]);
   const general = errors.filter((e) => !e.fieldId);
+  // Someone already here with this phone or email: offer them instead of a second record.
+  const twins = useMemo(() => findDuplicates(entity, values, records), [entity, values, records]);
+  const twin = twins[0];
   // Records with a date can repeat: a booking every Tuesday, a fee every month.
   const dateField = seriesField(entity);
   const [repeatChoice, setRepeatChoice] = useState<RepeatChoice>(NO_REPEAT);
@@ -102,6 +106,21 @@ export function RecordFormDialog({
             <p role="alert" className="text-[13px] text-destructive">
               {general[0].message}
             </p>
+          ) : null}
+          {twin ? (
+            <div
+              aria-live="polite"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12.5px]"
+            >
+              <span>
+                <span className="font-medium">{recordTitle(entity, twin.record)}</span> already has this{" "}
+                {twin.field.name.toLowerCase()}
+                {twins.length > 1 ? ` (and ${twins.length - 1} more)` : ""}.
+              </span>
+              <Button type="button" size="sm" variant="outline" onClick={() => onCreated(twin.record.id)}>
+                Use {recordTitle(entity, twin.record)} instead
+              </Button>
+            </div>
           ) : null}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>
