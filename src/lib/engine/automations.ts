@@ -1,3 +1,4 @@
+import { displayKind } from "@/lib/blueprint/field-kind";
 import { findRecord } from "@/lib/blueprint/lookup";
 import { walkPath } from "@/lib/blueprint/paths";
 import type {
@@ -12,10 +13,12 @@ import type {
 import {
   formatDate,
   formatDateTime,
+  formatDuration,
   formatMoney,
   formatNumber,
   formatPercent,
   formatRange,
+  formatRating,
   isTimeRange,
 } from "@/lib/format";
 import { addDays, dateKey, manilaParts, minutesOf, todayKey } from "@/lib/time";
@@ -57,12 +60,20 @@ function readable(bp: Blueprint, field: Field | undefined, value: FieldValue, re
     return value.map((v) => field?.options?.find((o) => o.id === v)?.label ?? v).join(", ");
   if (isTimeRange(value)) return `${formatDate(value.start)} · ${formatRange(value)}`;
   if (!field) return String(value);
-  const type = field.type === "formula" ? field.formula?.resultType : field.type;
+  // A rollup reads as what it adds up: an order's total as money, hours worked as time.
+  const type =
+    field.type === "rollup"
+      ? displayKind(bp, field)
+      : field.type === "formula"
+        ? field.formula?.resultType
+        : field.type;
   const option = field.options?.find((o) => o.id === value);
   if (option) return option.label;
   if (typeof value === "number") {
     if (type === "money") return formatMoney(value);
     if (type === "percent") return formatPercent(value);
+    if (type === "rating") return formatRating(value);
+    if (type === "duration") return formatDuration(value);
     return formatNumber(value);
   }
   if (typeof value === "boolean") return value ? "Yes" : "No";

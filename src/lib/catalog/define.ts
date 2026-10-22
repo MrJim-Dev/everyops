@@ -13,6 +13,8 @@ export const f = {
   number: make("number"),
   money: make("money"),
   percent: make("percent"),
+  rating: make("rating"),
+  duration: make("duration"),
   date: make("date"),
   datetime: make("datetime"),
   timeRange: make("time_range"),

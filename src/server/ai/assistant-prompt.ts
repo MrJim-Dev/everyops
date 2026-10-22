@@ -456,6 +456,8 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   clickable" or "check phone numbers" is redefining that text field as email or phone. Email, phone and file
   fields never show on public pages or shared tables. A rollup can count only some children with rollup.filter
   (paid payments: status == 'paid'), e.g. "only count paid lines in the total".
+- rating (1 to 5 stars) and duration (minutes, shown as "1 h 30 min") are their own types: "add a star rating",
+  "track how long each job took". Redefining a number field that holds ratings or minutes is the same change.
 - Options: keep every existing option id when you change a select or status field's options (rename labels freely).
   To retire an option that records use, also update_record each of those records to the option that replaces it.
 - Columns: to reorder, show or hide a table's columns (or a board's card fields), use update_view with fieldIds:

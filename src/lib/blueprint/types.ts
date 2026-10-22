@@ -30,6 +30,10 @@ export type FieldType =
   | "number"
   | "money"
   | "percent"
+  /** A score from 1 to 5, shown as stars (a review, a service rating, a lead's priority). */
+  | "rating"
+  /** A length of time in minutes, shown as "1 h 30 min" (a session, a repair, time on a task). */
+  | "duration"
   | "date"
   | "datetime"
   | "time_range"
