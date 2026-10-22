@@ -21,6 +21,7 @@ import { FileInput } from "./file-input";
 import { ImageInput } from "./image-input";
 import { RatingInput } from "./rating-input";
 import { RelationInput } from "./relation-input";
+import { SignatureInput } from "./signature-input";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const timeOf = (iso: string) => {
@@ -177,6 +178,16 @@ export function FieldInput({ id, field, value, onChange, invalid }: Props) {
         <FileInput
           id={id}
           field={field}
+          value={typeof value === "string" ? value : null}
+          onChange={onChange}
+        />
+      );
+    case "signature":
+      return (
+        <SignatureInput
+          id={id}
+          field={field}
+          invalid={invalid}
           value={typeof value === "string" ? value : null}
           onChange={onChange}
         />

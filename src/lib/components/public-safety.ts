@@ -38,7 +38,8 @@ export function aboutPeople(entity: Entity): boolean {
 
 /**
  * A field that names or reaches a person: a person field, contact details (email and phone fields, or anything
- * named like them), a person's name, or a link to people. File fields are the team's documents and count too.
+ * named like them), a person's name, or a link to people. File fields are the team's documents and count too, and
+ * so do signatures.
  */
 export function personalField(bp: Blueprint, field: Field): boolean {
   if (
@@ -46,6 +47,7 @@ export function personalField(bp: Blueprint, field: Field): boolean {
     field.type === "email" ||
     field.type === "phone" ||
     field.type === "file" ||
+    field.type === "signature" ||
     field.type === "created_by" ||
     field.type === "edited_by"
   )

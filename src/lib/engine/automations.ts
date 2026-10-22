@@ -105,6 +105,7 @@ export function readable(
     return value.map((v) => field?.options?.find((o) => o.id === v)?.label ?? v).join(", ");
   if (isTimeRange(value)) return `${formatDate(value.start)} · ${formatRange(value)}`;
   if (!field) return String(value);
+  if (field.type === "signature") return "Signed";
   // A rollup reads as what it adds up: an order's total as money, hours worked as time.
   const type =
     field.type === "rollup"

@@ -22,7 +22,8 @@ export type DisplayKind =
   | "email"
   | "phone"
   | "url"
-  | "file";
+  | "file"
+  | "signature";
 
 export function displayKind(bp: Blueprint, field: Field): DisplayKind {
   switch (field.type) {

@@ -54,6 +54,8 @@ export function valueText(
       const linked = typeof value === "string" ? findRecord(records, value) : undefined;
       return target && linked ? recordTitle(target, linked) : "";
     }
+    case "signature":
+      return "Signed";
     default:
       return String(value);
   }

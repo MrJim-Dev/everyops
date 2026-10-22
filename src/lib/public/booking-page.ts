@@ -165,6 +165,8 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
   }
   @keyframes fadeonly { from { opacity: 0; } to { opacity: 1; } }
   @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } aside.summary { position: static; } }
+  .sign { display: block; width: 100%; max-width: 420px; height: 140px; border: 1px solid #d4d4d8; border-radius: 10px; background: #fff; touch-action: none; cursor: crosshair; }
+  .signed { display: flex; align-items: center; gap: 12px; font-size: 14px; }
 </style>
 </head>
 <body ${BOOKING_PAGE_MARK}="${esc(o.formId)}">
@@ -457,6 +459,38 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
             set(onNow ? list.filter(function (x) { return x !== o.id; }) : list.concat(o.id)); draw();
           } }, [o.label]);
         }));
+      }
+      case "signature": {
+        // Once saved, the page says so (the drawing is the team's); a redraw of the panel never loses it.
+        if (v) return el("div", { class: "signed", id: "f_" + f.id }, [el("span", { text: "\u2713 Signed" }), el("button", { type: "button", class: "button", onclick: function () { set(""); draw(); } }, ["Sign again"])]);
+        var pad = el("canvas", { class: "sign", id: "f_" + f.id, role: "img", "aria-label": "Signature pad for " + f.name + ". Draw your signature with a finger, pen or mouse." });
+        var note = el("p", { class: "hint", text: "Sign in the box." });
+        var ink = false, lastPt = null;
+        var pt = function (e) { var b = pad.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
+        requestAnimationFrame(function () {
+          var r = window.devicePixelRatio || 1, b = pad.getBoundingClientRect();
+          pad.width = Math.round(b.width * r); pad.height = Math.round(b.height * r);
+          var c = pad.getContext("2d"); c.scale(r, r); c.lineWidth = 2.2; c.lineCap = "round"; c.lineJoin = "round"; c.strokeStyle = "#111";
+        });
+        pad.addEventListener("pointerdown", function (e) { pad.setPointerCapture(e.pointerId); ink = true; lastPt = pt(e); });
+        pad.addEventListener("pointermove", function (e) {
+          if (!ink || !lastPt) return;
+          var c = pad.getContext("2d"), n = pt(e);
+          c.beginPath(); c.moveTo(lastPt.x, lastPt.y); c.lineTo(n.x, n.y); c.stroke(); lastPt = n;
+        });
+        var end = function () {
+          if (!ink) return;
+          ink = false; lastPt = null; note.textContent = "Saving signature\u2026";
+          pad.toBlob(function (blob) {
+            if (!blob) return;
+            EveryOps.upload(FORM, new File([blob], "Signature.png", { type: "image/png" })).then(function (r) {
+              if (r && r.ok) { state.values[f.id] = r.url; delete state.errors[f.id]; note.textContent = "Signed. Keep drawing to change it."; }
+              else note.textContent = (r && r.message) || "That didn't save. Sign again.";
+            });
+          }, "image/png");
+        };
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (t) { pad.addEventListener(t, end); });
+        return el("div", {}, [pad, note]);
       }
       case "image": return el("input", Object.assign({}, common, { type: "file", accept: "image/*", required: f.required && !v ? true : null, onchange: function (e) {
         var file = e.target.files && e.target.files[0];

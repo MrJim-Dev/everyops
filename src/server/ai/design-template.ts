@@ -294,15 +294,19 @@ export function noProgress(before: string[], after: string[]): boolean {
   return before.every((b) => after.some((a) => alike(a, b)));
 }
 /**
- * Record types as the designer's schema can carry them. It has no created_by / edited_by type (the schema is near
- * Gemini's limit), so those go as text fields with their names; toEntity turns them back (a text field named
- * "Created by" or "Last edited by").
+ * Record types as the designer's schema can carry them. It has no signature or created_by / edited_by type (the
+ * schema is near Gemini's limit): a signature goes as a file field and the stamps as text fields, keeping their
+ * names; toEntity turns them back (a file field named Signature, a text field named Created by or Last edited by).
  */
 export function designEntities(entities: Entity[]): Design["entities"] {
   return entities.map((e) => ({
     ...e,
     fields: e.fields.map((f) =>
-      f.type === "created_by" || f.type === "edited_by" ? { ...f, type: "text" as const } : f,
+      f.type === "signature"
+        ? { ...f, type: "file" as const }
+        : f.type === "created_by" || f.type === "edited_by"
+          ? { ...f, type: "text" as const }
+          : f,
     ),
   })) as Design["entities"];
 }

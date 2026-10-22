@@ -79,7 +79,7 @@ import {
 import { toAssistantRule } from "./assistant-rule";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
 import { reviewCoverage } from "./coverage";
-import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toView } from "./design";
+import { fillNotesView, SIGNATURE_NAME, tidyBlocks, toEntity, toFieldValue, toView } from "./design";
 import { view } from "./design-prompt";
 import { dataDigest } from "./digest";
 import { generateJsonHedged } from "./gemini";
@@ -392,12 +392,20 @@ export function toDesignOps(
       case "add_field":
         if (o.entityId && o.field) {
           const owner = bp.entities.find((e) => e.id === o.entityId)?.name ?? o.entityId;
+          // The schema has no signature or created_by / edited_by type: a file field named Signature is a signature
+          // pad, and a text field named Created by / Last edited by is stamped by the app.
           const asked = o.field as Field;
           const actorType = asked.type === "text" ? actorTypeFor(asked.name) : null;
+          const typed =
+            asked.type === "file" && SIGNATURE_NAME.test(asked.name.trim())
+              ? { ...asked, type: "signature" as const }
+              : actorType
+                ? { ...asked, type: actorType }
+                : asked;
           ops.push({
             op: "add_field",
             entityId: o.entityId,
-            field: withStatusOptions(actorType ? { ...asked, type: actorType } : asked, owner),
+            field: withStatusOptions(typed, owner),
           });
         } else errors.push(`${at}: needs entityId and field`);
         break;

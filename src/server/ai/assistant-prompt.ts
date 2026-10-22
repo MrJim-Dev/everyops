@@ -461,6 +461,8 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   (paid payments: status == 'paid'), e.g. "only count paid lines in the total".
 - rating (1 to 5 stars) and duration (minutes, shown as "1 h 30 min") are their own types: "add a star rating",
   "track how long each job took". Redefining a number field that holds ratings or minutes is the same change.
+- A signature someone draws (a waiver, a rental agreement, proof of delivery) is a file field named Signature (or
+  "Customer signature", "Renter signature"): it becomes a signature pad, on public forms too.
 - Who added or last changed a record: add a text field named exactly "Created by" or "Last edited by". The app
   fills it in itself on every save (the person, public form, automation or API key), so don't add rules for it.
 - Options: keep every existing option id when you change a select or status field's options (rename labels freely).

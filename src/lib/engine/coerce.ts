@@ -43,6 +43,8 @@ function one(
     case "image":
     case "file":
       return { error: "takes an upload, which isn't available here" };
+    case "signature":
+      return { error: "is signed on a signature pad in EveryOps, which isn't available here" };
     case "number":
     case "money":
     case "percent": {
