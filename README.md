@@ -193,13 +193,13 @@ New accounts can be limited to approved emails, with everyone else kept on a wai
 
 With the gate on, an email may create an account when it is on `PRIVATE_BETA_ALLOWLIST` or its `waitlist` row has status `approved`. Anyone else who tries email sign-up or a first Google sign-in gets no user, account or session; they are added to the `waitlist` table (migration `0021_waitlist.sql`: email lowercased and unique, name, source `email` or `google`, status `waiting` or `approved`, `created_at`, `updated_at`, `approved_at`) and see "You're on the EveryOps waitlist. We'll email you as soon as your spot opens." Trying again keeps one row and its original `created_at`. No password is stored for waitlisted people. Existing accounts always sign in, with a password or Google, whether or not they are allowed. Invited teammates and setup scripts that create accounts (`pnpm db:seed` on a fresh database) need to be allowed too. The check is a Better Auth `user.create.before` hook (`src/server/private-beta.ts`), so it runs on the server for every way an account gets created.
 
-To approve someone on the waitlist, run this against the database (they can then sign up with that email; no redeploy needed):
+Site admins (`SITE_ADMIN_EMAILS`, comma separated; james@everyops.app when unset) run the waitlist (`src/server/waitlist-admin.ts`):
 
-```sql
-update waitlist set status = 'approved', approved_at = now(), updated_at = now() where email = lower('person@example.com');
-```
+- Each new person emails every site admin once ("Maria Santos joined the EveryOps waitlist"), with an **Approve** button. That link is signed with `BETTER_AUTH_SECRET`, works for 30 days without signing in, and opens a confirm page (`/waitlist/approve`) so a mail scanner opening it approves nobody. Trying again doesn't email again.
+- `/admin/waitlist` lists everyone, waiting first, with Approve. It's a 404 for anyone who isn't a site admin, as is `/api/admin/waitlist`.
+- Approving emails the person "Your EveryOps spot is open" with a sign-up link that fills in their email. They can then sign up with that email or Google; no redeploy needed.
 
-`select email, name, source, created_at from waitlist where status = 'waiting' order by created_at` lists who is waiting. EveryOps doesn't send acceptance emails yet; the table holds what the team needs to send them.
+Mail goes through SMTP (`notify@everyops.app` on Hostinger in production); a failed send never blocks a sign-up or an approval.
 
 To allow an email that never joined the waitlist, add it to `PRIVATE_BETA_ALLOWLIST` and redeploy. `scripts/deploy.sh` replaces Cloud Run's variables on every deploy and passes these two only when they are set, so set them where the deploy reads them: the GitHub `production` environment's variable `PRIVATE_BETA_ENABLED` and secret `PRIVATE_BETA_ALLOWLIST` (or the same names in your shell for an emergency deploy). Locally, put them in `.env.local`. The env is read on each sign-up, so no other restart is needed.
 
