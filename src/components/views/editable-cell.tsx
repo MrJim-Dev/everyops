@@ -16,7 +16,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useRecordActions } from "@/components/workspace/use-record-actions";
+import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { DataRecord, Field, FieldValue } from "@/lib/blueprint/types";
+import { valueText } from "@/lib/engine/value-text";
 import { cn } from "@/lib/utils";
 
 /** Field types that can be edited right inside a table cell. */
@@ -29,6 +31,8 @@ const INLINE = new Set<Field["type"]>([
   "number",
   "percent",
   "money",
+  "rating",
+  "duration",
   "date",
   "datetime",
   "select",
@@ -41,6 +45,7 @@ const TYPE_TO_EDIT = new Set<Field["type"]>([
   "number",
   "percent",
   "money",
+  "duration",
   "email",
   "phone",
   "url",
@@ -57,6 +62,7 @@ export function canEditInline(field: Field) {
  */
 export function EditableCell({ record, field }: { record: DataRecord; field: Field }) {
   const { update } = useRecordActions();
+  const { blueprint, records } = useWorkspace();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<FieldValue | undefined>(undefined);
   const value = record.data[field.id];
@@ -142,7 +148,8 @@ export function EditableCell({ record, field }: { record: DataRecord; field: Fie
       <button
         ref={cell}
         type="button"
-        aria-label={`${field.name}: ${empty ? "empty" : String(value)}. Double-click or press Enter to edit`}
+        // Read the way it shows ("1 h 15 min", "₱1,200", "Cash"), not as it's stored (75, 1200, "cash").
+        aria-label={`${field.name}: ${empty ? "empty" : valueText(blueprint, records, field, value) || String(value)}. Double-click or press Enter to edit`}
         title="Double-click to edit"
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => {

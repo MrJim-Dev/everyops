@@ -215,12 +215,20 @@ export function resultTypeOf(raw: string): ResultType {
 }
 
 export function toEntity(e: Design["entities"][number]): Entity {
+  const rangeOf = (raw: string): Field["range"] => {
+    const t = raw.trim().toLowerCase();
+    if (/^(dates?|days?|whole days?|all[- ]day)$/.test(t)) return "dates";
+    if (/^(times?|hours?|clock( times?)?|hh:mm)$/.test(t)) return "times";
+    return raw as Field["range"];
+  };
   const fields = e.fields.map((f) => {
     const out: Field = {
       id: f.id,
       name: f.name,
       type: contactType(f),
       ...(pick(f, ["required", "description", "options", "range", "relation"]) as Partial<Field>),
+      // range comes as plain text too: "days" or "whole days" mean dates, "hours" or "clock" times.
+      ...(f.range !== undefined ? { range: rangeOf(f.range) } : {}),
       // resultType and op come as plain text (the schema is near Gemini's limit); validation names a wrong one.
       ...(f.formula
         ? {

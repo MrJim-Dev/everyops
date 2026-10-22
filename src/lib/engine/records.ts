@@ -8,7 +8,7 @@ import type {
   RecordData,
   WorkspaceData,
 } from "@/lib/blueprint/types";
-import { formatRange, isTimeRange } from "@/lib/format";
+import { formatRange, isTimeRange, RATING_MAX } from "@/lib/format";
 import { isOn, runSaveRules } from "./automations";
 import { findConflict, resourceLabel } from "./availability";
 import type { RecordOp } from "./changes";
@@ -51,6 +51,17 @@ export function validateRecord(
       case "percent":
         if (typeof value !== "number" || Number.isNaN(value))
           errors.push({ fieldId: field.id, message: `${field.name} must be a number` });
+        break;
+      case "rating":
+        if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > RATING_MAX)
+          errors.push({ fieldId: field.id, message: `${field.name} must be 1 to ${RATING_MAX} stars` });
+        break;
+      case "duration":
+        if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+          errors.push({
+            fieldId: field.id,
+            message: `${field.name} needs a length of time, like 1:30 or 45 min`,
+          });
         break;
       case "select":
       case "status":

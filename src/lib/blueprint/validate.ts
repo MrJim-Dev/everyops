@@ -52,6 +52,8 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
         errors.push({ path, message: `${field.name} links to a missing entity` });
       if ((field.type === "select" || field.type === "status") && !field.options?.length)
         errors.push({ path, message: `${field.name} needs options` });
+      if (field.range !== undefined && field.range !== "dates" && field.range !== "times")
+        errors.push({ path, message: `${field.name}: range is "dates" or "times", not "${field.range}"` });
       if (field.type === "formula") {
         if (!field.formula) errors.push({ path, message: `${field.name} has no formula` });
         else {
@@ -285,10 +287,21 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
     }
   });
 
+  const templateIds = new Set<string>();
+  (bp.printTemplates ?? []).forEach((template, ti) => {
+    const path = `printTemplates.${ti}`;
+    if (templateIds.has(template.id))
+      errors.push({ path, message: `Duplicate print template id "${template.id}"` });
+    templateIds.add(template.id);
+    if (!template.name.trim()) errors.push({ path, message: "A print template needs a name" });
+    if (!entityIds.has(template.entityId))
+      errors.push({ path, message: `${template.name} prints a missing record type` });
+  });
+
   return errors;
 }
 
-const NUMERIC = new Set(["number", "money", "percent"]);
+const NUMERIC = new Set(["number", "money", "percent", "rating", "duration"]);
 const list = (items: { id: string }[]) => items.map((f) => f.id).join(", ") || "none";
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const resolvesPath = (bp: Blueprint, entity: Entity, ref: string) =>
@@ -356,6 +369,21 @@ function checkRule(bp: Blueprint, source: Entity, rule: Rule, path: string, erro
         for (const m of text.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g))
           if (!resolvesPath(bp, source, m[1]))
             say(`{{${m[1]}}} isn't a field of ${source.name} (fields: ${list(source.fields)})`);
+      continue;
+    }
+    if (action.type === "call_api") {
+      if (!action.endpointId?.trim())
+        say("call_api needs endpointId, a webhook endpoint from Settings → Webhooks");
+      if (action.body?.trim()) {
+        for (const m of action.body.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g))
+          if (!resolvesPath(bp, source, m[1]))
+            say(`{{${m[1]}}} isn't a field of ${source.name} (fields: ${list(source.fields)})`);
+        try {
+          JSON.parse(action.body.replace(/\{\{\s*[\w.]+\s*\}\}/g, "x"));
+        } catch {
+          say('the call body isn\'t JSON; write it like {"text": "New booking for {{name}}"}');
+        }
+      }
       continue;
     }
     if (action.type === "create_record") {

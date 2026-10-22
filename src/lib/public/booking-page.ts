@@ -434,6 +434,8 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     switch (f.type) {
       case "long_text": return el("textarea", Object.assign({ rows: "3", oninput: on }, common), [v || ""]);
       case "number": case "money": case "percent": return el("input", Object.assign({ type: "number", step: "any", value: v || "", oninput: on }, common));
+      case "rating": return el("select", Object.assign({ value: v || "", onchange: on }, common), [el("option", { value: "" }, ["Choose…"])].concat([5, 4, 3, 2, 1].map(function (n) { return el("option", { value: String(n), selected: String(n) === String(v) || null }, ["★★★★★".slice(0, n) + "☆☆☆☆☆".slice(n)]); })));
+      case "duration": return el("input", Object.assign({ type: "text", placeholder: "1:30, 90 or 1h 30m", value: v || "", oninput: on }, common));
       case "date": return el("input", Object.assign({ type: "date", value: v || "", oninput: on }, common));
       case "datetime": return el("input", Object.assign({ type: "datetime-local", value: v || "", oninput: on }, common));
       case "checkbox": return el("input", Object.assign({ type: "checkbox", checked: v === "on" || null, onchange: on }, common));

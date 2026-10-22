@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { ExtrasPicker } from "@/components/forms/extras-picker";
 import { StepIndicator } from "@/components/forms/step-indicator";
 import { BookingPicker } from "@/components/public/booking-pickers";
+import { DurationInput } from "@/components/records/duration-input";
+import { RatingInput } from "@/components/records/rating-input";
 import { SignaturePad } from "@/components/records/signature-pad";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -465,6 +467,24 @@ function PublicInput({
           inputMode="decimal"
           value={value === undefined || value === null ? "" : String(value)}
           onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+        />
+      );
+    case "rating":
+      return (
+        <RatingInput
+          id={id}
+          label={field.name}
+          invalid={invalid}
+          value={typeof value === "number" ? value : null}
+          onChange={onChange}
+        />
+      );
+    case "duration":
+      return (
+        <DurationInput
+          {...common}
+          value={typeof value === "number" || typeof value === "string" ? value : null}
+          onChange={onChange}
         />
       );
     case "date":

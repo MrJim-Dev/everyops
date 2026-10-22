@@ -4,6 +4,7 @@
  * Only fields a block lists are included, and a form only offers records people may see (bookable resources,
  * or record types a public block already shows), never, say, the list of customers.
  */
+
 import { displayKind, editableFields } from "@/lib/blueprint/field-kind";
 import { formSteps, placeExtras } from "@/lib/blueprint/form-steps";
 import { findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
@@ -29,10 +30,12 @@ import { autoReferenceFields } from "@/lib/engine/references";
 import {
   formatDate,
   formatDateTime,
+  formatDuration,
   formatMoney,
   formatNumber,
   formatPercent,
   formatRange,
+  formatRating,
   isTimeRange,
 } from "@/lib/format";
 import { type SiteDetails, withIncludes } from "./bindings";
@@ -275,6 +278,10 @@ export function formatCell(
       return { ...base, kind: "number", text: formatNumber(Number(value)) };
     case "percent":
       return { ...base, kind: "number", text: formatPercent(Number(value)) };
+    case "rating":
+      return { ...base, kind: "text", text: formatRating(Number(value)) };
+    case "duration":
+      return { ...base, kind: "number", text: formatDuration(Number(value)) };
     case "date":
       return { ...base, kind: "text", text: typeof value === "string" ? formatDate(value) : "" };
     case "datetime":
