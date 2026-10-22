@@ -11,6 +11,7 @@ import type {
 import { formatRange, isTimeRange, RATING_MAX } from "@/lib/format";
 import { isOn, runSaveRules } from "./automations";
 import { findConflict, resourceLabel } from "./availability";
+import { actionsFor, allActions } from "./branches";
 import type { RecordOp } from "./changes";
 import { computeAll } from "./compute";
 import { recordContext } from "./context";
@@ -150,7 +151,7 @@ function contributions(bp: Blueprint, records: DataRecord[], record: DataRecord,
       continue;
     const ctx = recordContext(bp, entity, record.data, records, now);
     if (rule.when && !truthy(run(rule.when, ctx))) continue;
-    for (const raw of rule.actions) {
+    for (const raw of actionsFor(rule, ctx)) {
       const action = completeAction(bp, rule, raw);
       if (action?.type !== "adjust_number" || action.target.kind !== "relation") continue;
       const targetId = record.data[action.target.fieldId];
@@ -210,7 +211,11 @@ function rulesReadComputed(bp: Blueprint, entityId: string): boolean {
   );
   return bp.rules.some((rule) => {
     if (!isOn(rule) || rule.trigger.entityId !== entityId) return false;
-    const text = [rule.when ?? "", ...rule.actions.map((a) => JSON.stringify(a))].join(" ");
+    const text = [
+      rule.when ?? "",
+      ...(rule.branches ?? []).map((b) => b.when ?? ""),
+      ...allActions(rule).map((a) => JSON.stringify(a)),
+    ].join(" ");
     if (/\b[a-z_][a-z0-9_]*\.[a-z_]/i.test(text.replace(/'[^']*'/g, ""))) return true;
     return (text.match(/[a-z_][a-z0-9_]*/gi) ?? []).some((word) => computed.has(word));
   });
