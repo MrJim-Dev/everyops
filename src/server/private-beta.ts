@@ -13,8 +13,11 @@ export type WaitlistSource = "email" | "google";
 export type WaitlistStore = {
   /** Whether the email's waitlist row has status 'approved'. */
   isApproved(email: string): Promise<boolean>;
-  /** Adds the email, or refreshes its row if it's already there (created_at, source and status stay). */
-  join(entry: { email: string; name: string | null; source: WaitlistSource }): Promise<void>;
+  /**
+   * Adds the email, or refreshes its row if it's already there (created_at, source and status stay). True when it's
+   * new, so the admins hear about each person once.
+   */
+  join(entry: { email: string; name: string | null; source: WaitlistSource }): Promise<boolean>;
 };
 
 const normalize = (email: string) => email.trim().toLowerCase();
@@ -47,11 +50,13 @@ export const waitlistTable: WaitlistStore = {
     return rows.length > 0;
   },
   async join({ email, name, source }) {
-    await sql`
+    const { rows } = await sql<{ inserted: boolean }>`
       insert into waitlist (id, email, name, source)
       values (${randomUUID()}, ${normalize(email)}, ${name}, ${source})
       on conflict (email) do update
-        set name = coalesce(excluded.name, waitlist.name), updated_at = now()`.execute(db);
+        set name = coalesce(excluded.name, waitlist.name), updated_at = now()
+      returning (xmax = 0) as inserted`.execute(db);
+    return rows[0]?.inserted === true;
   },
 };
 
@@ -76,7 +81,11 @@ export async function mayRegister(
  * deploys change it without a restart. The error code reaches the browser: as `error.code` from email sign-up,
  * and as `?error=waitlist` on the Google error redirect.
  */
-export function privateBetaGate(store: WaitlistStore = waitlistTable) {
+export function privateBetaGate(
+  store: WaitlistStore = waitlistTable,
+  /** Told about each new person on the waitlist (the site admins' email). A failure here never blocks the answer. */
+  onJoined?: (entry: { email: string; name: string | null; source: WaitlistSource }) => Promise<void>,
+) {
   return {
     databaseHooks: {
       user: {
@@ -85,7 +94,8 @@ export function privateBetaGate(store: WaitlistStore = waitlistTable) {
             if (await mayRegister(user.email, store)) return;
             // Email sign-up is the only path that creates users at /sign-up; every other one is the Google callback.
             const source: WaitlistSource = ctx?.path?.startsWith("/sign-up") ? "email" : "google";
-            await store.join({ email: user.email, name: user.name?.trim() || null, source });
+            const entry = { email: user.email, name: user.name?.trim() || null, source };
+            if ((await store.join(entry)) && onJoined) await onJoined(entry).catch(() => {});
             throw new APIError("FORBIDDEN", { code: WAITLIST_CODE, message: WAITLIST_MESSAGE });
           },
         },
@@ -94,4 +104,6 @@ export function privateBetaGate(store: WaitlistStore = waitlistTable) {
   } satisfies Partial<BetterAuthOptions>;
 }
 
-export const privateBeta = privateBetaGate();
+export const privateBeta = privateBetaGate(waitlistTable, (entry) =>
+  import("./waitlist-admin").then((m) => m.notifyAdminsOfJoin(entry)),
+);
