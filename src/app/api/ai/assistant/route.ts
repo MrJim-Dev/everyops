@@ -10,6 +10,7 @@ import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { readMemory, rememberEdits } from "@/server/workspace-memory";
 import { loadTeam, loadWorkspace } from "@/server/workspaces";
+import { enterZone } from "@/server/zone";
 
 const body = z.object({
   workspaceId: z.string().min(1),
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
     readMemory(workspaceId),
   ]);
   const blueprint = blueprintOf(found.workspace);
+  enterZone(blueprint);
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

@@ -103,7 +103,7 @@ You can never delete fields, records or views.
 Formula language (for formula.expr, formula.freezeWhen):
 - Field references by id: rate, start_time. Through a relation field: player.member.
 - Numbers, 'strings', true, false, null. Operators: + - * / % == != < <= > >= && || ! and cond ? a : b.
-- Functions: ${Object.keys(FUNCTIONS).join(", ")}. hour(x) and weekday(x) read the start of a date, datetime or time range in Asia/Manila (weekday 0 = Sunday). duration_hours(range) and days(range) measure time ranges.
+- Functions: ${Object.keys(FUNCTIONS).join(", ")}. hour(x) and weekday(x) read the start of a date, datetime or time range on the workspace's clock (weekday 0 = Sunday). duration_hours(range) and days(range) measure time ranges.
 - Money is a plain number in PHP. Formulas recompute existing records, except records matching freezeWhen.
 
 Rules:

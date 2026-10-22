@@ -10,6 +10,7 @@ import {
   formatRange,
   isTimeRange,
 } from "@/lib/format";
+import { toLocal } from "@/lib/time";
 
 /** A field's value as plain text, the way it reads on screen: for CSV exports and summaries. */
 export function valueText(
@@ -69,7 +70,7 @@ export type SheetColumn = {
 export type SheetCell = string | number | boolean | null;
 
 /**
- * Rows for an Excel export: numbers stay numbers (money in pesos), dates are dates (date-times as Manila wall time),
+ * Rows for an Excel export: numbers stay numbers (money in pesos), dates are dates (date-times as the workspace's wall time),
  * yes/no stays true/false, and everything else reads as it does on screen. Excel can then sort, sum and filter them.
  */
 export function toSheet(
@@ -84,7 +85,6 @@ export function toSheet(
     if (kind === "date" || kind === "datetime") return kind;
     return "text";
   });
-  const manila = (iso: string) => new Date(Date.parse(iso) + 8 * 3_600_000).toISOString().slice(0, 16);
   return {
     columns: fields.map((f, i) => ({ header: f.name, format: formats[i] })),
     rows: rows.map((row) =>
@@ -97,7 +97,7 @@ export function toSheet(
           return Number.isFinite(n) ? n : null;
         }
         if (format === "date" && typeof value === "string") return value.slice(0, 10);
-        if (format === "datetime" && typeof value === "string") return manila(value);
+        if (format === "datetime" && typeof value === "string") return toLocal(value);
         if (displayKind(bp, f) === "checkbox") return !!value;
         return valueText(bp, records, f, value);
       }),

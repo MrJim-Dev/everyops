@@ -3,6 +3,7 @@ import { MAX_INSTRUCTIONS, MAX_NOTE_CHARS, MEMORY_KINDS, type MemoryEdit } from 
 import type { Screen } from "@/lib/assistant/screen";
 import { parseCanvas } from "@/lib/canvas/model";
 import { canManage } from "@/lib/store/workspace-model";
+import { addDays, at } from "@/lib/time";
 import { listActivity, logActivity } from "../activity";
 import { actorOf } from "../api-auth";
 import { deliverPending, listRuns, runTimedAutomations } from "../automations";
@@ -44,7 +45,10 @@ const pageOf = (ctx: Ctx, pageId: unknown) => {
   return system;
 };
 
-const DAY_ARG = { type: "string", description: "YYYY-MM-DD (Asia/Manila)" };
+const DAY_ARG = {
+  type: "string",
+  description: "YYYY-MM-DD on the workspace's clock (the schema's timeZone)",
+};
 
 export const MORE_TOOLS: Tool[] = [
   {
@@ -382,7 +386,7 @@ export const MORE_TOOLS: Tool[] = [
     name: "read_activity",
     title: "Activity log",
     description:
-      "Who or what changed the workspace, newest first (people, API keys, AI agents, automations). Filter by action (e.g. record.update, or record. for all record actions), result and Manila days; before is the last id for the next page. Owners and admins.",
+      "Who or what changed the workspace, newest first (people, API keys, AI agents, automations). Filter by action (e.g. record.update, or record. for all record actions), result and days on the workspace's clock; before is the last id for the next page. Owners and admins.",
     permission: "manage",
     readOnly: true,
     properties: {
@@ -398,9 +402,8 @@ export const MORE_TOOLS: Tool[] = [
       const day = (v: unknown, next = false) => {
         const s = optStr(v);
         if (!s || !DAY.test(s)) return null;
-        const d = new Date(`${s}T00:00:00+08:00`);
-        if (next) d.setUTCDate(d.getUTCDate() + 1);
-        return d;
+        // The day's start on the workspace's clock.
+        return new Date(at(next ? addDays(s, 1) : s, "00:00"));
       };
       const items = await listActivity(ctx.workspaceId, {
         action: optStr(args.action) ?? null,

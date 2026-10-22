@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatMoney } from "@/lib/format";
+import { zone } from "@/lib/time";
 
 export type Receipt = {
   business: string;
@@ -30,7 +31,7 @@ const htmlText = (s: string) =>
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c,
   );
 const when = (d: Date) =>
-  d.toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" });
+  d.toLocaleString("en-PH", { timeZone: zone(), dateStyle: "medium", timeStyle: "short" });
 
 /** A receipt as a small standalone page, sized for 58–80 mm thermal printers. */
 function receiptHtml(r: Receipt) {

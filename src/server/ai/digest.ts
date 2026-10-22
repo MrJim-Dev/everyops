@@ -1,4 +1,5 @@
 import type { Blueprint, DataRecord, Field } from "@/lib/blueprint/types";
+import { dateKey } from "@/lib/time";
 
 /**
  * The assistant's view of the data: a digest per record type (count, sum/avg/min/max of number fields, option
@@ -54,8 +55,8 @@ export function kindOf(f: Field): Kind {
   }
 }
 
-export const MANILA = "Asia/Manila";
-const dayOf = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: MANILA });
+// Days are the workspace's (zone() is the request's workspace clock).
+const dayOf = (iso: string) => dateKey(iso);
 const num = (n: number) =>
   Number.isInteger(n) ? n.toLocaleString("en-US") : n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 const compact = (r: DataRecord) => JSON.stringify({ id: r.id, ...r.data });

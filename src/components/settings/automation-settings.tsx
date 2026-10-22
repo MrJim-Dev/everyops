@@ -19,6 +19,7 @@ import { describeActions, describeTrigger, isOn, isTimed } from "@/lib/engine/au
 import { formatDateTime } from "@/lib/format";
 import { canManage } from "@/lib/store/workspace-model";
 import { useWorkspaces } from "@/lib/store/workspaces";
+import { zone, zoneName } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { SettingsPage, SettingsSection } from "./settings-section";
 
@@ -141,7 +142,7 @@ export function AutomationSettings() {
         description="What happens by itself when records are saved, at set times, or as dates come up. Ask EveryOps to add or change one; turn one off here to pause it."
         footer={
           rules.length
-            ? `${rules.filter(isOn).length} of ${rules.length} on. Timed automations run every 15 minutes, Manila time.`
+            ? `${rules.filter(isOn).length} of ${rules.length} on. Timed automations run every 15 minutes, on ${zoneName(zone())} time.`
             : undefined
         }
       >

@@ -1,6 +1,7 @@
 import { isEmail, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, Field, FieldValue, RecordData } from "@/lib/blueprint/types";
+import { at, fromLocal } from "@/lib/time";
 
 /**
  * Values an agent or script sends (JSON) as a record's stored values: fields named by id or by name, choices by id or
@@ -13,12 +14,13 @@ const fieldFor = (entity: Entity, key: string) => {
   return entity.fields.find((f) => f.id === key) ?? entity.fields.find((f) => f.name.toLowerCase() === k);
 };
 
-const MANILA_ISO = (text: string): string | null => {
+/** A date or date-time as written on the workspace's clock (or with its own offset), as an ISO instant. */
+const LOCAL_ISO = (text: string): string | null => {
   const t = text.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return new Date(`${t}T00:00:00+08:00`).toISOString();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return at(t, "00:00");
   if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(t)) return null;
-  const withZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t.replace(" ", "T")}+08:00`;
-  const ms = Date.parse(withZone);
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(t)) return fromLocal(t);
+  const ms = Date.parse(t);
   return Number.isNaN(ms) ? null : new Date(ms).toISOString();
 };
 
@@ -84,7 +86,7 @@ function one(
       return m ? { value: m[1] } : { error: "needs a date as YYYY-MM-DD" };
     }
     case "datetime": {
-      const iso = MANILA_ISO(text);
+      const iso = LOCAL_ISO(text);
       return iso ? { value: iso } : { error: "needs a date and time as YYYY-MM-DDTHH:MM (Manila)" };
     }
     case "time_range": {
@@ -98,8 +100,8 @@ function one(
           ? { value: { start: s, end: e } }
           : { error: "needs start and end dates as YYYY-MM-DD" };
       }
-      const s = MANILA_ISO(v.start);
-      const e = MANILA_ISO(v.end);
+      const s = LOCAL_ISO(v.start);
+      const e = LOCAL_ISO(v.end);
       return s && e
         ? { value: { start: s, end: e } }
         : { error: "needs start and end as YYYY-MM-DDTHH:MM (Manila)" };

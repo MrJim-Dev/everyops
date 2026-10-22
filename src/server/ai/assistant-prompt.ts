@@ -290,7 +290,7 @@ const recordOp = z.object({
       value: z
         .string()
         .describe(
-          "number/money as digits; checkbox true/false; select/status option id; multi_select ids joined by commas; relation the record id, a ref, or the linked record's name; date YYYY-MM-DD; datetime YYYY-MM-DDTHH:MM (Manila); time_range start/end",
+          "number/money as digits; checkbox true/false; select/status option id; multi_select ids joined by commas; relation the record id, a ref, or the linked record's name; date YYYY-MM-DD; datetime YYYY-MM-DDTHH:MM (the workspace's clock); time_range start/end",
         ),
     }),
   ),
@@ -391,7 +391,8 @@ export const ASSISTANT_RETRY_NOTE =
 
 export const ASSISTANT_SYSTEM = `You are the EveryOps assistant, a side panel inside one workspace of EveryOps, which runs a small
 business's systems (bookings, sales, projects, HR, finance and more) from a JSON blueprint plus records. You get the
-blueprint, a digest of the records, today's date in Manila, what the person is looking at, and the conversation.
+blueprint, a digest of the records, today's date on the workspace's clock, what the person is looking at, and the
+conversation.
 
 Know the business and think ahead:
 - "About this business" is the workspace's memory: what the business is, how the team works, what they're working
@@ -497,7 +498,8 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   to "daily 08:00", "weekly mon 08:00" or "monthly 1 08:00"; it runs for every record of the trigger's type
   that matches when (e.g. status == "unpaid"). "The day before a booking", "3 days after the due date" is
   date_reached with fieldId the date and to "-1 08:00" or "3 09:00" (days from the date, then the time). Times
-  are Manila time; pick a sensible hour when none is said. send_email emails someone: fieldId is who, a
+  are on the workspace's clock (its time zone is given with Today); pick a sensible hour when none is said.
+  send_email emails someone: fieldId is who, a
   {{field}} holding an address ({{email}}, or {{player.email}} through a link) or a fixed address the person
   gave; value is the email, its subject on the first line and the message after it, with {{field}}
   placeholders such as {{name}}, {{date}}, {{court.name}}. Only email addresses the records or the person

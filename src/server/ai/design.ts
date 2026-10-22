@@ -35,7 +35,7 @@ import { parsePartialJson } from "@/lib/partial-json";
 import { withCustomSite } from "@/lib/public/custom-site";
 import { MAX_HTML_BYTES } from "@/lib/public/html-page";
 import { copyFromBlocks, type SiteCopy, standardBlocks } from "@/lib/public/site-template";
-import { hhmm, todayKey } from "@/lib/time";
+import { fromLocal, hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
 import { CHOICE_REPAIR_SYSTEM, choicePatch, choiceRepairAnswer } from "./choice-repair-prompt";
 import { reviewCoverage } from "./coverage";
@@ -987,8 +987,9 @@ export function ensurePublicForm(bp: Blueprint, brief: string): Blueprint {
 const toIso = (v: string) => {
   const t = v.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
-  const withZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t.length === 16 ? `${t}:00` : t}+08:00`;
-  const ms = Date.parse(withZone);
+  // Without an offset it's the workspace's wall time.
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(t)) return fromLocal(t);
+  const ms = Date.parse(t);
   return Number.isNaN(ms) ? null : new Date(ms).toISOString();
 };
 

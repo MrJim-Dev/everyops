@@ -22,7 +22,7 @@ const INSTRUCTIONS = `EveryOps holds a small business's records (bookings, sales
 types the owner designed, shown on pages of tabs (tables, boards, calendars, schedules, forms, layouts, documents) and
 dashboard cards. Start with describe_workspace to learn the record types, field ids, pages, tabs and cards; the other
 tools take those ids. describe_view shows how a tab is set up and read_view what it shows right now (pageId for a
-page's dashboard). Times are Asia/Manila and money is PHP. Writes are checked like the app checks them and run the
+page's dashboard). Times are on the workspace's clock (get_schema's timeZone, Asia/Manila unless set) and money is PHP. Writes are checked like the app checks them and run the
 workspace's automations, so prefer get_record before update_record and send its rev back. To change the design (fields,
 pages, layouts, automations, websites) or make several record changes at once, use ask_everyops: show the person the
 plan's steps, then apply_change; undo_change takes it back. Plans that must wait for an owner come back with

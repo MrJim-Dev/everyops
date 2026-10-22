@@ -40,6 +40,8 @@ export type ChangeOp =
       patch: Partial<Pick<Widget, "title" | "filter" | "metric" | "calc" | "target">>;
     }
   | { op: "rename_workspace"; name: string }
+  /** The time zone the workspace's clock runs on. Stored times stay the same instants; how they read changes. */
+  | { op: "set_time_zone"; timeZone: string }
   | { op: "add_entity"; entity: Entity }
   | { op: "add_system"; system: System }
   /** Adds an automation, or replaces the one with the same id (how an automation is fixed or changed). */
@@ -395,6 +397,9 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       }
       case "rename_workspace":
         next.workspaceName = op.name;
+        break;
+      case "set_time_zone":
+        next.timeZone = op.timeZone;
         break;
       case "add_entity":
         if (!next.entities.some((e) => e.id === op.entity.id)) next.entities.push(op.entity);

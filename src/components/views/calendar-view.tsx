@@ -162,11 +162,12 @@ export function CalendarView({ view }: { view: CalendarConfig }) {
       ? formatMonth(month)
       : mode === "week"
         ? `${formatDate(week)} – ${formatDate(addDays(week, 6))}`
-        : new Date(`${cursor}T12:00:00+08:00`).toLocaleDateString("en-PH", {
+        : // A calendar day: read at noon UTC in UTC, so it's the same day in every zone.
+          new Date(`${cursor}T12:00:00Z`).toLocaleDateString("en-PH", {
             weekday: "long",
             month: "short",
             day: "numeric",
-            timeZone: "Asia/Manila",
+            timeZone: "UTC",
           });
   const isCurrent =
     mode === "month"

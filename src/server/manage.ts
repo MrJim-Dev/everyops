@@ -11,6 +11,7 @@ import { db } from "./db";
 import { saveImage } from "./storage";
 import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
+import { enterZone } from "./zone";
 
 /**
  * Manage links: after a public booking, the visitor gets a link to that one booking (/b/TOKEN). It shows the
@@ -118,6 +119,7 @@ async function load(claim: ManageClaim) {
   const doc = await readCurrent(db, claim.workspace);
   if (!doc || doc.meta.setup) return null;
   const bp = doc.blueprint;
+  enterZone(bp);
   const view = bp.views.find((v) => v.id === claim.view);
   if (view?.type !== "form" || !view.public) return null;
   const entity = bp.entities.find((e) => e.id === view.entityId);

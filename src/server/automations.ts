@@ -20,6 +20,7 @@ import { db } from "./db";
 import { sendMail } from "./mail";
 import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, putRecords, readRecords } from "./workspace-data";
+import { enterZone } from "./zone";
 
 type Ex = Parameters<typeof readRecords>[0];
 
@@ -242,6 +243,8 @@ export async function runTimedAutomations(
       const done = await db.transaction().execute(async (trx) => {
         await sql`select 1 from workspace where id = ${id} for update`.execute(trx);
         const bp = await currentBlueprint(trx, id);
+        // Each workspace's schedules and dates run on its own clock.
+        enterZone(bp);
         if (!bp || !bp.rules.some((r) => isOn(r) && isTimed(r)))
           return { runs: 0, pending: [] as number[], hooks: 0 };
         const stored = await readRecords(trx, id);

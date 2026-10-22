@@ -2,8 +2,9 @@ import "server-only";
 import { type RawBuilder, sql } from "kysely";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, Field } from "@/lib/blueprint/types";
+import { zone } from "@/lib/time";
 import { db } from "../db";
-import { kindOf, MANILA } from "./digest";
+import { kindOf } from "./digest";
 import type { ToolSet } from "./gemini";
 
 /**
@@ -170,8 +171,8 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
     if (kind === "datetime" || kind === "range") {
       if (DATE_ONLY.test(v)) {
         // A whole Manila day: "on" the day is from its midnight to the next.
-        const start = sql`(${v}::date::timestamp at time zone ${MANILA})`;
-        const end = sql`((${v}::date + 1)::timestamp at time zone ${MANILA})`;
+        const start = sql`(${v}::date::timestamp at time zone ${zone()})`;
+        const end = sql`((${v}::date + 1)::timestamp at time zone ${zone()})`;
         if (raw.op === "eq") return sql`(${expr} >= ${start} and ${expr} < ${end})`;
         if (raw.op === "neq") return sql`not (${expr} >= ${start} and ${expr} < ${end})`;
         if (raw.op === "lte") return sql`${expr} < ${end}`;
@@ -289,7 +290,7 @@ export function recordTools(workspaceId: string, bp: Blueprint, onCall?: (text: 
           const local =
             kind === "date"
               ? sql`(${sqlValue(f)})::date::timestamp`
-              : sql`(${sqlValue(f)} at time zone ${MANILA})`;
+              : sql`(${sqlValue(f)} at time zone ${zone()})`;
           key = sql`to_char(date_trunc(${bucket}, ${local}), ${bucket === "month" ? "YYYY-MM" : "YYYY-MM-DD"})`;
         } else if (args.groupBy) {
           const f = fieldOf(e, args.groupBy);

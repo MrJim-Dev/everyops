@@ -207,7 +207,8 @@ function DaySlots({
       ) : (
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {Array.from({ length: 14 }, (_, i) => addDays(from, i)).map((d) => {
-            const date = new Date(`${d}T12:00:00+08:00`);
+            // A calendar day: noon UTC read in UTC is that day everywhere.
+            const date = new Date(`${d}T12:00:00Z`);
             return (
               <button
                 key={d}
@@ -223,7 +224,7 @@ function DaySlots({
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                <span>{date.toLocaleDateString("en-PH", { weekday: "short", timeZone: "Asia/Manila" })}</span>
+                <span>{date.toLocaleDateString("en-PH", { weekday: "short", timeZone: "UTC" })}</span>
                 <span className="font-mono text-[14px] tabular text-foreground">{Number(d.slice(8))}</span>
               </button>
             );
@@ -419,7 +420,7 @@ function MonthGrid({
   const today = todayKey();
   const [month, setMonth] = useState(() => (selected?.start ?? today).slice(0, 7));
   const first = `${month}-01`;
-  const lead = new Date(`${first}T12:00:00+08:00`).getUTCDay();
+  const lead = new Date(`${first}T12:00:00Z`).getUTCDay();
   const length = daysBetween(first, `${addDays(first, 31).slice(0, 7)}-01`);
   const shift = (n: number) => {
     const d = new Date(`${first}T00:00:00Z`);

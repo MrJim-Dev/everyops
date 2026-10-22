@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     sheet.addRow(
       row.map((cell, i) => {
         const format = columns[i]?.format;
-        // Dates are written as Manila wall time; Excel has no time zones, so it shows them as written.
+        // Dates are written as the workspace's wall time; Excel has no time zones, so it shows them as written.
         if ((format === "date" || format === "datetime") && typeof cell === "string") {
           const d = new Date(format === "date" ? `${cell}T00:00:00Z` : `${cell}:00Z`);
           return Number.isNaN(d.getTime()) ? cell : d;

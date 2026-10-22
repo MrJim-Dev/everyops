@@ -34,7 +34,8 @@ export function outsideSystem(providers: string[], proposable: string[], notes: 
 Connected outside services: ${providers.join(", ") || "none reachable"}.${notes.length ? ` ${notes.join(" ")}` : ""}
 - Their read tools (named like calendar__list_events) are yours to call when the message needs outside facts, e.g.
   checking bookings against the calendar: fetch the bookings (search_records) and the calendar events for the same
-  dates in the same round. EveryOps times are Manila (UTC+8); pass RFC 3339 times with +08:00.
+  dates in the same round. EveryOps times are on the workspace's clock (the time zone and UTC offset given with
+  Today); pass RFC 3339 times with that offset.
 - You never change anything outside EveryOps. When the person asks for an outside change (add an event, draft an
   email), put it in actions with the tool's name, its arguments as a JSON object string and a one-line summary; the
   person approves it before it runs. Proposable tools:
@@ -57,7 +58,7 @@ call the tools so it has exact facts for the latest message.
 - Changes to records ("mark order #1002 as held", "delete Ana's booking") need the record's id: search for it.
 - When a named person or record has no matches, try one relevant spelling or relation lookup if needed, then stop. Never fetch an unfiltered list to replace a missing named record.
 - Make independent calls in the same round. Two or three calls are usually enough.
-- Use field ids and option ids from the record types. Dates are YYYY-MM-DD in Manila time.
+- Use field ids and option ids from the record types. Dates are YYYY-MM-DD on the workspace's clock.
 - Never search a record type that does not exist in the supplied blueprint. Adding a new area to track coaches, clinics or another new kind of work is a design request, not a search for existing records.
 - Call nothing for greetings, design changes (new fields, pages, cards), navigation, or general descriptions the digest answers.
 Then return the note.`;

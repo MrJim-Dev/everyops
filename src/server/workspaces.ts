@@ -37,6 +37,7 @@ import {
   writePages,
 } from "./workspace-data";
 import { applyEditsIn } from "./workspace-memory";
+import { enterZone } from "./zone";
 
 const ID = /^[a-z0-9][a-z0-9-]{1,79}$/;
 /** Largest save accepted. Saves are patches now; only creating a big workspace comes close. */
@@ -386,6 +387,7 @@ export async function patchWorkspace(
         let puts = patch.records.put;
         const fresh = puts.filter((p) => p.rev === null).map((p) => p.record);
         const bp = fresh.length ? await currentBlueprint(trx, slug) : undefined;
+        enterZone(bp);
         if (bp) {
           const types = [...new Set(fresh.map((r) => r.entityId))];
           const { rows } = await sql<{ id: string; entity_id: string; data: DataRecord["data"] }>`
@@ -409,6 +411,7 @@ export async function patchWorkspace(
         }
         // Automations that fire on a save are logged (and their emails queued) with the save itself.
         const rulesBp = await currentBlueprint(trx, slug);
+        enterZone(rulesBp);
         const watching = fireOnSave(rulesBp);
         // Webhooks need each changed record's previous values too (changed fields, status changes).
         const hooked = await hasEndpoints(trx, slug);

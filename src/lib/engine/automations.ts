@@ -18,7 +18,7 @@ import {
   formatRange,
   isTimeRange,
 } from "@/lib/format";
-import { addDays, dateKey, manilaParts, minutesOf, todayKey } from "@/lib/time";
+import { addDays, dateKey, minutesOf, todayKey, zonedParts } from "@/lib/time";
 import { recordContext } from "./context";
 import { run, truthy } from "./expr";
 import { newId } from "./ids";
@@ -375,14 +375,14 @@ function dayOf(value: FieldValue | undefined): string | undefined {
 }
 
 const reached = (now: Date, hhmm: string) => {
-  const p = manilaParts(now);
+  const p = zonedParts(now);
   return p.hour * 60 + p.minute >= minutesOf(/^\d{1,2}:\d{2}$/.test(hhmm) ? hhmm : "08:00");
 };
 
 /** Whether a schedule runs today (Manila) and its time has come. */
 export function scheduleDue(schedule: Rule["trigger"]["schedule"], now: Date): boolean {
   if (!schedule) return false;
-  const p = manilaParts(now);
+  const p = zonedParts(now);
   if (schedule.every === "week" && (schedule.weekday ?? 1) !== p.weekday) return false;
   if (schedule.every === "month" && (schedule.monthDay ?? 1) !== p.day) return false;
   return reached(now, schedule.at);
