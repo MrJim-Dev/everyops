@@ -14,8 +14,9 @@ const SECRET = "test-secret-test-secret-test-secret-1234";
 const NOW = Date.UTC(2026, 9, 23);
 
 describe("site admins", () => {
-  it("default to james@everyops.app and read SITE_ADMIN_EMAILS loosely", () => {
-    expect(siteAdmins({})).toEqual(["james@everyops.app"]);
+  it("default to James and Jared and read SITE_ADMIN_EMAILS loosely", () => {
+    expect(siteAdmins({})).toEqual(["james@everyops.app", "jared@everyops.app"]);
+    expect(isSiteAdmin("jared@everyops.app", {})).toBe(true);
     expect(siteAdmins({ SITE_ADMIN_EMAILS: " A@x.com, b@x.com;a@x.com " })).toEqual(["a@x.com", "b@x.com"]);
     expect(isSiteAdmin("James@EveryOps.app", {})).toBe(true);
     expect(isSiteAdmin("someone@x.com", {})).toBe(false);
