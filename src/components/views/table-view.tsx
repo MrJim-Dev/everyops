@@ -3,6 +3,7 @@
 import {
   ArrowsOutSimpleIcon,
   CaretDownIcon,
+  CaretLeftIcon,
   CaretRightIcon,
   CaretUpIcon,
   DownloadSimpleIcon,
@@ -65,6 +66,11 @@ import { ToolbarSummary, ViewToolbar } from "./view-toolbar";
 
 const GROUPABLE = new Set(["choice", "status", "relation", "person", "checkbox"]);
 const NO_GROUP = "__none";
+/**
+ * Rows on screen at once. A busy workspace's history runs to tens of thousands of rows; drawing them all crashed the
+ * tab at 20,000. Search, sorting, grouping, totals and select-all still cover every matching row.
+ */
+export const PAGE_SIZE = 100;
 
 type Group = { key: string; label: string; rows: DataRecord[] };
 
@@ -146,6 +152,16 @@ export function TableView({ view }: { view: TableViewConfig }) {
   }, [groupField, rows, blueprint, records]);
 
   const visibleIds = rows.map((r) => r.id);
+  // Paging: the page goes back to the first when the search, sort or grouping changes.
+  const pageKey = JSON.stringify([view.id, query, sort, groupBy]);
+  const [paging, setPaging] = useState({ key: pageKey, page: 0 });
+  const ordered = groups ? groups.flatMap((g) => (collapsed.has(g.key) ? [] : g.rows)) : rows;
+  const pages = Math.max(1, Math.ceil(ordered.length / PAGE_SIZE));
+  const page = paging.key === pageKey ? Math.min(paging.page, pages - 1) : 0;
+  const goTo = (n: number) => setPaging({ key: pageKey, page: Math.max(0, Math.min(pages - 1, n)) });
+  const onPage = new Set(ordered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((r) => r.id));
+  const paged = ordered.length > PAGE_SIZE;
+  const shownRows = (list: DataRecord[]) => (paged ? list.filter((r) => onPage.has(r.id)) : list);
   const picked = visibleIds.filter((id) => selected.has(id));
   const allPicked = picked.length > 0 && picked.length === visibleIds.length;
   const toggle = (id: string) =>
@@ -377,7 +393,7 @@ export function TableView({ view }: { view: TableViewConfig }) {
               </DropdownMenuContent>
             </DropdownMenu>
             <ToolbarSummary>
-              {rows.length} {rows.length === 1 ? entity.name.toLowerCase() : plural}
+              {rows.length.toLocaleString("en-PH")} {rows.length === 1 ? entity.name.toLowerCase() : plural}
             </ToolbarSummary>
           </>
         )}
@@ -478,6 +494,8 @@ export function TableView({ view }: { view: TableViewConfig }) {
               {groups
                 ? groups.map((group) => {
                     const open = !collapsed.has(group.key);
+                    // On a later page, only the groups with rows there (and closed ones, to open them) show.
+                    if (paged && open && !group.rows.some((r) => onPage.has(r.id))) return null;
                     return (
                       <Fragment key={group.key || "__empty"}>
                         <TableRow className="h-9 bg-muted/30 hover:bg-muted/50">
@@ -523,11 +541,11 @@ export function TableView({ view }: { view: TableViewConfig }) {
                             </TableCell>
                           ))}
                         </TableRow>
-                        {open ? group.rows.map(renderRow) : null}
+                        {open ? shownRows(group.rows).map(renderRow) : null}
                       </Fragment>
                     );
                   })
-                : rows.map(renderRow)}
+                : shownRows(rows).map(renderRow)}
             </TableBody>
             {view.totals && fields.some(summable) ? (
               <TableFooter className="sticky bottom-0 bg-background">
@@ -550,6 +568,26 @@ export function TableView({ view }: { view: TableViewConfig }) {
               </TableFooter>
             ) : null}
           </Table>
+          {paged ? (
+            <nav
+              aria-label="Pages"
+              className="flex items-center justify-end gap-3 border-t px-5 py-2.5 text-[12.5px] text-muted-foreground"
+            >
+              <span className="tabular">
+                {(page * PAGE_SIZE + 1).toLocaleString("en-PH")}–
+                {Math.min((page + 1) * PAGE_SIZE, ordered.length).toLocaleString("en-PH")} of{" "}
+                {ordered.length.toLocaleString("en-PH")}
+              </span>
+              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => goTo(page - 1)}>
+                <CaretLeftIcon data-icon="inline-start" />
+                Previous
+              </Button>
+              <Button variant="outline" size="sm" disabled={page >= pages - 1} onClick={() => goTo(page + 1)}>
+                Next
+                <CaretRightIcon data-icon="inline-end" />
+              </Button>
+            </nav>
+          ) : null}
         </div>
       )}
     </div>
