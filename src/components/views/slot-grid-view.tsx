@@ -10,7 +10,7 @@ import { getEntity, getField, optionOf, recordsOf, recordTitle } from "@/lib/blu
 import type { SlotGridView as SlotGridConfig, TimeRange } from "@/lib/blueprint/types";
 import { formatDate, formatRange, formatTime, isTimeRange } from "@/lib/format";
 import { useFreshStore } from "@/lib/motion/fresh";
-import { addDays, at, dateKey, hhmm, manilaParts, minutesOf, todayKey } from "@/lib/time";
+import { addDays, at, dateKey, hhmm, minutesOf, todayKey, zonedParts } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { DateStepper } from "./date-stepper";
 import { ToolbarSummary, ViewToolbar } from "./view-toolbar";
@@ -71,12 +71,12 @@ export function SlotGridView({ view }: { view: SlotGridConfig }) {
   const unpaid = bookings.filter((b) => optionOf(status, b.data[status.id])?.tone === "warning").length;
 
   const now = new Date();
-  const nowParts = manilaParts(now);
+  const nowParts = zonedParts(now);
   const nowMinutes = nowParts.hour * 60 + nowParts.minute;
   const isToday = day === today;
   const isPast = (minute: number) => day < today || (isToday && minute + step <= nowMinutes);
   const offset = (iso: string) => {
-    const p = manilaParts(iso);
+    const p = zonedParts(iso);
     return ((p.hour * 60 + p.minute - opens) / step) * ROW;
   };
 

@@ -1,5 +1,6 @@
 import type { Blueprint } from "@/lib/blueprint/types";
 import { splitToolName } from "@/lib/connections";
+import { fromLocal, zone } from "@/lib/time";
 import type { LookupCall } from "./lookup-result";
 
 /**
@@ -16,7 +17,8 @@ function at(value: unknown): number {
       ? ((value as { dateTime?: string; date?: string }).dateTime ?? (value as { date?: string }).date)
       : value;
   if (typeof v !== "string") return Number.NaN;
-  return Date.parse(/T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(v) ? `${v}+08:00` : v);
+  // A time without an offset is on the workspace's clock.
+  return Date.parse(/T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(v) ? (fromLocal(v) ?? v) : v);
 }
 
 function eventSpans(value: unknown, out: Span[] = [], depth = 0): Span[] {
@@ -53,7 +55,7 @@ function recordSpans(bp: Blueprint, call: LookupCall): Span[] {
 
 const manila = (ms: number, withDay: boolean) =>
   new Date(ms).toLocaleString("en-PH", {
-    timeZone: "Asia/Manila",
+    timeZone: zone(),
     ...(withDay ? { weekday: "short", month: "short", day: "numeric" } : {}),
     hour: "numeric",
     minute: "2-digit",

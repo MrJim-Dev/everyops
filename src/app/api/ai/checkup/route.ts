@@ -7,6 +7,7 @@ import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { hideFinding, readCheckup, readMemory, saveCheckup } from "@/server/workspace-memory";
 import { loadWorkspace, roleIn } from "@/server/workspaces";
+import { enterZone } from "@/server/zone";
 
 /**
  * "Things to fix" for a workspace. The last check is reused until the design or the memory changes (or refresh=1);
@@ -23,6 +24,7 @@ export async function GET(request: Request) {
     return Response.json({ ok: false, message: "Viewers can't fix things." }, { status: 403 });
   const memory = await readMemory(workspaceId);
   const blueprint = blueprintOf(found.workspace);
+  enterZone(blueprint);
   const key = checkupKey(blueprint.version, memory.updatedAt);
   const cached = await readCheckup(workspaceId);
   if (cached && cached.key === key && params.get("refresh") !== "1")

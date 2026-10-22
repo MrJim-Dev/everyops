@@ -4,6 +4,8 @@ import { allowedIn } from "@/lib/api-keys";
 import { findEntity } from "@/lib/blueprint/lookup";
 import type { Blueprint, Entity } from "@/lib/blueprint/types";
 import { coerceValues } from "@/lib/engine/coerce";
+import { zone } from "@/lib/time";
+import { enterZone } from "@/server/zone";
 import { logActivity } from "../activity";
 import { recordTools } from "../ai/record-tools";
 import { type ApiCaller, actorOf, workspaceAccess } from "../api-auth";
@@ -142,7 +144,7 @@ const CORE_TOOLS: Tool[] = [
       return {
         id: ctx.workspaceId,
         name: ctx.bp.workspaceName,
-        timeZone: "Asia/Manila",
+        timeZone: zone(),
         currency: "PHP",
         recordTypes: ctx.bp.entities.map((e) => ({
           id: e.id,
@@ -296,7 +298,7 @@ const CORE_TOOLS: Tool[] = [
     name: "create_record",
     title: "Create a record",
     description:
-      "Adds a record, checked like the app checks it (required fields, valid choices, free booking slots); save automations run. values maps field ids or names to values: choices by label, links by the linked record's name or id, dates YYYY-MM-DD, times in Manila, time ranges as {start, end}.",
+      "Adds a record, checked like the app checks it (required fields, valid choices, free booking slots); save automations run. values maps field ids or names to values: choices by label, links by the linked record's name or id, dates YYYY-MM-DD, times on the workspace's clock (the schema's timeZone), time ranges as {start, end}.",
     permission: "records:write",
     readOnly: false,
     properties: {
@@ -466,6 +468,7 @@ export async function runTool(
   const allowed = await workspaceAccess(caller, workspaceId, tool.permission);
   if (allowed.error) throw await accessError(allowed.error);
   const bp = await currentBlueprint(db, workspaceId);
+  enterZone(bp);
   if (!bp) throw new ToolError("Workspace not found.", 404);
   if (!(tool.readOnly && caller.client === "mcp"))
     return tool.run({ caller, scope, workspaceId, bp, role: allowed.role }, args);

@@ -518,6 +518,8 @@ export type Blueprint = {
   views: View[];
   widgets: Widget[];
   rules: Rule[];
+  /** The IANA time zone the workspace's dates, schedules and "today" are read in. Older blueprints mean Asia/Manila. */
+  timeZone?: string;
   /** Printable documents (invoices, quotes, agreements). Older blueprints have none. */
   printTemplates?: PrintTemplate[];
 };

@@ -65,7 +65,7 @@ import {
 } from "@/lib/public/resolve";
 import { copyFromBlocks, mainForm, standardBlocks } from "@/lib/public/site-template";
 import { type Invite, type Member, randomToken } from "@/lib/store/workspace-model";
-import { todayKey } from "@/lib/time";
+import { addDays, todayKey, utcOffset, zone } from "@/lib/time";
 import { personActor } from "../activity";
 import { type OutsideTools, outsideTools, proposeActions } from "../connections";
 import {
@@ -1121,9 +1121,9 @@ export async function assistantTurn(input: {
         }`
       : "";
   const today = todayKey();
-  const weekday = new Date(`${today}T12:00:00+08:00`).toLocaleDateString("en-PH", {
+  const weekday = new Date(`${today}T12:00:00Z`).toLocaleDateString("en-PH", {
     weekday: "long",
-    timeZone: "Asia/Manila",
+    timeZone: "UTC",
   });
   // A digest of the records instead of every record, plus exact lookups (SQL) for what this message needs.
   const digest = dataDigest(bp, records, { ids: screen.focusIds, entityId: screen.entityId });
@@ -1139,7 +1139,7 @@ export async function assistantTurn(input: {
     blueprint: bp,
     digest,
     screen: screen.text,
-    today: `${weekday}, ${today}`,
+    today: `${weekday}, ${today} (time zone ${zone()}, UTC${utcOffset()})`,
     messages: input.messages,
     onStatus: status,
     signal: input.signal,
@@ -1225,7 +1225,7 @@ ${written}`
     : ""
 }
 
-Today in Manila: ${weekday}, ${today}
+Today (time zone ${zone()}, UTC${utcOffset()}; every date and time in this workspace is on this clock): ${weekday}, ${today}
 Coming days: ${comingDays(today)}
 
 ${permissions}${team}${endpointsText}
@@ -2005,15 +2005,15 @@ export function withStatusOptions(field: Field, entityName: string): Field {
 
 /** The next two weeks as "Mon, Oct 19 (2026-10-19)", so dates like "next Monday" are read off, not worked out. */
 export function comingDays(today: string, count = 14): string {
-  const start = new Date(`${today}T12:00:00+08:00`).getTime();
   return Array.from({ length: count }, (_, i) => {
-    const day = new Date(start + (i + 1) * 86_400_000);
-    const label = day.toLocaleDateString("en-US", {
+    // Calendar days: noon UTC read in UTC is that day in every zone.
+    const key = addDays(today, i + 1);
+    const label = new Date(`${key}T12:00:00Z`).toLocaleDateString("en-US", {
       weekday: "short",
       month: "short",
       day: "numeric",
-      timeZone: "Asia/Manila",
+      timeZone: "UTC",
     });
-    return `${label} (${day.toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })})`;
+    return `${label} (${key})`;
   }).join("; ");
 }

@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { normalizeUrl } from "@/lib/blueprint/contact";
 import type { Field, FieldValue, TimeRange } from "@/lib/blueprint/types";
 import { isTimeRange } from "@/lib/format";
-import { at, dateKey, manilaParts } from "@/lib/time";
+import { at, dateKey, fromLocal, zonedParts } from "@/lib/time";
 import { DurationInput } from "./duration-input";
 import { FileInput } from "./file-input";
 import { ImageInput } from "./image-input";
@@ -24,7 +24,7 @@ import { RelationInput } from "./relation-input";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const timeOf = (iso: string) => {
-  const p = manilaParts(iso);
+  const p = zonedParts(iso);
   return `${pad(p.hour)}:${pad(p.minute)}`;
 };
 const localDateTime = (iso: string) => `${dateKey(iso)}T${timeOf(iso)}`;
@@ -110,9 +110,7 @@ export function FieldInput({ id, field, value, onChange, invalid }: Props) {
           {...common}
           type="datetime-local"
           value={typeof value === "string" ? localDateTime(value) : ""}
-          onChange={(e) =>
-            onChange(e.target.value ? new Date(`${e.target.value}:00+08:00`).toISOString() : null)
-          }
+          onChange={(e) => onChange(e.target.value ? fromLocal(e.target.value) : null)}
         />
       );
     case "time_range":

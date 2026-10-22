@@ -1,4 +1,5 @@
 import { type DataEvidence, EVIDENCE_LABELS } from "@/lib/assistant/evidence";
+import { zone, zoneName } from "@/lib/time";
 
 export function DataEvidenceNote({ evidence }: { evidence: DataEvidence }) {
   return (
@@ -7,13 +8,13 @@ export function DataEvidenceNote({ evidence }: { evidence: DataEvidence }) {
         {EVIDENCE_LABELS[evidence.status]}
         <span className="ml-2 text-[11px]">
           {new Date(evidence.checkedAt).toLocaleString("en-PH", {
-            timeZone: "Asia/Manila",
+            timeZone: zone(),
             month: "short",
             day: "numeric",
             hour: "numeric",
             minute: "2-digit",
           })}{" "}
-          · Manila
+          · {zoneName(zone())}
         </span>
       </summary>
       <div className="mt-2 space-y-2 border-t pt-2">

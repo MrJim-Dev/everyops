@@ -185,6 +185,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
 (function () {
   var FORM = ${JSON.stringify(o.formId)};
   var HOME = ${JSON.stringify(o.homeHref)};
+  // The workspace's clock, from the form once it loads (pages written before workspaces had a zone say Manila).
   var TZ = "Asia/Manila";
   var panel = document.getElementById("panel");
   var summary = document.getElementById("summary");
@@ -205,12 +206,16 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     (kids || []).forEach(function (c) { if (c) n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
     return n;
   }
+  // Today is read on the workspace's clock; calendar days are plain dates (noon UTC), so arithmetic and labels on
+  // them never slip a day in far-off zones.
   function dayKey(d) { return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d); }
-  function fromKey(k) { return new Date(k + "T12:00:00+08:00"); }
-  function addDays(k, n) { return dayKey(new Date(fromKey(k).getTime() + n * 86400000)); }
+  function plainKey(d) { return d.toISOString().slice(0, 10); }
+  function fromKey(k) { return new Date(k + "T12:00:00Z"); }
+  function addDays(k, n) { return plainKey(new Date(fromKey(k).getTime() + n * 86400000)); }
   function fmt(d, opts) { return new Intl.DateTimeFormat("en-PH", Object.assign({ timeZone: TZ }, opts)).format(d); }
+  function fmtDay(d, opts) { return new Intl.DateTimeFormat("en-PH", Object.assign({ timeZone: "UTC" }, opts)).format(d); }
   function timeOf(iso) { return fmt(new Date(iso), { hour: "numeric", minute: "2-digit" }); }
-  function dayLabel(k) { return fmt(fromKey(k), { weekday: "short", month: "short", day: "numeric" }); }
+  function dayLabel(k) { return fmtDay(fromKey(k), { weekday: "short", month: "short", day: "numeric" }); }
   function booking() { return form && form.booking; }
   function payField() {
     if (!form || !form.payments) return null;
@@ -348,7 +353,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     for (var i = 0; i < 21; i++) (function (k) {
       var d = fromKey(k);
       strip.appendChild(el("button", { type: "button", class: "day", "aria-pressed": String(k === state.day), "aria-label": dayLabel(k), onclick: function () { state.day = k; loadSlots(); } },
-        [el("small", { text: fmt(d, { weekday: "short" }) }), el("b", { text: fmt(d, { day: "numeric" }) }), el("small", { text: fmt(d, { month: "short" }) })]));
+        [el("small", { text: fmtDay(d, { weekday: "short" }) }), el("b", { text: fmtDay(d, { day: "numeric" }) }), el("small", { text: fmtDay(d, { month: "short" }) })]));
     })(addDays(today, i));
     box.appendChild(strip);
     if (!state.day) return;
@@ -380,10 +385,10 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     state.days.forEach(function (d) { free[d.day] = d.free; });
     var first = fromKey(state.days[0].day.slice(0, 7) + "-15");
     var shown = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + state.month, 15, 4));
-    var monthKey = dayKey(shown).slice(0, 7);
+    var monthKey = plainKey(shown).slice(0, 7);
     box.appendChild(el("div", { class: "monthbar" }, [
       el("button", { type: "button", "aria-label": "Previous month", disabled: state.month === 0, onclick: function () { state.month--; draw(); } }, ["\u2039"]),
-      el("span", { text: fmt(shown, { month: "long", year: "numeric" }) }),
+      el("span", { text: fmtDay(shown, { month: "long", year: "numeric" }) }),
       el("button", { type: "button", "aria-label": "Next month", disabled: state.month >= 2, onclick: function () { state.month++; draw(); } }, ["\u203a"])
     ]));
     var grid = el("div", { class: "month" });
@@ -392,7 +397,8 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
     for (var i = 0; i < pad; i++) grid.appendChild(el("span"));
     for (var d = 1; d <= 31; d++) {
       var k = monthKey + "-" + (d < 10 ? "0" + d : d);
-      if (dayKey(fromKey(k)).slice(0, 7) !== monthKey) break;
+      // Past the month's last day (Feb 30 becomes Mar 2) the month ends.
+      if (plainKey(fromKey(k)).slice(0, 7) !== monthKey) break;
       (function (k) {
         var s = state.stay, inRange = s.start && s.end && k > s.start && k < s.end, edge = k === s.start || k === s.end;
         var usable = k in free && (free[k] || (s.start && !s.end && k > s.start));
@@ -590,6 +596,7 @@ ${p.font ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel
   EveryOps.form(FORM).then(function (r) {
     if (!r || !r.ok) { panel.innerHTML = '<p class="muted">Booking is closed right now. Please check back soon.</p>'; return; }
     form = r.form;
+    if (form && form.timeZone) TZ = form.timeZone;
     var b = booking();
     if (b && b.resources.length === 1) state.resource = b.resources[0].id;
     buildSteps();

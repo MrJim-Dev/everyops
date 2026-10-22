@@ -7,7 +7,7 @@
  */
 import type { FieldValue, TimeRange } from "@/lib/blueprint/types";
 import { isTimeRange } from "@/lib/format";
-import { addDays, dateKey, daysBetween, hoursBetween, manilaParts, todayKey } from "@/lib/time";
+import { addDays, dateKey, daysBetween, hoursBetween, todayKey, zonedParts } from "@/lib/time";
 
 export type Value = FieldValue;
 
@@ -221,11 +221,11 @@ type Fn = (args: (Value | undefined)[], ctx: EvalContext) => Value;
 export const FUNCTIONS: Record<string, Fn> = {
   hour: ([v]) => {
     const s = startOf(v);
-    return s ? manilaParts(s).hour : null;
+    return s ? zonedParts(s).hour : null;
   },
   weekday: ([v]) => {
     const s = startOf(v);
-    return s ? manilaParts(s).weekday : null;
+    return s ? zonedParts(s).weekday : null;
   },
   duration_hours: ([v]) =>
     isTimeRange(v ?? null) ? hoursBetween((v as TimeRange).start, (v as TimeRange).end) : 0,
@@ -250,7 +250,7 @@ export const FUNCTIONS: Record<string, Fn> = {
   is_this_week: ([v], ctx) => {
     const s = startOf(v);
     if (!s) return false;
-    const monday = addDays(todayKey(ctx.now), -((manilaParts(ctx.now).weekday + 6) % 7));
+    const monday = addDays(todayKey(ctx.now), -((zonedParts(ctx.now).weekday + 6) % 7));
     const day = dateKey(s);
     return day >= monday && day <= addDays(monday, 6);
   },

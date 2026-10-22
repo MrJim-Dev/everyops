@@ -30,7 +30,7 @@ import { addDays, dateKey, todayKey } from "@/lib/time";
 export type ReadOptions = {
   limit?: number;
   offset?: number;
-  /** Calendars and schedules: first and last day (YYYY-MM-DD, Manila). */
+  /** Calendars and schedules: first and last day (YYYY-MM-DD, on the workspace's clock). */
   from?: string;
   to?: string;
   now?: Date;
@@ -147,7 +147,7 @@ function whenOf(value: FieldValue | undefined) {
   return DAY.test(value) ? { day: value, start: value } : { day: dateKey(new Date(value)), start: value };
 }
 
-/** Slots with their Manila time ("6:00 PM – 7:00 PM") next to the instants. */
+/** Slots with their time on the workspace's clock ("6:00 PM – 7:00 PM") next to the instants. */
 const labelled = <T extends { start: string; end: string }>(slots: T[] | null) =>
   (slots ?? []).map((s) => ({ ...s, time: formatRange(s) }));
 

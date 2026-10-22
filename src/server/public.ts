@@ -39,6 +39,7 @@ import { managePath } from "./manage";
 import { saveImage } from "./storage";
 import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
+import { enterZone } from "./zone";
 
 const ID = /^[a-z0-9][a-z0-9-]{1,79}$/;
 
@@ -56,6 +57,7 @@ export async function publicPage(
   viewId?: string,
 ): Promise<{ site: PublicSite; page: PublicPageData } | { redirect: string } | null> {
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc || doc.meta.setup) return null;
   const bp = doc.blueprint;
   const custom = viewId
@@ -86,6 +88,7 @@ export async function publicPage(
  */
 export async function sharedData(slug: string, viewId: string) {
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc || doc.meta.setup) return null;
   const data = publicTableData(doc.blueprint, doc.records, viewId);
   return data.ok ? data : null;
@@ -99,6 +102,7 @@ export async function publicSlots(
 ): Promise<Slot[] | null> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc) return null;
   const bp = doc.blueprint;
   const view = bp.views.find((v) => v.id === viewId);
@@ -116,6 +120,7 @@ export async function publicDays(
 ): Promise<DayFree[] | null> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return null;
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc) return null;
   const view = doc.blueprint.views.find((v) => v.id === viewId);
   if (view?.type !== "form" || !view.public) return null;
@@ -345,6 +350,7 @@ export async function quotePublicForm(
   now = new Date(),
 ): Promise<QuoteResult> {
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc || doc.meta.setup) return { ok: false, message: "This page doesn't exist." };
   const bp = doc.blueprint;
   const view = bp.views.find((v) => v.id === viewId);
@@ -406,6 +412,7 @@ export async function submitPublicForm(
     // The same lock browser saves take, so revs stay put while the booking is checked and written.
     const { rows } = await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
     const bp = rows.length ? await currentBlueprint(trx, slug) : undefined;
+    enterZone(bp);
     if (!bp) return { ok: false, status: 404, message: "This page doesn't exist." } as const;
     const stored = await readRecords(trx, slug);
     const doc = { records: stored.map((s) => s.record) };
@@ -526,6 +533,7 @@ export async function uploadPublicImage(
   bytes: Uint8Array,
 ): Promise<UploadResult> {
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc || doc.meta.setup) return { ok: false, status: 404, message: "This page doesn't exist." };
   const view = doc.blueprint.views.find((v) => v.id === viewId);
   if (view?.type !== "form" || !view.public) return { ok: false, status: 404, message: "No such form." };

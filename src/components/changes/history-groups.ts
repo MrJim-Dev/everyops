@@ -1,30 +1,19 @@
+import { formatDate } from "@/lib/format";
 import type { ChangeEntry } from "@/lib/store/workspace-model";
-import { TIME_ZONE } from "@/lib/time";
+import { dateKey } from "@/lib/time";
 
 export type HistoryItem = { kind: "entry"; entry: ChangeEntry } | { kind: "run"; entries: ChangeEntry[] };
 export type HistoryDay = { key: string; label: string; items: HistoryItem[] };
 
-const dayKey = new Intl.DateTimeFormat("en-CA", { timeZone: TIME_ZONE });
-const dayLabel = new Intl.DateTimeFormat("en-PH", {
-  timeZone: TIME_ZONE,
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-});
-const dayLabelYear = new Intl.DateTimeFormat("en-PH", {
-  timeZone: TIME_ZONE,
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
+// Days are read on the workspace's clock.
+const dayKey = { format: (d: Date) => dateKey(d) };
 
-/** "Today", "Yesterday" or "Tue, Oct 13" (with the year when it isn't this one), in Manila time. */
+/** "Today", "Yesterday" or "Tue, Oct 13" (with the year when it isn't this one), on the workspace's clock. */
 export function historyDayLabel(iso: string, now = new Date()): string {
   const key = dayKey.format(new Date(iso));
   if (key === dayKey.format(now)) return "Today";
   if (key === dayKey.format(new Date(now.getTime() - 86_400_000))) return "Yesterday";
-  return (key.slice(0, 4) === dayKey.format(now).slice(0, 4) ? dayLabel : dayLabelYear).format(new Date(iso));
+  return formatDate(key, { withYear: key.slice(0, 4) !== dayKey.format(now).slice(0, 4) });
 }
 
 /**

@@ -10,6 +10,7 @@ import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, deleteRecords, putRecords, readRecords, writePages } from "./workspace-data";
+import { enterZone } from "./zone";
 
 /**
  * Record writes from outside the app (MCP tools, the REST API): one record at a time, through the same engine as
@@ -41,6 +42,7 @@ export async function writeRecord(
     const done = await (async (): Promise<WriteResult> => {
       await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
       const bp = await currentBlueprint(trx, slug);
+      enterZone(bp);
       if (!bp) return { ok: false, status: 404, message: "Workspace not found." };
       const stored = await readRecords(trx, slug);
       const before = new Map(stored.map((s) => [s.record.id, s]));

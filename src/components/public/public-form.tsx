@@ -15,7 +15,7 @@ import type { FieldValue } from "@/lib/blueprint/types";
 import { formatDate, formatDateTime, formatRange, isTimeRange } from "@/lib/format";
 import { isHeic, MAX_SOURCE_BYTES, prepareImage } from "@/lib/prepare-image";
 import type { PublicField, PublicForm, ResolvedBlock } from "@/lib/public/resolve";
-import { at, dateKey } from "@/lib/time";
+import { at, dateKey, fromLocal } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 type Done = { reference: string; title: string; summary: { name: string; text: string }[]; manage?: string };
@@ -499,9 +499,7 @@ function PublicInput({
         <Input
           {...common}
           type="datetime-local"
-          onChange={(e) =>
-            onChange(e.target.value ? new Date(`${e.target.value}:00+08:00`).toISOString() : null)
-          }
+          onChange={(e) => onChange(e.target.value ? fromLocal(e.target.value) : null)}
         />
       );
     case "checkbox":
