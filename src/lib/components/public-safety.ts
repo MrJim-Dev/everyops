@@ -41,7 +41,14 @@ export function aboutPeople(entity: Entity): boolean {
  * named like them), a person's name, or a link to people. File fields are the team's documents and count too.
  */
 export function personalField(bp: Blueprint, field: Field): boolean {
-  if (field.type === "person" || field.type === "email" || field.type === "phone" || field.type === "file")
+  if (
+    field.type === "person" ||
+    field.type === "email" ||
+    field.type === "phone" ||
+    field.type === "file" ||
+    field.type === "created_by" ||
+    field.type === "edited_by"
+  )
     return true;
   if (CONTACT.test(words(field)) || PEOPLE.test(words(field))) return true;
   if (field.type === "relation") {

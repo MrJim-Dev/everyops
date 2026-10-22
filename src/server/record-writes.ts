@@ -5,7 +5,7 @@ import { newId } from "@/lib/engine/ids";
 import { applyRecordOps, createRecord, updateRecord } from "@/lib/engine/records";
 import { autoReferenceFields, nextReference } from "@/lib/engine/references";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
-import { type Actor, logActivity } from "./activity";
+import { type Actor, logActivity, recordActor } from "./activity";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { queueChanges, sendSoon } from "./webhooks";
@@ -95,7 +95,7 @@ export async function writeRecord(
       });
       const gone = stored.filter((s) => !kept.has(s.record.id)).map((s) => ({ id: s.record.id, rev: s.rev }));
       removed = gone.map((g) => g.id);
-      const put = await putRecords(trx, slug, puts);
+      const put = await putRecords(trx, slug, puts, await recordActor(trx, actor));
       const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, gone))];
       if (conflicts.length) throw new Error(`record write conflicted on ${conflicts.join(", ")}`);
       hooks = await queueChanges(trx, slug, bp, [

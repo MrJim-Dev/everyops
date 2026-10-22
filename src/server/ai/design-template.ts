@@ -1,5 +1,5 @@
 import "server-only";
-import type { Blueprint, DataRecord, Field, FieldValue, FormView } from "@/lib/blueprint/types";
+import type { Blueprint, DataRecord, Entity, Field, FieldValue, FormView } from "@/lib/blueprint/types";
 import { shiftRecords } from "@/lib/catalog/shift";
 import type { CommunitySystem } from "@/server/community";
 import type { Design, DesignPatch } from "./design-prompt";
@@ -80,7 +80,7 @@ export function seedDesign(
     workspaceName: workspaceName || bp.workspaceName,
     summary: system.name,
     systems: bp.systems,
-    entities: bp.entities,
+    entities: designEntities(bp.entities),
     views: views as unknown as Design["views"],
     widgets: bp.widgets as unknown as Design["widgets"],
     rules: bp.rules as unknown as Design["rules"],
@@ -292,4 +292,17 @@ export function noProgress(before: string[], after: string[]): boolean {
     return shared / Math.max(1, Math.min(x.size, y.size)) >= 0.6;
   };
   return before.every((b) => after.some((a) => alike(a, b)));
+}
+/**
+ * Record types as the designer's schema can carry them. It has no created_by / edited_by type (the schema is near
+ * Gemini's limit), so those go as text fields with their names; toEntity turns them back (a text field named
+ * "Created by" or "Last edited by").
+ */
+export function designEntities(entities: Entity[]): Design["entities"] {
+  return entities.map((e) => ({
+    ...e,
+    fields: e.fields.map((f) =>
+      f.type === "created_by" || f.type === "edited_by" ? { ...f, type: "text" as const } : f,
+    ),
+  })) as Design["entities"];
 }

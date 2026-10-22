@@ -38,7 +38,14 @@ export function validateRecord(
 ): FieldError[] {
   const errors: FieldError[] = [];
   for (const field of entity.fields) {
-    if (field.type === "formula" || field.type === "rollup") continue;
+    // Computed or stamped by EveryOps, never typed.
+    if (
+      field.type === "formula" ||
+      field.type === "rollup" ||
+      field.type === "created_by" ||
+      field.type === "edited_by"
+    )
+      continue;
     const value = data[field.id];
     if (field.required && isEmpty(value) && !notYet?.has(field.id)) {
       errors.push({ fieldId: field.id, message: `${field.name} is required` });

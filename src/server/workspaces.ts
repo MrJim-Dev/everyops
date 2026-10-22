@@ -19,7 +19,7 @@ import {
   workspaceFrom,
 } from "@/lib/store/workspace-model";
 import type { PatchResult, WorkspaceMeta, WorkspacePatch } from "@/lib/store/workspace-sync";
-import { logActivity, personActor, recordEntries } from "./activity";
+import { logActivity, personActor, recordActor, recordEntries } from "./activity";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { inviteEmail } from "./emails";
@@ -268,8 +268,20 @@ export async function loadWorkspace(
   if (!access) return null;
   const found = await readWorkspace(db, id);
   if (!found) return null;
+  // The team comes too: the browser replaces its summary with this copy and reads a member's role from it, so
+  // without it staff and admins could only view a workspace once it opened.
+  const team = await loadTeam(id);
+  const manager = access.role === "owner" || access.role === "admin";
   return {
-    workspace: { ...found.doc, slug: id, syncedAt: found.syncedAt, ownerId: access.ownerId, loaded: true },
+    workspace: {
+      ...found.doc,
+      slug: id,
+      syncedAt: found.syncedAt,
+      ownerId: access.ownerId,
+      members: team.members,
+      invites: manager ? team.invites : [],
+      loaded: true,
+    },
     role: access.role,
     revs: found.revs,
   };
@@ -443,7 +455,7 @@ export async function patchWorkspace(
               }),
             )
           : [];
-        const put = await putRecords(trx, slug, puts);
+        const put = await putRecords(trx, slug, puts, await recordActor(trx, personActor(userId)));
         const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, patch.records.delete))];
         if (conflicts.length)
           throw new Conflict({
