@@ -371,6 +371,21 @@ function checkRule(bp: Blueprint, source: Entity, rule: Rule, path: string, erro
             say(`{{${m[1]}}} isn't a field of ${source.name} (fields: ${list(source.fields)})`);
       continue;
     }
+    if (action.type === "call_api") {
+      if (!action.endpointId?.trim())
+        say("call_api needs endpointId, a webhook endpoint from Settings → Webhooks");
+      if (action.body?.trim()) {
+        for (const m of action.body.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g))
+          if (!resolvesPath(bp, source, m[1]))
+            say(`{{${m[1]}}} isn't a field of ${source.name} (fields: ${list(source.fields)})`);
+        try {
+          JSON.parse(action.body.replace(/\{\{\s*[\w.]+\s*\}\}/g, "x"));
+        } catch {
+          say('the call body isn\'t JSON; write it like {"text": "New booking for {{name}}"}');
+        }
+      }
+      continue;
+    }
     if (action.type === "create_record") {
       const made = bp.entities.find((e) => e.id === action.entityId);
       if (!made) {
