@@ -13,9 +13,12 @@ import { appUrl, sendMail } from "./mail";
 type Env = Record<string, string | undefined>;
 const normalize = (email: string) => email.trim().toLowerCase();
 
-/** SITE_ADMIN_EMAILS: who runs EveryOps itself (emails, comma or space separated). james@everyops.app when unset. */
+/** Who runs EveryOps itself: they get the waitlist emails and the waitlist page. */
+export const DEFAULT_SITE_ADMINS = "james@everyops.app, jared@everyops.app";
+
+/** SITE_ADMIN_EMAILS: who runs EveryOps itself (emails, comma or space separated). DEFAULT_SITE_ADMINS when unset. */
 export function siteAdmins(env: Env = process.env): string[] {
-  const list = (env.SITE_ADMIN_EMAILS ?? "james@everyops.app")
+  const list = (env.SITE_ADMIN_EMAILS ?? DEFAULT_SITE_ADMINS)
     .split(/[\s,;]+/)
     .map(normalize)
     .filter(Boolean);
