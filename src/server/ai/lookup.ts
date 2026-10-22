@@ -1,6 +1,7 @@
 import "server-only";
 import type { Blueprint } from "@/lib/blueprint/types";
 import { splitToolName } from "@/lib/connections";
+import type { Viewer } from "@/lib/engine/access";
 import type { OutsideTools } from "../connections";
 import { generateJsonHedged } from "./gemini";
 import {
@@ -32,6 +33,8 @@ export async function lookupData(input: {
   signal?: AbortSignal;
   /** Connected outside MCP servers' read tools (owners and admins only). */
   outside?: OutsideTools | null;
+  /** Who is asking: members who see only their own records look up only those. */
+  viewer?: Viewer;
 }): Promise<LookupResult & { proposals?: { tool: string; arguments: string; summary: string }[] }> {
   // Greetings, navigation and design changes need no records: skip the round instead of asking Gemini.
   const last = input.messages.filter((m) => m.role === "user").at(-1)?.text ?? "";
@@ -40,7 +43,7 @@ export async function lookupData(input: {
     console.info(JSON.stringify({ event: "lookup_skipped" }));
     return lookupResult(input.blueprint, [], true);
   }
-  const records = recordTools(input.workspaceId, input.blueprint, input.onStatus);
+  const records = recordTools(input.workspaceId, input.blueprint, input.onStatus, input.viewer);
   const tools = outside
     ? {
         ...records,

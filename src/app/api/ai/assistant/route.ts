@@ -3,10 +3,12 @@ import { attachmentRef } from "@/lib/assistant/attachments";
 import { appliesOnItsOwn } from "@/lib/assistant/permissions";
 import { screenSchema } from "@/lib/assistant/screen";
 import { blueprintOf, canEdit, canManage } from "@/lib/store/workspace-model";
+import { viewerOf } from "@/server/access";
 import { assistantTurn } from "@/server/ai/assistant";
 import { noteMemory } from "@/server/ai/memory";
 import { takeAiToken } from "@/server/ai/rate-limit";
 import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
+import { db } from "@/server/db";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { listEndpoints } from "@/server/webhooks";
 import { readMemory, rememberEdits } from "@/server/workspace-memory";
@@ -99,6 +101,7 @@ export async function POST(request: Request) {
           canDesign: manager,
           canEditRecords: canEdit(found.role),
           userId: user.id,
+          viewer: await viewerOf(db, user.id, found.role),
           workspaceId,
           team,
           workspaceName: found.workspace.name,

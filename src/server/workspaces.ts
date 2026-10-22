@@ -3,9 +3,11 @@ import { sql } from "kysely";
 import { notesFromSetup } from "@/lib/assistant/memory";
 import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { freshSample } from "@/lib/catalog/shift";
+import { guardWrites, isLimited } from "@/lib/engine/access";
 import { renumberTaken } from "@/lib/engine/sequence";
 import { htmlDocKeys } from "@/lib/public/html-page";
 import {
+  blueprintOf,
   type ChangeEntry,
   type Invite,
   importedIds,
@@ -19,6 +21,7 @@ import {
   workspaceFrom,
 } from "@/lib/store/workspace-model";
 import type { PatchResult, WorkspaceMeta, WorkspacePatch } from "@/lib/store/workspace-sync";
+import { limitWorkspace, viewerOf } from "./access";
 import { logActivity, personActor, recordActor, recordEntries } from "./activity";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
@@ -269,13 +272,17 @@ export async function loadWorkspace(
   if (!access) return null;
   const found = await readWorkspace(db, id);
   if (!found) return null;
+  // Members who see only their own records of some type get only those, everywhere this copy goes (the browser,
+  // the assistant, MCP plans).
+  const viewer = await viewerOf(db, userId, access.role);
+  const limited = limitWorkspace(blueprintOf(found.doc), viewer, found.doc, found.revs);
   // The team comes too: the browser replaces its summary with this copy and reads a member's role from it, so
   // without it staff and admins could only view a workspace once it opened.
   const team = await loadTeam(id);
   const manager = access.role === "owner" || access.role === "admin";
   return {
     workspace: {
-      ...found.doc,
+      ...limited.doc,
       slug: id,
       syncedAt: found.syncedAt,
       ownerId: access.ownerId,
@@ -284,7 +291,7 @@ export async function loadWorkspace(
       loaded: true,
     },
     role: access.role,
-    revs: found.revs,
+    revs: limited.revs,
   };
 }
 
@@ -424,6 +431,23 @@ export async function patchWorkspace(
         // Automations that fire on a save are logged (and their emails queued) with the save itself.
         const rulesBp = await currentBlueprint(trx, slug);
         enterZone(rulesBp);
+        // Members who see only their own records change only those; totals are worked out here from every record
+        // (src/lib/engine/access.ts), since their browser has only some of them.
+        if (!manager && rulesBp) {
+          const viewer = await viewerOf(trx, userId, access.role);
+          if (isLimited(rulesBp, viewer)) {
+            const checked = guardWrites(
+              rulesBp,
+              viewer,
+              await readRecords(trx, slug),
+              puts,
+              patch.records.delete,
+              new Date(),
+            );
+            if (!checked.ok) throw new Conflict({ ok: false, status: 403, message: checked.message });
+            puts = checked.puts;
+          }
+        }
         const watching = fireOnSave(rulesBp);
         // Webhooks need each changed record's previous values too (changed fields, status changes).
         const hooked = await hasEndpoints(trx, slug);

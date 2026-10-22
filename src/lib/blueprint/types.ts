@@ -109,6 +109,12 @@ export type Entity = {
     closesAt: string;
     slotMinutes: 15 | 30 | 60 | 90 | 120;
   };
+  /**
+   * Staff and viewers see only their own records of this type: by is the field naming them (a person or email field
+   * holding their name or email), or "created_by" for the records they added (src/lib/engine/access.ts).
+   * Without it everyone in the workspace sees every record.
+   */
+  access?: { by: string };
 };
 
 export type Sort = { fieldId: string; dir: "asc" | "desc" };

@@ -1,10 +1,12 @@
 import "server-only";
 import { sql } from "kysely";
 import type { DataRecord, RecordData } from "@/lib/blueprint/types";
+import { canSee } from "@/lib/engine/access";
 import { newId } from "@/lib/engine/ids";
 import { applyRecordOps, createRecord, updateRecord } from "@/lib/engine/records";
 import { autoReferenceFields, nextReference } from "@/lib/engine/references";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
+import { viewerIn } from "./access";
 import { type Actor, logActivity, recordActor } from "./activity";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
@@ -48,6 +50,12 @@ export async function writeRecord(
       const before = new Map(stored.map((s) => [s.record.id, s]));
       const ws = { blueprint: bp, records: stored.map((s) => s.record) };
       const target = change.kind === "create" ? undefined : before.get(change.id);
+      // Records the caller can't see (record-level access) aren't there for them.
+      if (target && actor.userId) {
+        const viewer = await viewerIn(trx, slug, actor.userId);
+        if (viewer && !canSee(bp, viewer, target.record))
+          return { ok: false, status: 404, message: `No record "${target.record.id}".` };
+      }
       if (target) entityId = target.record.entityId;
       if (change.kind !== "create") {
         if (!target) return { ok: false, status: 404, message: `No record "${change.id}".` };

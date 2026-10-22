@@ -4,6 +4,7 @@ import { sql } from "kysely";
 import { allowedIn } from "@/lib/api-keys";
 import { findEntity } from "@/lib/blueprint/lookup";
 import type { Blueprint, Entity } from "@/lib/blueprint/types";
+import { type Viewer, visibleTo } from "@/lib/engine/access";
 import { coerceValues } from "@/lib/engine/coerce";
 import { zone } from "@/lib/time";
 import { enterZone } from "@/server/zone";
@@ -70,8 +71,22 @@ const FILTERS = {
   },
 };
 
+/** The caller, for record-level access: what they may see is what tools read and change. */
+const viewerOfCtx = (ctx: Ctx): Viewer => ({
+  userId: ctx.caller.user.id,
+  role: ctx.role,
+  name: ctx.caller.user.name,
+  email: ctx.caller.user.email,
+});
+const visibleRecords = async (ctx: Ctx) =>
+  visibleTo(
+    ctx.bp,
+    viewerOfCtx(ctx),
+    (await readRecords(db, ctx.workspaceId)).map((s) => s.record),
+  );
+
 const lookup = async (ctx: Ctx, name: string, args: Args) => {
-  const result = await recordTools(ctx.workspaceId, ctx.bp).run(name, args);
+  const result = await recordTools(ctx.workspaceId, ctx.bp, undefined, viewerOfCtx(ctx)).run(name, args);
   if (result && typeof result === "object" && "error" in result) {
     const message = String((result as { error: unknown }).error);
     throw new ToolError(message, /^No record\b/.test(message) ? 404 : 400);
@@ -275,7 +290,15 @@ const CORE_TOOLS: Tool[] = [
       if (!view) throw new ToolError(`No tab "${viewId}".`, 404);
       if (view.type === "canvas") {
         const doc = await readCurrent(db, ctx.workspaceId);
-        return doc ? readView(doc.blueprint, doc.records, doc.docs, ctx.workspaceId, view) : null;
+        return doc
+          ? readView(
+              doc.blueprint,
+              visibleTo(doc.blueprint, viewerOfCtx(ctx), doc.records),
+              doc.docs,
+              ctx.workspaceId,
+              view,
+            )
+          : null;
       }
       // Until someone saves a page it shows what the design started it with, as in the app.
       const body =
@@ -309,7 +332,7 @@ const CORE_TOOLS: Tool[] = [
     required: ["entityId", "values"],
     run: async (ctx, args) => {
       const entity = entityOf(ctx.bp, args.entityId);
-      const records = (await readRecords(db, ctx.workspaceId)).map((s) => s.record);
+      const records = await visibleRecords(ctx);
       const { data, errors } = coerceValues(ctx.bp, records, entity, (args.values ?? {}) as Args);
       if (errors.length) throw new ToolError(errors.join("\n"));
       return writeResult(
@@ -336,7 +359,7 @@ const CORE_TOOLS: Tool[] = [
     required: ["id", "values"],
     run: async (ctx, args) => {
       const id = str(args.id, "id");
-      const records = (await readRecords(db, ctx.workspaceId)).map((s) => s.record);
+      const records = await visibleRecords(ctx);
       const record = records.find((r) => r.id === id);
       const entity = ctx.bp.entities.find((e) => e.id === record?.entityId);
       if (!record || !entity) throw new ToolError(`No record "${id}".`, 404);

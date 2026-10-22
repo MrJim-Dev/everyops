@@ -522,7 +522,7 @@ export async function submitPublicForm(
  * Cloud Run instance and kept across restarts), like the AI limit; it falls back to memory if the database fails.
  */
 export async function allowSubmission(key: string, limit = 8, windowMs = 10 * 60_000): Promise<boolean> {
-  return (await takeToken("public:" + key, limit, windowMs)).ok;
+  return (await takeToken(`public:${key}`, limit, windowMs)).ok;
 }
 
 export type UploadResult = { ok: true; url: string } | { ok: false; status: number; message: string };

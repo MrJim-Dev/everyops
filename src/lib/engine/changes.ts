@@ -45,6 +45,8 @@ export type ChangeOp =
   | { op: "set_currency"; currency: string }
   /** The time zone the workspace's clock runs on. Stored times stay the same instants; how they read changes. */
   | { op: "set_time_zone"; timeZone: string }
+  /** Who sees a record type's records: by limits staff and viewers to their own (src/lib/engine/access.ts); null lets everyone see all. */
+  | { op: "set_access"; entityId: string; by: string | null }
   | { op: "add_entity"; entity: Entity }
   | { op: "add_system"; system: System }
   /** Adds an automation, or replaces the one with the same id (how an automation is fixed or changed). */
@@ -411,6 +413,14 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       case "set_time_zone":
         next.timeZone = op.timeZone;
         break;
+      case "set_access": {
+        const entity = next.entities.find((e) => e.id === op.entityId);
+        if (entity) {
+          if (op.by) entity.access = { by: op.by };
+          else delete entity.access;
+        }
+        break;
+      }
       case "add_entity":
         if (!next.entities.some((e) => e.id === op.entity.id)) next.entities.push(op.entity);
         break;
