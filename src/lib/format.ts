@@ -1,5 +1,5 @@
 import type { FieldValue, TimeRange } from "@/lib/blueprint/types";
-import { isDateKey, TIME_ZONE } from "@/lib/time";
+import { at, isDateKey, zone } from "@/lib/time";
 
 const plain = new Intl.NumberFormat("en-PH", { maximumFractionDigits: 2 });
 
@@ -167,45 +167,42 @@ export function parseDuration(text: string): number | null {
   return Math.round(Number(parts[1] ?? 0) * 60 + Number(parts[2] ?? 0));
 }
 
-const dateFormat = new Intl.DateTimeFormat("en-PH", {
-  timeZone: TIME_ZONE,
-  weekday: "short",
-  day: "numeric",
-  month: "short",
-});
-const dateYearFormat = new Intl.DateTimeFormat("en-PH", {
-  timeZone: TIME_ZONE,
-  weekday: "short",
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-});
-const timeFormat = new Intl.DateTimeFormat("en-PH", {
-  timeZone: TIME_ZONE,
-  hour: "numeric",
-  minute: "2-digit",
-});
-const monthFormat = new Intl.DateTimeFormat("en-PH", {
-  timeZone: TIME_ZONE,
-  month: "long",
-  year: "numeric",
-});
+const DATE_STYLES = {
+  date: { weekday: "short", day: "numeric", month: "short" },
+  dateYear: { weekday: "short", day: "numeric", month: "short", year: "numeric" },
+  time: { hour: "numeric", minute: "2-digit" },
+  month: { month: "long", year: "numeric" },
+} as const satisfies Record<string, Intl.DateTimeFormatOptions>;
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+/** A date formatter on the current zone's clock (the workspace's), made once per zone. */
+function dateFormat(style: keyof typeof DATE_STYLES): Intl.DateTimeFormat {
+  const tz = zone();
+  const key = `${tz}:${style}`;
+  let f = dateFormats.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-PH", { timeZone: tz, ...DATE_STYLES[style] });
+    dateFormats.set(key, f);
+  }
+  return f;
+}
 
-/** Date keys ("YYYY-MM-DD") are calendar days; anchor them at Manila noon. */
+/** Date keys ("YYYY-MM-DD") are calendar days; anchor them at noon on the workspace's clock. */
 function toDate(value: string): Date {
-  return isDateKey(value) ? new Date(`${value}T12:00:00+08:00`) : new Date(value);
+  return isDateKey(value) ? new Date(at(value, "12:00")) : new Date(value);
 }
 
 export function formatDate(value: string, { withYear = false } = {}): string {
-  return (withYear ? dateYearFormat : dateFormat).format(toDate(value));
+  return dateFormat(withYear ? "dateYear" : "date").format(toDate(value));
 }
 
 export function formatTime(value: string): string {
-  return timeFormat.format(new Date(value)).replace(/\s?(AM|PM)/i, " $1");
+  return dateFormat("time")
+    .format(new Date(value))
+    .replace(/\s?(AM|PM)/i, " $1");
 }
 
 export function formatMonth(value: string): string {
-  return monthFormat.format(toDate(value));
+  return dateFormat("month").format(toDate(value));
 }
 
 export function formatDateTime(value: string): string {

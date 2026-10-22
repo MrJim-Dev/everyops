@@ -39,6 +39,7 @@ import {
   formatRating,
   isTimeRange,
 } from "@/lib/format";
+import { timeZoneOf } from "@/lib/time";
 import { type SiteDetails, withIncludes } from "./bindings";
 import { liveBlocksOf, liveSiteHtml } from "./custom-site";
 import { type HeroFact, heroFacts } from "./hero-facts";
@@ -86,6 +87,8 @@ export type PublicResource = {
 export type PublicForm = {
   viewId: string;
   title: string;
+  /** The workspace's time zone: booking pages read "today" and slot times on its clock. */
+  timeZone?: string;
   intro?: string;
   submitLabel: string;
   /** Text that was written into the button label but is too long for a button; shown above it. */
@@ -194,6 +197,8 @@ export type PublicSite = {
   book?: { id: string; label: string };
   /** The currency the site's prices read in. */
   currency?: string;
+  /** The workspace's time zone, for the dates visitors see. */
+  timeZone?: string;
 };
 
 export const sitePath = (slug: string, viewId?: string) => (viewId ? `/s/${slug}/${viewId}` : `/s/${slug}`);
@@ -249,6 +254,7 @@ export function siteOf(slug: string, name: string, bp: Blueprint): PublicSite | 
     name,
     pages,
     currency: currencyOf(bp),
+    timeZone: timeZoneOf(bp),
     ...(book ? { book: { id: formPageOf(bp, book) ?? book.id, label: bookLabel(bp, book.id) } } : {}),
   };
 }
@@ -271,6 +277,9 @@ export function formatCell(
   switch (kind) {
     case "image":
       return { ...base, kind: "image", text: typeof value === "string" ? value : "" };
+    case "signature":
+      // The drawing is the team's; anywhere it's listed it only says it's there.
+      return { ...base, kind: "text", text: "Signed" };
     case "long_text":
       return { ...base, kind: "markdown", text: String(value) };
     case "money":
@@ -545,6 +554,7 @@ export function publicForm(bp: Blueprint, records: DataRecord[], view: FormView)
   }
   return {
     viewId: view.id,
+    timeZone: timeZoneOf(bp),
     title: view.name,
     intro: view.intro,
     ...(() => {

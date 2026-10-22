@@ -1,4 +1,4 @@
-import { isEmail, isFilePath, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
+import { isEmail, isFilePath, isPhone, isSignaturePath, normalizeUrl } from "@/lib/blueprint/contact";
 import { findRecord, getEntity, optionOf } from "@/lib/blueprint/lookup";
 import type {
   Blueprint,
@@ -38,7 +38,14 @@ export function validateRecord(
 ): FieldError[] {
   const errors: FieldError[] = [];
   for (const field of entity.fields) {
-    if (field.type === "formula" || field.type === "rollup") continue;
+    // Computed or stamped by EveryOps, never typed.
+    if (
+      field.type === "formula" ||
+      field.type === "rollup" ||
+      field.type === "created_by" ||
+      field.type === "edited_by"
+    )
+      continue;
     const value = data[field.id];
     if (field.required && isEmpty(value) && !notYet?.has(field.id)) {
       errors.push({ fieldId: field.id, message: `${field.name} is required` });
@@ -101,6 +108,11 @@ export function validateRecord(
       case "file":
         if (!isFilePath(value))
           errors.push({ fieldId: field.id, message: `Upload ${field.name.toLowerCase()} again` });
+        break;
+      case "signature":
+        // A preview keeps the drawing in the page; a saved workspace stores it as a document.
+        if (!isSignaturePath(value, { preview: true }))
+          errors.push({ fieldId: field.id, message: `Sign ${field.name.toLowerCase()} again` });
         break;
     }
   }

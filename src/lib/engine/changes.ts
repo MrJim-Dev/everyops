@@ -43,6 +43,8 @@ export type ChangeOp =
   | { op: "rename_workspace"; name: string }
   /** The currency the workspace's money reads in. Amounts stay as they are; only how they read changes. */
   | { op: "set_currency"; currency: string }
+  /** The time zone the workspace's clock runs on. Stored times stay the same instants; how they read changes. */
+  | { op: "set_time_zone"; timeZone: string }
   | { op: "add_entity"; entity: Entity }
   | { op: "add_system"; system: System }
   /** Adds an automation, or replaces the one with the same id (how an automation is fixed or changed). */
@@ -405,6 +407,9 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
         break;
       case "set_currency":
         next.currency = op.currency;
+        break;
+      case "set_time_zone":
+        next.timeZone = op.timeZone;
         break;
       case "add_entity":
         if (!next.entities.some((e) => e.id === op.entity.id)) next.entities.push(op.entity);

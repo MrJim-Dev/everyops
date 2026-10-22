@@ -3,7 +3,7 @@
 import { recordsOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { DataRecord, Entity, Field, View, WorkspaceData } from "@/lib/blueprint/types";
 import { formatDate, formatMoney, formatRange, isTimeRange } from "@/lib/format";
-import { dateKey, manilaParts } from "@/lib/time";
+import { dateKey, zonedParts } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 /** A readable value for any field, without the workspace context the real views need. */
@@ -195,8 +195,8 @@ function Schedule({
         const range = b.data[booking?.timeFieldId ?? ""];
         const col = resources.findIndex((res) => res.id === b.data[booking?.resourceFieldId ?? ""]);
         if (!isTimeRange(range) || col < 0) return null;
-        const start = manilaParts(range.start).hour;
-        const end = Math.max(start + 1, manilaParts(range.end).hour);
+        const start = zonedParts(range.start).hour;
+        const end = Math.max(start + 1, zonedParts(range.end).hour);
         if (start < 9 || start > 16) return null;
         return (
           <span
@@ -215,7 +215,7 @@ function Schedule({
 
 function Month({ entity, rows, date }: { entity: Entity; rows: DataRecord[]; date: Date }) {
   const dateField = entity.fields.find((f) => f.type === "date" || f.type === "datetime");
-  const day = manilaParts(date.toISOString()).day;
+  const day = zonedParts(date.toISOString()).day;
   return (
     <div className="grid h-full grid-cols-7 grid-rows-[24px_repeat(5,minmax(0,1fr))] overflow-hidden rounded-xl border">
       {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (

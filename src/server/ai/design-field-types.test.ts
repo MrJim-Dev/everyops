@@ -47,3 +47,29 @@ describe("toEntity field types", () => {
     expect(entity.fields[7].rollup).toMatchObject({ op: "sum", filter: "paid" });
   });
 });
+describe("signature fields from the designer", () => {
+  it("turns a file field named like a signature into a signature pad, and leaves other files alone", () => {
+    const entity = toEntity({
+      id: "rental",
+      name: "Rental",
+      pluralName: "Rentals",
+      primaryFieldId: "renter",
+      fields: [
+        { id: "renter", name: "Renter", type: "text" },
+        { id: "sig", name: "Renter signature", type: "file" },
+        { id: "sig2", name: "Signature", type: "file" },
+        { id: "contract", name: "Signed contract", type: "file" },
+        { id: "staff", name: "Staff signature", type: "file" },
+        { id: "when", name: "Signature date", type: "file" },
+      ],
+    } as never);
+    expect(entity.fields.map((f) => f.type)).toEqual([
+      "text",
+      "signature",
+      "signature",
+      "file",
+      "signature",
+      "file",
+    ]);
+  });
+});

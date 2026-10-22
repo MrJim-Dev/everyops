@@ -1,6 +1,7 @@
 import "server-only";
 import { type Kysely, sql, type Transaction } from "kysely";
-import type { Blueprint, DataRecord } from "@/lib/blueprint/types";
+import type { Blueprint, DataRecord, RecordActor } from "@/lib/blueprint/types";
+import { editedBy, withActorValues } from "@/lib/engine/actors";
 import type { ChangeEntry, PageDoc, WorkspaceDoc } from "@/lib/store/workspace-model";
 import type { RecordChanges, RecordPut, StoredRecord, WorkspaceMeta } from "@/lib/store/workspace-sync";
 import type { Database } from "./db";
@@ -18,6 +19,8 @@ type RecordRow = {
   created_at: Date;
   updated_at: Date;
   rev: number;
+  created_by: RecordActor | null;
+  updated_by: RecordActor | null;
 };
 const toStored = (r: RecordRow): StoredRecord => ({
   record: {
@@ -26,6 +29,8 @@ const toStored = (r: RecordRow): StoredRecord => ({
     data: r.data,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
+    ...(r.created_by ? { createdBy: r.created_by } : {}),
+    ...(r.updated_by ? { updatedBy: r.updated_by } : {}),
   },
   rev: r.rev,
 });
@@ -43,28 +48,42 @@ export function metaFrom(doc: WorkspaceDoc | WorkspaceMeta): WorkspaceMeta {
   };
 }
 
+/** Stored records with their Created by / Last edited by fields filled from their stamps (src/lib/engine/actors.ts). */
+function withActors(bp: Blueprint | undefined, stored: StoredRecord[]): StoredRecord[] {
+  if (!bp) return stored;
+  const filled = withActorValues(
+    bp,
+    stored.map((s) => s.record),
+  );
+  return stored.map((s, i) => ({ ...s, record: filled[i] }));
+}
+
 export async function readRecords(ex: Ex, workspaceId: string): Promise<StoredRecord[]> {
-  const { rows } = await sql<RecordRow>`
-    select id, entity_id, data, created_at, updated_at, rev from workspace_record
-    where workspace_id = ${workspaceId} order by seq`.execute(ex);
-  return rows.map(toStored);
+  const [{ rows }, bp] = await Promise.all([
+    sql<RecordRow>`
+      select id, entity_id, data, created_at, updated_at, rev, created_by, updated_by from workspace_record
+      where workspace_id = ${workspaceId} order by seq`.execute(ex),
+    currentBlueprint(ex, workspaceId),
+  ]);
+  return withActors(bp, rows.map(toStored));
 }
 
 /** Records written and deleted after `since` (with a few seconds' overlap for writes still committing). */
 export async function recordChangesSince(ex: Ex, workspaceId: string, since: string): Promise<RecordChanges> {
   const from = Number.isNaN(Date.parse(since)) ? new Date(0) : new Date(Date.parse(since) - 5000);
-  const [{ rows: now }, { rows: changed }, { rows: deleted }] = await Promise.all([
+  const [{ rows: now }, { rows: changed }, { rows: deleted }, bp] = await Promise.all([
     sql<{ now: Date }>`select now() as now`.execute(ex),
     sql<RecordRow>`
-      select id, entity_id, data, created_at, updated_at, rev from workspace_record
+      select id, entity_id, data, created_at, updated_at, rev, created_by, updated_by from workspace_record
       where workspace_id = ${workspaceId} and changed_at > ${from} order by seq`.execute(ex),
     sql<{ id: string }>`
       select id from workspace_record_deleted where workspace_id = ${workspaceId} and deleted_at > ${from}`.execute(
       ex,
     ),
+    currentBlueprint(ex, workspaceId),
   ]);
   return {
-    changed: changed.map(toStored),
+    changed: withActors(bp, changed.map(toStored)),
     deleted: deleted.map((d) => d.id),
     syncedAt: (now[0]?.now ?? new Date()).toISOString(),
   };
@@ -151,11 +170,19 @@ export async function writeContent(trx: Ex, id: string, doc: WorkspaceDoc) {
 }
 
 /** Adds records (new ids only), in order. Returns the ids that already existed. */
-export async function insertRecords(trx: Ex, id: string, records: DataRecord[]): Promise<string[]> {
+/** Adds records, stamped with who added them (by) when known. Returns ids that were already taken. */
+export async function insertRecords(
+  trx: Ex,
+  id: string,
+  records: DataRecord[],
+  by?: RecordActor,
+): Promise<string[]> {
   if (!records.length) return [];
+  const stamp = by ? JSON.stringify(by) : null;
   const { rows } = await sql<{ id: string }>`
-    insert into workspace_record (workspace_id, id, entity_id, data, created_at, updated_at)
-    select ${id}, x.id, x."entityId", coalesce(x.data, '{}'::jsonb), x."createdAt", coalesce(x."updatedAt", x."createdAt")
+    insert into workspace_record (workspace_id, id, entity_id, data, created_at, updated_at, created_by, updated_by)
+    select ${id}, x.id, x."entityId", coalesce(x.data, '{}'::jsonb), x."createdAt", coalesce(x."updatedAt", x."createdAt"),
+      ${stamp}::jsonb, ${stamp}::jsonb
     from rows from (
       jsonb_to_recordset(${JSON.stringify(records)}::jsonb)
         as (id text, "entityId" text, data jsonb, "createdAt" timestamptz, "updatedAt" timestamptz)
@@ -176,18 +203,24 @@ export async function putRecords(
   trx: Ex,
   id: string,
   puts: RecordPut[],
+  /** Who is writing: stamped as the creator of new records and the last editor of every one. Never the browser's. */
+  by?: RecordActor,
 ): Promise<{ revs: Record<string, number>; conflicts: string[] }> {
   const revs: Record<string, number> = {};
   const conflicts: string[] = [];
   const fresh = puts.filter((p) => p.rev === null).map((p) => p.record);
-  for (const taken of await insertRecords(trx, id, fresh)) conflicts.push(taken);
+  for (const taken of await insertRecords(trx, id, fresh, by)) conflicts.push(taken);
   for (const r of fresh) if (!conflicts.includes(r.id)) revs[r.id] = 1;
   const edits = puts.filter((p) => p.rev !== null);
   if (edits.length) {
     const input = edits.map((p) => ({ ...p.record, rev: p.rev }));
+    // The last editor changes only on records whose typed values changed (src/lib/engine/actors.ts editedBy).
+    const stamped = by ? await editedIds(trx, id, edits) : [];
     const { rows } = await sql<{ id: string; rev: number }>`
       update workspace_record r set entity_id = x."entityId", data = coalesce(x.data, '{}'::jsonb),
-        updated_at = coalesce(x."updatedAt", r.updated_at), rev = r.rev + 1, changed_at = now()
+        updated_at = coalesce(x."updatedAt", r.updated_at), rev = r.rev + 1, changed_at = now(),
+        updated_by = case when x.id = any(${stamped}::text[]) then ${by ? JSON.stringify(by) : null}::jsonb
+          else r.updated_by end
       from jsonb_to_recordset(${JSON.stringify(input)}::jsonb) as
         x(id text, "entityId" text, data jsonb, "updatedAt" timestamptz, rev int)
       where r.workspace_id = ${id} and r.id = x.id and r.rev = x.rev
@@ -196,6 +229,20 @@ export async function putRecords(
     for (const p of edits) if (!(p.record.id in revs)) conflicts.push(p.record.id);
   }
   return { revs, conflicts };
+}
+
+async function editedIds(trx: Ex, id: string, edits: RecordPut[]): Promise<string[]> {
+  const bp = await currentBlueprint(trx, id);
+  const { rows } = await sql<{ id: string; entity_id: string; data: DataRecord["data"] }>`
+    select id, entity_id, data from workspace_record
+    where workspace_id = ${id} and id = any(${edits.map((p) => p.record.id)}::text[])`.execute(trx);
+  const was = new Map(rows.map((r) => [r.id, r]));
+  return edits.flatMap((p) => {
+    const old = was.get(p.record.id);
+    if (!old) return [];
+    const before = { ...p.record, entityId: old.entity_id, data: old.data };
+    return !bp || editedBy(bp, before, p.record) ? [p.record.id] : [];
+  });
 }
 
 /** Deletes records at the revs the caller last saw. Returns ids that were changed by someone else first. */

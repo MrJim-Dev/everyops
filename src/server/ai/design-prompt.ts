@@ -625,6 +625,10 @@ Rules for a valid blueprint:
 - rating is a score from 1 to 5 shown as stars (a customer review, service quality, a lead's priority); sample
   values are whole numbers 1-5. duration is a length of time in minutes shown as "1 h 30 min" (a session, a
   repair, time spent); sample values are minutes (90, not 1.5). Use number only for counts and other quantities.
+- A signature someone draws (waivers, rental agreements, proof of delivery) is a file field named Signature (or
+  Customer signature, Renter signature); it becomes a signature pad people sign on screen, on public forms too.
+- When the team needs to see who added or last changed a record (approvals, shared logs), add a text field named
+  exactly "Created by" or "Last edited by"; the app fills it in on every save. Leave it out of forms and samples.
 - Kanban boards use a status field. Calendars use a date, datetime or time_range field.
 - Bookings of courts, rooms, tables or similar: always a resource record type (courts) with resource hours, and a
   booking record type with booking settings: resourceFieldId (a required relation to the resource), timeFieldId (a

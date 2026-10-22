@@ -24,6 +24,7 @@ import { FREE_PAGE_TYPES } from "@/lib/blueprint/types";
 import { GROUP_KINDS, validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { samplesThisYear } from "@/lib/catalog/shift";
+import { actorTypeFor } from "@/lib/engine/actors";
 import { computeAll } from "@/lib/engine/compute";
 import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
 import { impliedRules, linePriceRules, widenMovements } from "@/lib/engine/implied-rules";
@@ -35,7 +36,7 @@ import { parsePartialJson } from "@/lib/partial-json";
 import { withCustomSite } from "@/lib/public/custom-site";
 import { MAX_HTML_BYTES } from "@/lib/public/html-page";
 import { copyFromBlocks, type SiteCopy, standardBlocks } from "@/lib/public/site-template";
-import { hhmm, todayKey } from "@/lib/time";
+import { fromLocal, hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
 import { CHOICE_REPAIR_SYSTEM, choicePatch, choiceRepairAnswer } from "./choice-repair-prompt";
 import { reviewCoverage } from "./coverage";
@@ -174,10 +175,18 @@ export function toView(v: Design["views"][number]): View {
 }
 
 /**
+ * Names that mean a drawn signature: anything ending in the word signature (Signature, Staff signature, Driver's
+ * signature, E-signature) or Signed by. "Signature date" or "Signed contract" stay what they are.
+ */
+export const SIGNATURE_NAME = /^(.{0,40}[\s'’-])?(e-?)?signature$|^signed by$/i;
+
+/**
  * A text field named exactly like contact details becomes that type ("Email" → email, "Phone" → phone, "Website"
  * → url), for designs that still used text for them. Only plain names: "Email template" stays text.
  */
 function contactType(f: { id: string; name: string; type: Field["type"] }): Field["type"] {
+  // A file field named Signature is a signature pad (the designer's schema has no signature type).
+  if (f.type === "file" && SIGNATURE_NAME.test(`${f.name}`.trim())) return "signature";
   if (f.type !== "text") return f.type;
   const name = `${f.name}`.trim().toLowerCase();
   const id = f.id.toLowerCase();
@@ -186,7 +195,7 @@ function contactType(f: { id: string; name: string; type: Field["type"] }): Fiel
     return "phone";
   if (/^(phone|mobile|phone_number|mobile_number|contact_number)$/.test(id)) return "phone";
   if (/^(website|web address|url|site)$/.test(name) || /^(website|url|web_address)$/.test(id)) return "url";
-  return "text";
+  return actorTypeFor(f.name) ?? "text";
 }
 
 type ResultType = NonNullable<Field["formula"]>["resultType"];
@@ -995,8 +1004,9 @@ export function ensurePublicForm(bp: Blueprint, brief: string): Blueprint {
 const toIso = (v: string) => {
   const t = v.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
-  const withZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t.length === 16 ? `${t}:00` : t}+08:00`;
-  const ms = Date.parse(withZone);
+  // Without an offset it's the workspace's wall time.
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(t)) return fromLocal(t);
+  const ms = Date.parse(t);
   return Number.isNaN(ms) ? null : new Date(ms).toISOString();
 };
 

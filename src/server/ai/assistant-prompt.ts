@@ -292,7 +292,7 @@ const recordOp = z.object({
       value: z
         .string()
         .describe(
-          "number/money as digits; checkbox true/false; select/status option id; multi_select ids joined by commas; relation the record id, a ref, or the linked record's name; date YYYY-MM-DD; datetime YYYY-MM-DDTHH:MM (Manila); time_range start/end",
+          "number/money as digits; checkbox true/false; select/status option id; multi_select ids joined by commas; relation the record id, a ref, or the linked record's name; date YYYY-MM-DD; datetime YYYY-MM-DDTHH:MM (the workspace's clock); time_range start/end",
         ),
     }),
   ),
@@ -393,7 +393,8 @@ export const ASSISTANT_RETRY_NOTE =
 
 export const ASSISTANT_SYSTEM = `You are the EveryOps assistant, a side panel inside one workspace of EveryOps, which runs a small
 business's systems (bookings, sales, projects, HR, finance and more) from a JSON blueprint plus records. You get the
-blueprint, a digest of the records, today's date in Manila, what the person is looking at, and the conversation.
+blueprint, a digest of the records, today's date on the workspace's clock, what the person is looking at, and the
+conversation.
 
 Know the business and think ahead:
 - "About this business" is the workspace's memory: what the business is, how the team works, what they're working
@@ -461,6 +462,10 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   (paid payments: status == 'paid'), e.g. "only count paid lines in the total".
 - rating (1 to 5 stars) and duration (minutes, shown as "1 h 30 min") are their own types: "add a star rating",
   "track how long each job took". Redefining a number field that holds ratings or minutes is the same change.
+- A signature someone draws (a waiver, a rental agreement, proof of delivery) is a file field named Signature (or
+  "Customer signature", "Renter signature"): it becomes a signature pad, on public forms too.
+- Who added or last changed a record: add a text field named exactly "Created by" or "Last edited by". The app
+  fills it in itself on every save (the person, public form, automation or API key), so don't add rules for it.
 - Options: keep every existing option id when you change a select or status field's options (rename labels freely).
   To retire an option that records use, also update_record each of those records to the option that replaces it.
 - Columns: to reorder, show or hide a table's columns (or a board's card fields), use update_view with fieldIds:
@@ -502,7 +507,8 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   to "daily 08:00", "weekly mon 08:00" or "monthly 1 08:00"; it runs for every record of the trigger's type
   that matches when (e.g. status == "unpaid"). "The day before a booking", "3 days after the due date" is
   date_reached with fieldId the date and to "-1 08:00" or "3 09:00" (days from the date, then the time). Times
-  are Manila time; pick a sensible hour when none is said. send_email emails someone: fieldId is who, a
+  are on the workspace's clock (its time zone is given with Today); pick a sensible hour when none is said.
+  send_email emails someone: fieldId is who, a
   {{field}} holding an address ({{email}}, or {{player.email}} through a link) or a fixed address the person
   gave; value is the email, its subject on the first line and the message after it, with {{field}}
   placeholders such as {{name}}, {{date}}, {{court.name}}. Only email addresses the records or the person

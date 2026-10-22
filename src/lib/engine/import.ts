@@ -14,6 +14,7 @@ import type {
   WorkspaceData,
 } from "@/lib/blueprint/types";
 import { looksLikeMoney, parseDuration, parseRating, stripMoney } from "@/lib/format";
+import { at, dateKey, fromLocal, hhmm } from "@/lib/time";
 import type { ChangeOp, ChangePlan, RecordOp } from "./changes";
 import { newId } from "./ids";
 import { validateRecord } from "./records";
@@ -31,7 +32,8 @@ export type Table = { headers: string[]; rows: string[][] };
 export const MAX_IMPORT_ROWS = 5000;
 
 /** Fields an import can write: not computed ones, nor uploads (an import has no files). */
-export const importable = (f: Field) => !["formula", "rollup", "image", "file"].includes(f.type);
+export const importable = (f: Field) =>
+  !["formula", "rollup", "image", "file", "signature", "created_by", "edited_by"].includes(f.type);
 
 /* ---------- Reading CSV ---------- */
 
@@ -203,12 +205,12 @@ function parseTime(text: string): number | null {
   return h * 60 + +(m[2] ?? 0);
 }
 
-/** A date and time in Manila, as an ISO instant. A date without a time is midnight. */
+/** A date and time on the workspace's clock, as an ISO instant. A date without a time is midnight. */
 export function parseDateTime(text: string): string | null {
   const t = text.trim();
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t)) {
-    const withZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t.length === 16 ? `${t}:00` : t}+08:00`;
-    const ms = Date.parse(withZone);
+    if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(t)) return fromLocal(t);
+    const ms = Date.parse(t);
     return Number.isNaN(ms) ? null : new Date(ms).toISOString();
   }
   const date = parseDate(t);
@@ -216,7 +218,7 @@ export function parseDateTime(text: string): string | null {
   const rest = t.replace(/^\S+(\s+\S+,?\s+\d{4})?/, "").replace(/^[\sT,]+/, "");
   const time = rest ? parseTime(rest) : 0;
   if (time === null) return null;
-  return new Date(`${date}T${pad(Math.floor(time / 60))}:${pad(time % 60)}:00+08:00`).toISOString();
+  return at(date, hhmm(time));
 }
 
 /** "₱1,250.50", "S$1,250", "1 250", "(300)", "12%": the number in it, or null. */
@@ -305,12 +307,7 @@ export function convertCell(
       const start = parseDateTime(a);
       // "Oct 16, 2026 6 PM - 8 PM": the end may be only a time on the same day.
       const endTime = parseTime(b);
-      const end =
-        endTime !== null && start
-          ? new Date(
-              `${new Date(Date.parse(start) + 8 * 3_600_000).toISOString().slice(0, 10)}T${pad(Math.floor(endTime / 60))}:${pad(endTime % 60)}:00+08:00`,
-            ).toISOString()
-          : parseDateTime(b);
+      const end = endTime !== null && start ? at(dateKey(start), hhmm(endTime)) : parseDateTime(b);
       return start && end ? { value: { start, end } } : bad(`"${t}" isn't a start and end time`);
     }
     case "select":

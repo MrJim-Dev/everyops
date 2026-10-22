@@ -22,7 +22,7 @@ import {
   formatRating,
   isTimeRange,
 } from "@/lib/format";
-import { addDays, dateKey, manilaParts, minutesOf, todayKey } from "@/lib/time";
+import { addDays, dateKey, minutesOf, todayKey, zonedParts } from "@/lib/time";
 import { recordContext } from "./context";
 import { run, truthy } from "./expr";
 import { newId } from "./ids";
@@ -106,6 +106,7 @@ export function readable(
     return value.map((v) => field?.options?.find((o) => o.id === v)?.label ?? v).join(", ");
   if (isTimeRange(value)) return `${formatDate(value.start)} · ${formatRange(value)}`;
   if (!field) return String(value);
+  if (field.type === "signature") return "Signed";
   // A rollup reads as what it adds up: an order's total as money, hours worked as time.
   const type =
     field.type === "rollup"
@@ -448,14 +449,14 @@ function dayOf(value: FieldValue | undefined): string | undefined {
 }
 
 const reached = (now: Date, hhmm: string) => {
-  const p = manilaParts(now);
+  const p = zonedParts(now);
   return p.hour * 60 + p.minute >= minutesOf(/^\d{1,2}:\d{2}$/.test(hhmm) ? hhmm : "08:00");
 };
 
 /** Whether a schedule runs today (Manila) and its time has come. */
 export function scheduleDue(schedule: Rule["trigger"]["schedule"], now: Date): boolean {
   if (!schedule) return false;
-  const p = manilaParts(now);
+  const p = zonedParts(now);
   if (schedule.every === "week" && (schedule.weekday ?? 1) !== p.weekday) return false;
   if (schedule.every === "month" && (schedule.monthDay ?? 1) !== p.day) return false;
   return reached(now, schedule.at);

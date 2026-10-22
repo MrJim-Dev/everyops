@@ -13,6 +13,7 @@ import { CATALOG } from "@/lib/catalog";
 import { downloadText, fileSlug } from "@/lib/download";
 import { CURRENCIES, currencyOf, formatDate, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import { canManage, useWorkspaces } from "@/lib/store/workspaces";
+import { TIME_ZONES, timeZoneOf } from "@/lib/time";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
 import { SettingsPage, SettingsSection } from "./settings-section";
 
@@ -104,6 +105,8 @@ export function WorkspaceSettings() {
       </form>
 
       <CurrencySetting manager={manager} />
+
+      <TimeZoneSetting manager={manager} />
 
       <SettingsSection
         title="Workspace link"
@@ -282,6 +285,84 @@ function CurrencySetting({ manager }: { manager: boolean }) {
           <span className="font-mono text-[13px] text-muted-foreground tabular">
             {formatMoney(1250.5, { currency: picked })}
           </span>
+        </div>
+      </SettingsSection>
+    </form>
+  );
+}
+
+/**
+ * The clock the workspace runs on: today, schedules, booking slots and every date it shows. Stored times stay the
+ * same moments; they read in the new zone. Versioned like a rename, so History can undo it.
+ */
+function TimeZoneSetting({ manager }: { manager: boolean }) {
+  const ws = useWorkspace();
+  const applyChange = useWorkspaces((s) => s.applyChange);
+  const current = timeZoneOf(ws.blueprint);
+  const [picked, setPicked] = useState<string>(current);
+  const changed = picked !== current;
+  const label = (id: string) => TIME_ZONES.find((z) => z.id === id)?.label ?? id;
+  const now = new Date().toLocaleString("en-PH", {
+    timeZone: picked,
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  const save = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!changed) return;
+    const entry = applyChange(ws.id, {
+      request: `Run the workspace on ${label(picked)} time`,
+      title: `Time zone changed to ${picked}`,
+      facts: [],
+      steps: [{ kind: "change", label: "Time zone", detail: `${current} → ${picked}` }],
+      ops: [{ op: "set_time_zone", timeZone: picked }],
+    });
+    if (entry)
+      toast.success(`The workspace now runs on ${label(picked)} time`, {
+        description: "You can undo it from History.",
+      });
+    else toast.error("Couldn't change the time zone");
+  };
+
+  return (
+    <form onSubmit={save}>
+      <SettingsSection
+        title="Time zone"
+        description="The clock the workspace runs on: today, schedules and reminders, booking slots, and every date it shows."
+        footer={
+          manager
+            ? "Saved times stay the same moments; they read on the new clock. Undo it from History."
+            : "Only the owner or an admin can change the time zone."
+        }
+        action={
+          manager ? (
+            <Button type="submit" size="sm" variant={changed ? "default" : "outline"} disabled={!changed}>
+              Save
+            </Button>
+          ) : null
+        }
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <NativeSelect
+            id="workspace-time-zone"
+            aria-label="Time zone"
+            className="w-[300px]"
+            value={picked}
+            disabled={!manager}
+            onChange={(e) => setPicked(e.target.value)}
+          >
+            {TIME_ZONES.map((z) => (
+              <NativeSelectOption key={z.id} value={z.id}>
+                {z.label}
+              </NativeSelectOption>
+            ))}
+            {TIME_ZONES.some((z) => z.id === current) ? null : (
+              <NativeSelectOption value={current}>{current}</NativeSelectOption>
+            )}
+          </NativeSelect>
+          <span className="text-[13px] text-muted-foreground tabular">Now there: {now}</span>
         </div>
       </SettingsSection>
     </form>

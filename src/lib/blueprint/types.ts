@@ -51,8 +51,17 @@ export type FieldType =
   | "url"
   /** An uploaded document (a PDF receipt, a contract): the app path, with its name, served only to the team. */
   | "file"
+  /**
+   * A drawn signature (a waiver, a rental agreement, a delivery receipt): a PNG in the workspace's private documents,
+   * like a file field's, served only to the team. Signed on a pad in the app or on a public form.
+   */
+  | "signature"
   | "formula"
-  | "rollup";
+  | "rollup"
+  /** Who added the record (a person, a public form, an automation, an API key), stamped by EveryOps. */
+  | "created_by"
+  /** Who changed the record last, stamped by EveryOps on every save. */
+  | "edited_by";
 
 export type FieldOption = { id: string; label: string; tone: Tone };
 
@@ -516,6 +525,8 @@ export type Blueprint = {
   rules: Rule[];
   /** ISO 4217 code money reads in (PHP, USD, SGD). Amounts are plain numbers; older blueprints mean PHP. */
   currency?: string;
+  /** The IANA time zone the workspace's dates, schedules and "today" are read in. Older blueprints mean Asia/Manila. */
+  timeZone?: string;
   /** Printable documents (invoices, quotes, agreements). Older blueprints have none. */
   printTemplates?: PrintTemplate[];
 };
@@ -549,7 +560,13 @@ export type DataRecord = {
   data: RecordData;
   createdAt: string;
   updatedAt: string;
+  /** Who added it and who changed it last, as the server stamped them. Older records have none. */
+  createdBy?: RecordActor;
+  updatedBy?: RecordActor;
 };
+
+/** Who wrote a record: its kind (person, form, automation, api, agent, sync, visitor), its id, and how it reads. */
+export type RecordActor = { type: string; id?: string | null; name: string };
 
 export type WorkspaceData = {
   blueprint: Blueprint;

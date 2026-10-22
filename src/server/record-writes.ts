@@ -5,11 +5,12 @@ import { newId } from "@/lib/engine/ids";
 import { applyRecordOps, createRecord, updateRecord } from "@/lib/engine/records";
 import { autoReferenceFields, nextReference } from "@/lib/engine/references";
 import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
-import { type Actor, logActivity } from "./activity";
+import { type Actor, logActivity, recordActor } from "./activity";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, deleteRecords, putRecords, readRecords, writePages } from "./workspace-data";
+import { enterZone } from "./zone";
 
 /**
  * Record writes from outside the app (MCP tools, the REST API): one record at a time, through the same engine as
@@ -41,6 +42,7 @@ export async function writeRecord(
     const done = await (async (): Promise<WriteResult> => {
       await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
       const bp = await currentBlueprint(trx, slug);
+      enterZone(bp);
       if (!bp) return { ok: false, status: 404, message: "Workspace not found." };
       const stored = await readRecords(trx, slug);
       const before = new Map(stored.map((s) => [s.record.id, s]));
@@ -95,7 +97,7 @@ export async function writeRecord(
       });
       const gone = stored.filter((s) => !kept.has(s.record.id)).map((s) => ({ id: s.record.id, rev: s.rev }));
       removed = gone.map((g) => g.id);
-      const put = await putRecords(trx, slug, puts);
+      const put = await putRecords(trx, slug, puts, await recordActor(trx, actor));
       const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, gone))];
       if (conflicts.length) throw new Error(`record write conflicted on ${conflicts.join(", ")}`);
       hooks = await queueChanges(trx, slug, bp, [

@@ -79,7 +79,7 @@ export const openapi = {
     title: "EveryOps API",
     version: API_VERSION,
     description:
-      "Read and write the records in your EveryOps workspaces. Every write is checked like the app checks it (required fields, valid choices, free booking slots) and runs the workspace's save automations. Times are in Asia/Manila; money is in the workspace's currency (the schema's currency, PHP unless the owner set another).",
+      "Read and write the records in your EveryOps workspaces. Every write is checked like the app checks it (required fields, valid choices, free booking slots) and runs the workspace's save automations. Times are on each workspace's clock (the schema's timeZone, Asia/Manila unless the owner set another); money is in the workspace's currency (the schema's currency, PHP unless the owner set another).",
   },
   servers: [{ url: "https://everyops.app/api/v1" }],
   security: [{ apiKey: [] }],
@@ -360,7 +360,7 @@ export const openapi = {
       Values: {
         type: "object",
         description:
-          "Field ids or names to values: choices by label, links by the linked record's name or id, dates YYYY-MM-DD, times in Manila, time ranges as {start, end}.",
+          "Field ids or names to values: choices by label, links by the linked record's name or id, dates YYYY-MM-DD, times on the workspace's clock, time ranges as {start, end}.",
         additionalProperties: true,
       },
       WriteMeta: {

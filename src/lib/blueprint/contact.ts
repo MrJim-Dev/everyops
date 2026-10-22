@@ -56,6 +56,18 @@ export function isFilePath(value: unknown): value is string {
   return !!m && (FILE_EXTENSIONS as readonly string[]).includes(m[1]);
 }
 
+/** The name a drawn signature is stored with, so the server can tell it from a photo on the same form. */
+export const SIGNATURE_FILE = "Signature.png";
+/** Previews (nothing is saved) keep a signature in the page as a PNG data URL, at most this long. */
+const PREVIEW_SIGNATURE = /^data:image\/png;base64,[A-Za-z0-9+/=]{100,400000}$/;
+
+/** A signature value: a PNG in the workspace's documents, or (in previews only) a PNG kept in the page. */
+export function isSignaturePath(value: unknown, { preview = false } = {}): value is string {
+  if (typeof value !== "string") return false;
+  if (preview && PREVIEW_SIGNATURE.test(value)) return true;
+  return FILE.exec(value)?.[1] === "png";
+}
+
 /** The name a file was uploaded with, or a plain one from its kind ("File.pdf"). */
 export function fileName(value: string): string {
   const m = FILE.exec(value);

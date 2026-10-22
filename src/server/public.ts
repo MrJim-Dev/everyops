@@ -1,7 +1,7 @@
 import { parseDuration, parseRating } from "@/lib/format";
 import "server-only";
 import { sql } from "kysely";
-import { normalizeUrl } from "@/lib/blueprint/contact";
+import { isSignaturePath, normalizeUrl, SIGNATURE_FILE } from "@/lib/blueprint/contact";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, FieldValue, FormView, RecordData } from "@/lib/blueprint/types";
 import { createRecord, isImagePath } from "@/lib/engine/records";
@@ -36,9 +36,10 @@ import { takeToken } from "./ai/rate-limit";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { managePath } from "./manage";
-import { saveImage } from "./storage";
+import { imageType, saveDocument, saveImage } from "./storage";
 import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
+import { enterZone } from "./zone";
 
 const ID = /^[a-z0-9][a-z0-9-]{1,79}$/;
 
@@ -56,6 +57,7 @@ export async function publicPage(
   viewId?: string,
 ): Promise<{ site: PublicSite; page: PublicPageData } | { redirect: string } | null> {
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc || doc.meta.setup) return null;
   const bp = doc.blueprint;
   const custom = viewId
@@ -86,6 +88,7 @@ export async function publicPage(
  */
 export async function sharedData(slug: string, viewId: string) {
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc || doc.meta.setup) return null;
   const data = publicTableData(doc.blueprint, doc.records, viewId);
   return data.ok ? data : null;
@@ -99,6 +102,7 @@ export async function publicSlots(
 ): Promise<Slot[] | null> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc) return null;
   const bp = doc.blueprint;
   const view = bp.views.find((v) => v.id === viewId);
@@ -116,6 +120,7 @@ export async function publicDays(
 ): Promise<DayFree[] | null> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return null;
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc) return null;
   const view = doc.blueprint.views.find((v) => v.id === viewId);
   if (view?.type !== "form" || !view.public) return null;
@@ -211,6 +216,10 @@ function draftFromVisitor(
       case "image":
         // Only a picture this workspace's public upload stored (a proof of payment); never a link elsewhere.
         value = isImagePath(v) && v.startsWith(`/api/files/${slug}/`) ? v : undefined;
+        break;
+      case "signature":
+        // Only a signature this workspace's public upload stored, in its own documents.
+        value = isSignaturePath(v) && v.startsWith(`/api/files/${slug}/docs/`) ? v : undefined;
         break;
     }
     if (value !== undefined) input[f.id] = value;
@@ -345,6 +354,7 @@ export async function quotePublicForm(
   now = new Date(),
 ): Promise<QuoteResult> {
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc || doc.meta.setup) return { ok: false, message: "This page doesn't exist." };
   const bp = doc.blueprint;
   const view = bp.views.find((v) => v.id === viewId);
@@ -406,6 +416,7 @@ export async function submitPublicForm(
     // The same lock browser saves take, so revs stay put while the booking is checked and written.
     const { rows } = await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
     const bp = rows.length ? await currentBlueprint(trx, slug) : undefined;
+    enterZone(bp);
     if (!bp) return { ok: false, status: 404, message: "This page doesn't exist." } as const;
     const stored = await readRecords(trx, slug);
     const doc = { records: stored.map((s) => s.record) };
@@ -425,7 +436,12 @@ export async function submitPublicForm(
       if (!was) return [{ record: r, rev: null }];
       return sameValue(was.record, r) ? [] : [{ record: r, rev: was.rev }];
     });
-    const saved = await putRecords(trx, slug, writes);
+    // Rows the form added read "Public form · <form name>"; totals it recalculated on other rows are its edits too.
+    const saved = await putRecords(trx, slug, writes, {
+      type: "public_form",
+      id: view.id,
+      name: `Public form · ${view.name}`,
+    });
     if (saved.conflicts.length)
       throw new Error(`public submission conflicted on ${saved.conflicts.join(", ")}`);
     hooks = await queueChanges(
@@ -519,12 +535,22 @@ export async function uploadPublicImage(
   slug: string,
   viewId: string,
   bytes: Uint8Array,
+  filename = "",
 ): Promise<UploadResult> {
   const doc = await readDoc(slug);
+  enterZone(doc?.blueprint);
   if (!doc || doc.meta.setup) return { ok: false, status: 404, message: "This page doesn't exist." };
   const view = doc.blueprint.views.find((v) => v.id === viewId);
   if (view?.type !== "form" || !view.public) return { ok: false, status: 404, message: "No such form." };
-  if (!publicFieldsOf(doc.blueprint, view).some((f) => f.type === "image"))
+  const fields = publicFieldsOf(doc.blueprint, view);
+  // A drawn signature goes to the workspace's private documents, never with the public pictures.
+  if (filename === SIGNATURE_FILE && fields.some((f) => f.type === "signature")) {
+    if (imageType(bytes)?.ext !== "png")
+      return { ok: false, status: 415, message: "That signature didn't come through. Sign again." };
+    const url = await saveDocument(slug, bytes, SIGNATURE_FILE);
+    return url ? { ok: true, url } : { ok: false, status: 415, message: "Sign again." };
+  }
+  if (!fields.some((f) => f.type === "image"))
     return { ok: false, status: 403, message: "This form doesn't take uploads." };
   const url = await saveImage(slug, bytes);
   if (!url)

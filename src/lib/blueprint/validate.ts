@@ -3,6 +3,7 @@ import { componentDef, layoutItems, type Ref } from "@/lib/components/registry";
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
 import { isCurrency } from "@/lib/format";
+import { isTimeZone } from "@/lib/time";
 import { displayKind, isNumericKind } from "./field-kind";
 import { walkPath } from "./paths";
 import type { Block, Blueprint, Entity, Field, FormExtras, LayoutView, Rule } from "./types";
@@ -33,6 +34,8 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
   const errors: ValidationError[] = [];
   if (bp.currency !== undefined && !isCurrency(bp.currency))
     errors.push({ path: "currency", message: `"${bp.currency}" isn't a currency EveryOps supports` });
+  if (bp.timeZone !== undefined && !isTimeZone(bp.timeZone))
+    errors.push({ path: "timeZone", message: `"${bp.timeZone}" isn't a time zone` });
   const entityIds = new Set(bp.entities.map((e) => e.id));
   const viewIds = new Set(bp.views.map((v) => v.id));
   const widgetIds = new Set(bp.widgets.map((w) => w.id));

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { CurrencyProvider } from "@/components/workspace/currency";
 import { publicHref } from "@/lib/domains";
 import type { PublicPageData, PublicSite } from "@/lib/public/resolve";
+import { setBrowserZone } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { HtmlPageFrame } from "./html-page-frame";
 import { PublicBlocks } from "./public-blocks";
@@ -36,6 +37,8 @@ function PublicSiteBody({
   /** Served on the workspace's own domain: links drop the /s/<workspace> prefix. */
   customDomain?: boolean;
 }) {
+  // Dates on the site read on the workspace's clock (in the browser; the server renders on it already).
+  setBrowserZone(site.timeZone);
   // A custom HTML page is the whole page: the owner's design, without the site's header and footer.
   if (page.type === "html")
     return (
