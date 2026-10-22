@@ -60,6 +60,60 @@ export async function queueEvents(ex: Ex, workspaceId: string, events: EventDraf
   return rows.length;
 }
 
+/** Automation calls one workspace may make in a day, so a schedule over many records can't flood a service. */
+const DAILY_CALLS = Number(process.env.AUTOMATION_CALL_DAILY_LIMIT ?? 500);
+
+/**
+ * Queues automations' calls, inside the transaction of the save or run that made them. Each goes to the endpoint
+ * it names (only this workspace's, and only while it's on and accepts automation calls), with the body as posted,
+ * so services that expect their own JSON (Slack's {"text": …}) get exactly that. Answers how many were queued and
+ * why any weren't, for the run's log.
+ */
+export async function queueCalls(
+  ex: Ex,
+  workspaceId: string,
+  calls: { endpointId: string; body: unknown }[],
+): Promise<{ queued: number; problems: string[] }> {
+  if (!calls.length) return { queued: 0, problems: [] };
+  const ids = [...new Set(calls.map((c) => c.endpointId))];
+  const { rows: endpoints } = await sql<{
+    id: string;
+    enabled: boolean;
+    events: string[];
+    description: string | null;
+  }>`
+    select id, enabled, events, description from webhook_endpoint
+    where workspace_id = ${workspaceId} and id = any(${ids})`.execute(ex);
+  const { rows: today } = await sql<{ n: number }>`select count(*)::int as n from webhook_delivery
+    where workspace_id = ${workspaceId} and event_type = 'automation.call'
+      and created_at >= date_trunc('day', now() at time zone 'Asia/Manila') at time zone 'Asia/Manila'`.execute(
+    ex,
+  );
+  let room = Math.max(0, DAILY_CALLS - (today[0]?.n ?? 0));
+  const problems = new Set<string>();
+  const rows: { endpoint: string; event: string; payload: string }[] = [];
+  for (const call of calls) {
+    const endpoint = endpoints.find((e) => e.id === call.endpointId);
+    if (!endpoint) problems.add(`The webhook endpoint ${call.endpointId} doesn't exist any more.`);
+    else if (!endpoint.enabled)
+      problems.add(`${endpoint.description || "The webhook endpoint"} is turned off.`);
+    else if (!endpoint.events.includes("automation.call"))
+      problems.add(`${endpoint.description || "The webhook endpoint"} doesn't accept automation calls.`);
+    else if (room <= 0) problems.add(`Today's limit of ${DAILY_CALLS} automation calls is reached.`);
+    else {
+      room--;
+      rows.push({ endpoint: endpoint.id, event: id("evt_"), payload: JSON.stringify(call.body ?? {}) });
+    }
+  }
+  if (rows.length)
+    await sql`insert into webhook_delivery (endpoint_id, workspace_id, event_id, event_type, payload)
+      select x.endpoint, ${workspaceId}, x.event, 'automation.call', x.payload::jsonb
+      from jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) as x(endpoint text, event text, payload text)`.execute(
+      ex,
+    );
+  return { queued: rows.length, problems: [...problems] };
+}
+
 /** Record changes (and any other events, like a public form submission) as queued deliveries. */
 export const queueChanges = (
   ex: Ex,

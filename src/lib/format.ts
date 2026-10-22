@@ -122,6 +122,51 @@ export function formatPercent(value: number): string {
   return `${plain.format(value)}%`;
 }
 
+/** The highest rating; ratings are whole numbers from 1 to RATING_MAX. */
+export const RATING_MAX = 5;
+
+/** A rating as stars: 4 → ★★★★☆. */
+export function formatRating(value: number): string {
+  const n = Math.max(0, Math.min(RATING_MAX, Math.round(value)));
+  return "★".repeat(n) + "☆".repeat(RATING_MAX - n);
+}
+
+/** "4", "4/5", "★★★★" or "4 stars" as a rating from 1 to 5, or null. */
+export function parseRating(text: string): number | null {
+  const t = text.trim();
+  const stars = (t.match(/★/g) ?? []).length;
+  const n =
+    stars && /^[★☆\s]+$/.test(t) ? stars : Number(/^(\d+(?:\.\d+)?)\s*(?:\/\s*5|stars?)?$/i.exec(t)?.[1]);
+  return Number.isInteger(n) && n >= 1 && n <= RATING_MAX ? n : null;
+}
+
+/** Minutes as people read them: 90 → "1 h 30 min", 45 → "45 min", 120 → "2 h". */
+export function formatDuration(minutes: number): string {
+  const total = Math.round(Math.abs(minutes));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  const text = h && m ? `${plain.format(h)} h ${m} min` : h ? `${plain.format(h)} h` : `${m} min`;
+  return minutes < 0 ? `−${text}` : text;
+}
+
+/**
+ * A length of time typed the usual ways, in minutes: "90" (minutes), "1:30", "1h 30m", "1 hr 30 mins", "1.5 h",
+ * "2 hours", "45 min". Null when it doesn't read as one.
+ */
+export function parseDuration(text: string): number | null {
+  const t = text.trim().toLowerCase();
+  if (!t) return null;
+  if (/^\d+(\.\d+)?$/.test(t)) return Math.round(Number(t));
+  const clock = /^(\d+):([0-5]\d)$/.exec(t);
+  if (clock) return Number(clock[1]) * 60 + Number(clock[2]);
+  const parts =
+    /^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?\s*(?:(\d+(?:\.\d+)?)\s*(?:m|min|mins|minute|minutes))?$/.exec(
+      t,
+    );
+  if (!parts || (!parts[1] && !parts[2])) return null;
+  return Math.round(Number(parts[1] ?? 0) * 60 + Number(parts[2] ?? 0));
+}
+
 const dateFormat = new Intl.DateTimeFormat("en-PH", {
   timeZone: TIME_ZONE,
   weekday: "short",

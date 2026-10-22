@@ -17,8 +17,10 @@ import { normalizeUrl } from "@/lib/blueprint/contact";
 import type { Field, FieldValue, TimeRange } from "@/lib/blueprint/types";
 import { currencySymbol, isTimeRange } from "@/lib/format";
 import { at, dateKey, manilaParts } from "@/lib/time";
+import { DurationInput } from "./duration-input";
 import { FileInput } from "./file-input";
 import { ImageInput } from "./image-input";
+import { RatingInput } from "./rating-input";
 import { RelationInput } from "./relation-input";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -60,6 +62,24 @@ export function FieldInput({ id, field, value, onChange, invalid }: Props) {
           inputMode="decimal"
           value={value === null || value === undefined ? "" : String(value)}
           onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+        />
+      );
+    case "rating":
+      return (
+        <RatingInput
+          id={id}
+          label={field.name}
+          invalid={invalid}
+          value={typeof value === "number" ? value : null}
+          onChange={onChange}
+        />
+      );
+    case "duration":
+      return (
+        <DurationInput
+          {...common}
+          value={typeof value === "number" || typeof value === "string" ? value : null}
+          onChange={onChange}
         />
       );
     case "money":

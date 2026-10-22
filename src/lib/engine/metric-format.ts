@@ -1,12 +1,21 @@
 import { displayKind } from "@/lib/blueprint/field-kind";
 import { getEntity } from "@/lib/blueprint/lookup";
 import type { Blueprint, Widget } from "@/lib/blueprint/types";
-import { currencyOf, formatMoney, formatNumber, formatPercent } from "@/lib/format";
+import { currencyOf, formatDuration, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 
 const isMoney = (bp: Blueprint, entityId: string, fieldId: string | undefined) => {
   const field = bp.entities.find((e) => e.id === entityId)?.fields.find((f) => f.id === fieldId);
   return !!field && displayKind(bp, field) === "money";
 };
+
+/** Formats a widget's number using the kind of the field it measures. */
+/** True when a widget adds up or averages a length of time (minutes), so its axis can read in hours. */
+export function measuresDuration(bp: Blueprint, widget: Widget): boolean {
+  const { op, fieldId } = widget.metric;
+  if (widget.calc || op === "count" || !fieldId) return false;
+  const field = bp.entities.find((e) => e.id === widget.entityId)?.fields.find((f) => f.id === fieldId);
+  return !!field && displayKind(bp, field) === "duration";
+}
 
 /** Formats a widget's number using the kind of the field it measures. */
 export function metricFormatter(bp: Blueprint, widget: Widget): (value: number) => string {
@@ -26,6 +35,7 @@ export function metricFormatter(bp: Blueprint, widget: Widget): (value: number) 
   const entity = getEntity(bp, widget.entityId);
   const field = entity.fields.find((f) => f.id === fieldId);
   const kind = field ? displayKind(bp, field) : "number";
+  if (kind === "duration") return (v) => formatDuration(v);
   return kind === "money"
     ? (v) => formatMoney(Math.round(v), { currency })
     : (v) => formatNumber(Math.round(v * 10) / 10);

@@ -1,7 +1,7 @@
 import { isEmail, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, Field, FieldValue, RecordData } from "@/lib/blueprint/types";
-import { stripMoney } from "@/lib/format";
+import { parseDuration, parseRating, RATING_MAX, stripMoney } from "@/lib/format";
 
 /**
  * Values an agent or script sends (JSON) as a record's stored values: fields named by id or by name, choices by id or
@@ -49,6 +49,18 @@ function one(
       if (/^(true|yes|1)$/i.test(text)) return { value: true };
       if (/^(false|no|0)$/i.test(text)) return { value: false };
       return { error: "needs true or false" };
+    case "rating": {
+      const n = typeof value === "number" && Number.isInteger(value) ? value : parseRating(text);
+      return n !== null && n >= 1 && n <= RATING_MAX
+        ? { value: n }
+        : { error: `needs 1 to ${RATING_MAX} stars, not "${text}"` };
+    }
+    case "duration": {
+      const n = typeof value === "number" ? value : parseDuration(text);
+      return n !== null && n >= 0
+        ? { value: n }
+        : { error: `needs a length of time like 1:30, 90 or 1h 30m, not "${text}"` };
+    }
     case "select":
     case "status": {
       const o = field.options?.find((x) => x.id === text || x.label.toLowerCase() === text.toLowerCase());

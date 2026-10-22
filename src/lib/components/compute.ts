@@ -11,7 +11,7 @@ import {
 } from "@/lib/engine/aggregate";
 import { compareStat, startOf } from "@/lib/engine/dashboard";
 import { applyFilter } from "@/lib/engine/query";
-import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
+import { formatDuration, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { addDays, dateKey, todayKey } from "@/lib/time";
 
 /**
@@ -21,7 +21,7 @@ import { addDays, dateKey, todayKey } from "@/lib/time";
  */
 
 export type Metric = { entityId: string; op: "count" | "sum" | "avg"; fieldId?: string; filter?: string };
-export type ValueKind = "money" | "number" | "percent";
+export type ValueKind = "money" | "number" | "percent" | "duration";
 
 export function metricWidget(title: string, m: Metric, extra: Partial<Widget> = {}): Widget {
   return {
@@ -40,13 +40,16 @@ export function valueKind(bp: Blueprint, m: Metric, format?: ValueKind): ValueKi
   if (format) return format;
   if (m.op === "count" || !m.fieldId) return "number";
   const field = bp.entities.find((e) => e.id === m.entityId)?.fields.find((f) => f.id === m.fieldId);
-  return field && displayKind(bp, field) === "money" ? "money" : "number";
+  const kind = field && displayKind(bp, field);
+  // Total or average time reads as time ("12 h 30 min"); counts of anything stay numbers.
+  return kind === "money" ? "money" : kind === "duration" ? "duration" : "number";
 }
 
 /** Without a currency it reads in the one on screen (the workspace or public site being shown). */
 export function formatValue(kind: ValueKind, v: number, currency?: string): string {
   if (kind === "money") return formatMoney(Math.round(v), { currency });
   if (kind === "percent") return formatPercent(Math.round(v * 10) / 10);
+  if (kind === "duration") return formatDuration(v);
   return formatNumber(Math.round(v * 10) / 10);
 }
 

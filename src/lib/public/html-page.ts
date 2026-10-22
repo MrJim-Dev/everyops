@@ -11,7 +11,7 @@
  */
 
 import type { Blueprint, FieldValue, HtmlPageView } from "@/lib/blueprint/types";
-import { stripMoney } from "@/lib/format";
+import { formatRating, parseDuration, parseRating, stripMoney } from "@/lib/format";
 import { at } from "@/lib/time";
 import type { PublicField, PublicForm } from "./resolve";
 
@@ -249,6 +249,16 @@ export function formValues(form: PublicForm, raw: RawFormValues): Record<string,
         if (v && Number.isFinite(n)) out[f.id] = n;
         break;
       }
+      case "rating": {
+        const n = parseRating(v);
+        if (n !== null) out[f.id] = n;
+        break;
+      }
+      case "duration": {
+        const n = parseDuration(v);
+        if (n !== null) out[f.id] = n;
+        break;
+      }
       case "checkbox":
         if (raw[f.id] !== undefined) out[f.id] = /^(on|true|yes|1)$/i.test(v);
         break;
@@ -307,6 +317,10 @@ export function formSnippet(form: PublicForm): string {
       case "money":
       case "percent":
         return `  <label>${label}<input type="number" name="${f.id}" step="any"${req}></label>`;
+      case "rating":
+        return `  <label>${label}<select name="${f.id}"${req}><option value="">Choose…</option>${[5, 4, 3, 2, 1].map((n) => `<option value="${n}">${formatRating(n)}</option>`).join("")}</select></label>`;
+      case "duration":
+        return `  <label>${label}<input type="text" name="${f.id}" placeholder="1:30, 90 or 1h 30m"${req}></label>`;
       case "date":
         return `  <label>${label}<input type="date" name="${f.id}"${req}></label>`;
       case "datetime":

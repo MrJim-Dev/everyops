@@ -18,7 +18,7 @@ import type { RecordPut } from "@/lib/store/workspace-sync";
 import { logActivity, recordEntries } from "./activity";
 import { db } from "./db";
 import { sendMail } from "./mail";
-import { queueChanges, sendSoon } from "./webhooks";
+import { queueCalls, queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, putRecords, readRecords } from "./workspace-data";
 
 type Ex = Parameters<typeof readRecords>[0];
@@ -93,7 +93,8 @@ export const fireOnSave = (bp: Blueprint | undefined) =>
 
 /**
  * Records what a save set off, inside the save's transaction: one row per automation that fired, with the emails
- * it sends waiting as pending. Returns the ids to deliver after the commit.
+ * it sends waiting as pending and the outside calls it makes queued on their webhook endpoints (sent after the
+ * commit, with the endpoint's retries). Returns the ids of runs whose emails to deliver after the commit.
  */
 export async function logSaveRuns(
   trx: Ex,
@@ -106,7 +107,24 @@ export async function logSaveRuns(
 ): Promise<number[]> {
   const runs = saveRuns(bp, changes, records, now);
   if (!runs.length) return [];
-  const rows = runs.map((r) => ({
+  // Outside calls first, so each run's log says whether its calls went out or why not.
+  const called = new Map<number, string | null>();
+  let queued = 0;
+  for (const [i, r] of runs.entries()) {
+    if (!r.calls.length) continue;
+    const done = await queueCalls(trx, workspaceId, r.calls);
+    queued += done.queued;
+    called.set(
+      i,
+      [
+        done.queued ? `Called ${done.queued} webhook endpoint${done.queued === 1 ? "" : "s"}.` : "",
+        ...done.problems,
+      ]
+        .filter(Boolean)
+        .join(" ") || null,
+    );
+  }
+  const rows = runs.map((r, i) => ({
     workspace_id: workspaceId,
     rule_id: r.rule.id,
     rule_name: r.rule.name,
@@ -115,15 +133,18 @@ export async function logSaveRuns(
     trigger,
     status: r.emails.length ? "pending" : "done",
     emails: r.emails.length ? r.emails : null,
+    detail: called.get(i) ?? null,
   }));
   const { rows: ids } = await sql<{ id: string; status: string }>`
     insert into automation_run (workspace_id, rule_id, rule_name, record_id, record_label, trigger, status, emails,
-      finished_at)
-    select x.workspace_id, x.rule_id, x.rule_name, x.record_id, x.record_label, x.trigger, x.status, x.emails,
+      detail, finished_at)
+    select x.workspace_id, x.rule_id, x.rule_name, x.record_id, x.record_label, x.trigger, x.status, x.emails, x.detail,
       case when x.status = 'done' then now() end
     from jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) as x(workspace_id text, rule_id text, rule_name text,
-      record_id text, record_label text, trigger text, status text, emails jsonb)
+      record_id text, record_label text, trigger text, status text, emails jsonb, detail text)
     returning id, status`.execute(trx);
+  // Sent once the response is out; a call made before the commit lands waits for the runner's next pass.
+  sendSoon(queued);
   return ids.filter((r) => r.status === "pending").map((r) => Number(r.id));
 }
 
@@ -249,6 +270,7 @@ export async function runTimedAutomations(
         const due = dueRuns(bp, records, now, { ruleId: options.ruleId, force: options.force });
         const ids: number[] = [];
         let count = 0;
+        let calls = 0;
         const ran = new Map<string, { name: string; records: string[]; notes: string[] }>();
         for (const run of due) {
           const key = options.force ? `manual:${now.getTime()}:${run.key}` : run.key;
@@ -271,10 +293,16 @@ export async function runTimedAutomations(
           const outcome = applyActions(bp, records, run.rule, current, now);
           records = outcome.records;
           count++;
+          const called = await queueCalls(trx, id, outcome.calls);
+          calls += called.queued;
           const added = outcome.created.length
             ? `Added ${outcome.created.length} record${outcome.created.length === 1 ? "" : "s"}.`
             : "";
-          const detail = [added, ...outcome.notices].filter(Boolean).join(" ") || null;
+          const reached = called.queued
+            ? `Called ${called.queued} webhook endpoint${called.queued === 1 ? "" : "s"}.`
+            : "";
+          const detail =
+            [added, reached, ...called.problems, ...outcome.notices].filter(Boolean).join(" ") || null;
           const r = ran.get(run.rule.id) ?? { name: run.rule.name, records: [], notes: [] };
           r.records.push(run.record.id);
           if (detail) r.notes.push(detail);
@@ -287,7 +315,7 @@ export async function runTimedAutomations(
             where id = ${runId}`.execute(trx);
           if (outcome.emails.length) ids.push(Number(runId));
         }
-        if (!count) return { runs: 0, pending: ids, hooks: 0 };
+        if (!count) return { runs: 0, pending: ids, hooks: calls };
         const computed = computeAll(bp, records, now);
         const before = new Map(stored.map((s) => [s.record.id, s]));
         const writes = computed.flatMap((r): RecordPut[] => {
@@ -338,7 +366,7 @@ export async function runTimedAutomations(
               writes.map((w) => ({ before: before.get(w.record.id)?.record, after: w.record })),
             )
           : 0;
-        return { runs: count, pending: ids, hooks };
+        return { runs: count, pending: ids, hooks: hooks + calls };
       });
       runs += done.runs;
       pending.push(...done.pending);

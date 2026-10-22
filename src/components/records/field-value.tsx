@@ -10,6 +10,7 @@ import {
   currencyOf,
   formatDate,
   formatDateTime,
+  formatDuration,
   formatMoney,
   formatNumber,
   formatPercent,
@@ -18,6 +19,7 @@ import {
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { PersonChip } from "./person-chip";
+import { RatingStars } from "./rating-input";
 import { StatusBadge } from "./status-badge";
 
 const Empty = () => <span className="text-muted-foreground/50">—</span>;
@@ -53,6 +55,14 @@ export function FieldValue({
       return (
         <span className={cn("font-mono tabular text-[12.5px]", className)}>
           {formatPercent(Number(value))}
+        </span>
+      );
+    case "rating":
+      return <RatingStars value={Number(value)} className={className} />;
+    case "duration":
+      return (
+        <span className={cn("font-mono tabular text-[12.5px]", className)}>
+          {formatDuration(Number(value))}
         </span>
       );
     case "checkbox":

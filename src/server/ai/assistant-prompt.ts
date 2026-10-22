@@ -40,18 +40,20 @@ export const assistantRule = rule.extend({
   }),
   actions: z.array(
     rule.shape.actions.element.extend({
-      type: z.string().describe("set_field, adjust_number, notify, send_email, create_record or link_record"),
+      type: z
+        .string()
+        .describe("set_field, adjust_number, notify, send_email, create_record, link_record or call_api"),
       fieldId: z
         .string()
         .optional()
         .describe(
-          "set_field/adjust_number: the field it changes. send_email: who to email, {{email_field}} or an address. create_record: the record type it adds. link_record: the field of the linked type to match",
+          "set_field/adjust_number: the field it changes. send_email: who to email, {{email_field}} or an address. create_record: the record type it adds. link_record: the field of the linked type to match. call_api: the webhook endpoint id",
         ),
       value: z
         .string()
         .optional()
         .describe(
-          'set_field: formula for the new value. adjust_number: leave empty; the amount goes in delta (qty, -qty). send_email: the email, its subject on the first line and the message after it. create_record: JSON of field id to formula on the trigger record, e.g. {"amount":"price"}. link_record: formula for what to match, e.g. date',
+          'set_field: formula for the new value. adjust_number: leave empty; the amount goes in delta (qty, -qty). send_email: the email, its subject on the first line and the message after it. create_record: JSON of field id to formula on the trigger record, e.g. {"amount":"price"}. link_record: formula for what to match, e.g. date. call_api: the JSON to post, or empty to send the record',
         ),
     }),
   ),
@@ -457,6 +459,8 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   clickable" or "check phone numbers" is redefining that text field as email or phone. Email, phone and file
   fields never show on public pages or shared tables. A rollup can count only some children with rollup.filter
   (paid payments: status == 'paid'), e.g. "only count paid lines in the total".
+- rating (1 to 5 stars) and duration (minutes, shown as "1 h 30 min") are their own types: "add a star rating",
+  "track how long each job took". Redefining a number field that holds ratings or minutes is the same change.
 - Options: keep every existing option id when you change a select or status field's options (rename labels freely).
   To retire an option that records use, also update_record each of those records to the option that replaces it.
 - Columns: to reorder, show or hide a table's columns (or a board's card fields), use update_view with fieldIds:
@@ -511,6 +515,12 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   every save while when holds, so "when saved as Logged" is when status == 'logged'. Owners turn automations on
   and off in Settings → Automations; when asked to turn one off, tell them to switch it off there (don't
   remove it unless they ask to delete it).
+- call_api sends something to an outside service (Slack, Zapier, Make, n8n, the owner's own system) through one of
+  the workspace's webhook endpoints, listed under "Webhook endpoints" with their ids: fieldId is the endpoint id
+  and value is the JSON to post with {{field}} placeholders inside its strings, e.g. {"text": "New booking: {{name}}
+  at {{time}}"} for Slack, or empty to send the whole record. Use only an endpoint that's listed; when none is (or
+  none accepts automation calls), don't plan it: say to add one in Settings → Webhooks with "An automation calls
+  it" ticked, then ask again. URLs and secrets stay in Settings, never in the automation.
 - Pages: each sidebar page is a system; its views are the tabs on that page. A new page for something that already
   exists ("a separate page for courts", "give the calendar its own page") is add_system plus add_view (a new view
   of that record type) or move_view (move an existing tab there; the old page keeps its other tabs). Give every

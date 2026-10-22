@@ -1,7 +1,8 @@
 "use client";
 
-import { DotsThreeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
-import { useState } from "react";
+import { DotsThreeIcon, PencilSimpleIcon, PlusIcon, PrinterIcon, TrashIcon } from "@phosphor-icons/react";
+import { useMemo, useState } from "react";
+import { PrintDialog } from "@/components/print/print-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
@@ -9,6 +10,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
@@ -25,7 +27,8 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useAssistant } from "@/lib/assistant/panel-store";
 import { editableFields, statusField } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
-import type { DataRecord, Entity, RecordData } from "@/lib/blueprint/types";
+import type { DataRecord, Entity, PrintTemplate, RecordData } from "@/lib/blueprint/types";
+import { renderPrint, starterTemplate, templatesFor } from "@/lib/engine/print";
 import type { FieldError } from "@/lib/engine/records";
 import { formatDateTime } from "@/lib/format";
 import { canEdit } from "@/lib/store/workspaces";
@@ -81,6 +84,14 @@ function RecordSheetBody({
   // The record as it was when editing started; only fields that differ from it are saved.
   const [base, setBase] = useState<RecordData>(record.data);
   const [errors, setErrors] = useState<FieldError[]>([]);
+  const [printing, setPrinting] = useState<PrintTemplate | null>(null);
+  // The record type's print templates; without any, one built from its fields so every record can print.
+  const printables = useMemo(() => {
+    const own = templatesFor(blueprint, entity.id);
+    return own.length
+      ? own
+      : [{ id: "default", entityId: entity.id, name: entity.name, body: starterTemplate(blueprint, entity) }];
+  }, [blueprint, entity]);
   const status = statusField(entity);
   const current = status ? optionOf(status, record.data[status.id]) : undefined;
   // The next sensible step is the first "success" option the record isn't in yet (e.g. Paid, Approved).
@@ -263,6 +274,13 @@ function RecordSheetBody({
                         Mark as {o.label.toLowerCase()}
                       </DropdownMenuItem>
                     ))}
+                  {printables.map((t) => (
+                    <DropdownMenuItem key={t.id} onClick={() => setPrinting(t)}>
+                      <PrinterIcon />
+                      Print {t.name.toLowerCase()}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     variant="destructive"
                     onClick={() => {
@@ -279,6 +297,15 @@ function RecordSheetBody({
           </>
         )}
       </SheetFooter>
+      {printing ? (
+        <PrintDialog
+          open
+          title={`${printing.name} ${recordTitle(entity, record)}`}
+          markdown={renderPrint(blueprint, printing, record, records)}
+          paper={printing.paper}
+          onClose={() => setPrinting(null)}
+        />
+      ) : null}
     </>
   );
 }
