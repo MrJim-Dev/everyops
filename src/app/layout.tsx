@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { StoreHydration } from "@/components/store-hydration";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { InstallSetup } from "@/lib/pwa/install";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -14,6 +15,8 @@ export const metadata: Metadata = {
   title: { default: "EveryOps", template: "%s · EveryOps" },
   description: "Describe your business and EveryOps builds the systems you need inside one workspace.",
   openGraph: { siteName: "EveryOps", type: "website" },
+  // Added to an iPhone or iPad home screen, it opens full screen with its own name.
+  appleWebApp: { capable: true, title: "EveryOps", statusBarStyle: "black" },
 };
 
 export const viewport: Viewport = { themeColor: "#000000" };
@@ -25,6 +28,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <TooltipProvider delay={400}>{children}</TooltipProvider>
         <Toaster position="bottom-left" />
         <StoreHydration />
+        <InstallSetup />
       </body>
     </html>
   );
