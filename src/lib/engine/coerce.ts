@@ -34,6 +34,9 @@ function one(
     case "formula":
     case "rollup":
       return { error: "is worked out by EveryOps and can't be set" };
+    case "created_by":
+    case "edited_by":
+      return { error: "is filled in by EveryOps from whoever adds or changes the record, and can't be set" };
     case "image":
     case "file":
       return { error: "takes an upload, which isn't available here" };

@@ -24,6 +24,7 @@ import { FREE_PAGE_TYPES } from "@/lib/blueprint/types";
 import { GROUP_KINDS, validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { samplesThisYear } from "@/lib/catalog/shift";
+import { actorTypeFor } from "@/lib/engine/actors";
 import { computeAll } from "@/lib/engine/compute";
 import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
 import { impliedRules, linePriceRules, widenMovements } from "@/lib/engine/implied-rules";
@@ -186,7 +187,7 @@ function contactType(f: { id: string; name: string; type: Field["type"] }): Fiel
     return "phone";
   if (/^(phone|mobile|phone_number|mobile_number|contact_number)$/.test(id)) return "phone";
   if (/^(website|web address|url|site)$/.test(name) || /^(website|url|web_address)$/.test(id)) return "url";
-  return "text";
+  return actorTypeFor(f.name) ?? "text";
 }
 
 type ResultType = NonNullable<Field["formula"]>["resultType"];

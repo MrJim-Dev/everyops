@@ -618,6 +618,8 @@ Rules for a valid blueprint:
 - Contact details and documents have their own types: email (an email address), phone (a phone number), url (a
   website or link) and file (a document such as a PDF receipt, contract or ID scan; the team uploads it). Use
   them instead of text for those, and keep names plain (Email, Phone, Website, Contract).
+- When the team needs to see who added or last changed a record (approvals, shared logs), add a text field named
+  exactly "Created by" or "Last edited by"; the app fills it in on every save. Leave it out of forms and samples.
 - Kanban boards use a status field. Calendars use a date, datetime or time_range field.
 - Bookings of courts, rooms, tables or similar: always a resource record type (courts) with resource hours, and a
   booking record type with booking settings: resourceFieldId (a required relation to the resource), timeFieldId (a

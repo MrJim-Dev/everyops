@@ -182,7 +182,10 @@ export async function attachToBooking(
       data: { ...stored.record.data, [fieldId]: url },
       updatedAt: new Date().toISOString(),
     };
-    const put = await putRecords(trx, claim.workspace, [{ record, rev: stored.rev }]);
+    const put = await putRecords(trx, claim.workspace, [{ record, rev: stored.rev }], {
+      type: "booking_link",
+      name: "Booking link",
+    });
     if (put.conflicts.length) return false;
     hooks = await queueChanges(trx, claim.workspace, found.bp, [{ before: stored.record, after: record }]);
     await logActivity(
