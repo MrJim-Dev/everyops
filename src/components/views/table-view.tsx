@@ -394,6 +394,12 @@ export function TableView({ view }: { view: TableViewConfig }) {
             </DropdownMenu>
             <ToolbarSummary>
               {rows.length.toLocaleString("en-PH")} {rows.length === 1 ? entity.name.toLowerCase() : plural}
+              {/* Staff and viewers who see only their own records are told so, so a short list isn't a surprise. */}
+              {entity.access && (ws.role === "staff" || ws.role === "viewer")
+                ? entity.access.by === "created_by"
+                  ? " · only the ones you added"
+                  : " · only the ones assigned to you"
+                : null}
             </ToolbarSummary>
           </>
         )}
