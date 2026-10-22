@@ -124,3 +124,63 @@ export function resetPasswordEmail(p: { to: string; name: string; url: string })
   });
   return { to: p.to, subject, text, html };
 }
+
+export function waitlistJoinedEmail(p: {
+  to: string;
+  name: string | null;
+  email: string;
+  source: "email" | "google";
+  waiting: number;
+  approveUrl: string;
+  listUrl: string;
+}): Mail {
+  const who = p.name ? `${p.name} (${p.email})` : p.email;
+  const via = p.source === "google" ? "Google" : "email";
+  const others = p.waiting > 1 ? `${p.waiting} people are waiting now.` : "They're the only one waiting.";
+  const subject = `${p.name ?? p.email} joined the EveryOps waitlist`;
+  const text = [
+    `${who} tried to create an account with ${via} and is on the waitlist.`,
+    others,
+    "",
+    `Approve them: ${p.approveUrl}`,
+    `Everyone waiting: ${p.listUrl}`,
+    "",
+    "Approving lets them create their account and emails them a sign-up link. The approve link works for 30 days.",
+  ].join("\n");
+  const html = layout({
+    heading: "Someone joined the waitlist",
+    preview: `${who} wants an EveryOps account.`,
+    lines: [
+      `<strong>${esc(p.name ?? p.email)}</strong>${p.name ? ` (${esc(p.email)})` : ""} tried to create an account with ${via} and is on the waitlist.`,
+      esc(others),
+      "Approving lets them create their account and emails them a sign-up link.",
+    ],
+    action: { label: `Approve ${p.name ?? p.email}`, url: p.approveUrl },
+    footnote: `See everyone waiting on the <a href="${esc(p.listUrl)}" style="color:${BRAND.ink}">waitlist page</a>. The approve link works for 30 days. You get this because you're a site admin of EveryOps.`,
+  });
+  return { to: p.to, subject, text, html };
+}
+
+export function waitlistApprovedEmail(p: { to: string; name: string | null; url: string }): Mail {
+  const subject = "Your EveryOps spot is open";
+  const hi = p.name ? `Hi ${p.name},` : "Hi,";
+  const text = [
+    hi,
+    "",
+    "You're off the waitlist. Create your EveryOps account here:",
+    p.url,
+    "",
+    `Use ${p.to} (or Google with that address) to sign up.`,
+  ].join("\n");
+  const html = layout({
+    heading: "Your spot is open",
+    preview: "You're off the EveryOps waitlist. Create your account.",
+    lines: [
+      p.name ? `Hi ${esc(p.name)}, you're off the waitlist.` : "You're off the waitlist.",
+      `Create your account with <strong>${esc(p.to)}</strong>, or continue with Google using that address.`,
+    ],
+    action: { label: "Create your account", url: p.url },
+    footnote: "You get this because you joined the EveryOps waitlist with this address.",
+  });
+  return { to: p.to, subject, text, html };
+}

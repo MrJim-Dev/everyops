@@ -40,10 +40,11 @@ function memoryWaitlist() {
       if (row) {
         row.name = name ?? row.name;
         row.updatedAt = now();
-      } else {
-        const at = now();
-        rows.push({ email: key, name, source, status: "waiting", createdAt: at, updatedAt: at });
+        return false;
       }
+      const at = now();
+      rows.push({ email: key, name, source, status: "waiting", createdAt: at, updatedAt: at });
+      return true;
     },
   };
   const approve = (email: string) => {
@@ -54,10 +55,10 @@ function memoryWaitlist() {
 }
 
 /** A real Better Auth instance with the same hooks as src/server/auth.ts, plus the Google callback's user handling. */
-function setup() {
+function setup(onJoined?: Parameters<typeof privateBetaGate>[1]) {
   const tables: Record<string, Row[]> = { user: [], session: [], account: [], verification: [] };
   const waitlist = memoryWaitlist();
-  const gate = privateBetaGate(waitlist.store);
+  const gate = privateBetaGate(waitlist.store, onJoined);
   const auth = betterAuth({
     baseURL: "http://localhost:3000",
     secret: "test-secret-test-secret-test-secret-1234",
@@ -216,7 +217,7 @@ describe("private beta, flag off", () => {
 
   it("doesn't read the waitlist at all", async () => {
     const isApproved = vi.fn(async () => false);
-    const join = vi.fn(async () => {});
+    const join = vi.fn(async () => true);
     expect(await mayRegister("anyone@example.com", { isApproved, join }, {})).toBe(true);
     expect(isApproved).not.toHaveBeenCalled();
   });
@@ -231,5 +232,33 @@ describe("allowlist parsing", () => {
     expect(await mayRegister(" C@x.com ", none, { ...env, PRIVATE_BETA_ENABLED: "on" })).toBe(true);
     expect(await mayRegister("d@x.com", none, { ...env, PRIVATE_BETA_ENABLED: "TRUE" })).toBe(false);
     expect(await mayRegister("d@x.com", none, { PRIVATE_BETA_ENABLED: "true" })).toBe(false);
+  });
+});
+
+describe("telling the admins", () => {
+  it("tells them once per person, whether they tried with email or Google, and still refuses the account", async () => {
+    gateOn();
+    const joined: { email: string; source: WaitlistSource }[] = [];
+    const { tables, signUp, googleSignIn } = setup(async (e) => {
+      joined.push({ email: e.email, source: e.source });
+    });
+    await waitlistError(signUp("New.Person@example.com", "New Person"));
+    await waitlistError(signUp("new.person@example.com", "New Person"));
+    await waitlistError(googleSignIn("google-sub-9", "other@example.com"));
+    expect(joined).toEqual([
+      { email: "new.person@example.com", source: "email" },
+      { email: "other@example.com", source: "google" },
+    ]);
+    expect(tables.user).toHaveLength(0);
+  });
+
+  it("still answers with the waitlist message when telling them fails", async () => {
+    gateOn();
+    const { tables, signUp } = setup(async () => {
+      throw new Error("SMTP down");
+    });
+    const body = await waitlistError(signUp("someone@example.com"));
+    expect(body?.message).toBe(WAITLIST_MESSAGE);
+    expect(tables.user).toHaveLength(0);
   });
 });
