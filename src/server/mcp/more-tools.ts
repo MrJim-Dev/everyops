@@ -2,6 +2,7 @@ import "server-only";
 import { MAX_INSTRUCTIONS, MAX_NOTE_CHARS, MEMORY_KINDS, type MemoryEdit } from "@/lib/assistant/memory";
 import type { Screen } from "@/lib/assistant/screen";
 import { parseCanvas } from "@/lib/canvas/model";
+import { visibleTo } from "@/lib/engine/access";
 import { canManage } from "@/lib/store/workspace-model";
 import { addDays, at } from "@/lib/time";
 import { listActivity, logActivity } from "../activity";
@@ -27,7 +28,14 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const current = async (ctx: Ctx) => {
   const doc = await readCurrent(db, ctx.workspaceId);
   if (!doc) throw new ToolError("Workspace not found.", 404);
-  return doc;
+  // What the caller may see (record-level access): pages, views and availability read only those records.
+  const viewer = {
+    userId: ctx.caller.user.id,
+    role: ctx.role,
+    name: ctx.caller.user.name,
+    email: ctx.caller.user.email,
+  };
+  return { ...doc, records: visibleTo(doc.blueprint, viewer, doc.records) };
 };
 
 const viewOf = (ctx: Ctx, viewId: unknown) => {
