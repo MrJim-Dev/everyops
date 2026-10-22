@@ -1,12 +1,13 @@
 "use client";
 
-import { CheckIcon, MinusIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
+import { BarcodeIcon, CheckIcon, MinusIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AnimatedValue } from "@/components/motion/animated-value";
 import { SegmentedControl } from "@/components/motion/segmented-control";
 import { FieldInput } from "@/components/records/field-input";
 import { RelationInput } from "@/components/records/relation-input";
+import { ScanDialog } from "@/components/scan/scan-dialog";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,7 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useReportView } from "@/lib/assistant/screen-store";
 import { useCurrentUser } from "@/lib/auth/client";
 import { findEntity, getEntity, getField, recordsOf, recordTitle } from "@/lib/blueprint/lookup";
+import { sameCode, scannableFields } from "@/lib/blueprint/scannable";
 import type {
   CheckoutView as CheckoutConfig,
   DataRecord,
@@ -73,6 +75,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
   const orderStatus = order.fields.find((f) => f.type === "status");
   const lowStockField = lowStockFieldOf(product);
   const customerField = customerFieldOf(order, product.id);
+  const codes = useMemo(() => scannableFields(product), [product]);
 
   const [query, setQuery] = useState("");
   useReportView({ viewId: view.id, search: query.trim() || undefined });
@@ -143,8 +146,18 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
     () =>
       recordsOf(records, product.id)
         .filter((p) => category === "all" || p.data[categoryField?.id ?? ""] === category)
-        .filter((p) => recordTitle(product, p).toLowerCase().includes(query.trim().toLowerCase())),
-    [records, product, category, categoryField, query],
+        .filter((p) => {
+          const q = query.trim().toLowerCase();
+          return (
+            recordTitle(product, p).toLowerCase().includes(q) ||
+            codes.some((f) =>
+              String(p.data[f.id] ?? "")
+                .toLowerCase()
+                .includes(q),
+            )
+          );
+        }),
+    [records, product, category, categoryField, query, codes],
   );
   const byId = (id: string) => records.find((r) => r.id === id);
   const price = (p: DataRecord | undefined) => Number(p?.data[priceField?.id ?? ""] ?? 0);
@@ -168,6 +181,23 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
         return c.map((i) => (i.productId === productId ? { ...i, qty: Math.min(max, i.qty + 1) } : i));
       return [...c, { productId, qty: 1 }];
     });
+  // Products with a code (Barcode, SKU) go into the sale when it's scanned, by camera or a handheld scanner.
+  const [scanning, setScanning] = useState(false);
+  const addByCode = (code: string, quiet = false): boolean => {
+    const found = recordsOf(records, product.id).find((p) => codes.some((f) => sameCode(p.data[f.id], code)));
+    if (!found) {
+      if (!quiet) toast.error(`No product with ${codes[0]?.name.toLowerCase() ?? "code"} ${code.trim()}`);
+      return false;
+    }
+    const inCart = cart.find((i) => i.productId === found.id)?.qty ?? 0;
+    if (stock(found) - inCart <= 0) {
+      toast.error(`${recordTitle(product, found)} is sold out`);
+      return true;
+    }
+    add(found.id);
+    toast.success(`Added ${recordTitle(product, found)}`);
+    return true;
+  };
   const setQty = (productId: string, qty: number) =>
     setCart((c) =>
       qty <= 0
@@ -266,7 +296,37 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
     <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[1fr_380px] lg:overflow-hidden">
       <section aria-label="Products" className="flex flex-col lg:min-h-0">
         <div className="flex flex-col gap-3 border-b px-5 py-3">
-          <SearchInput value={query} onChange={setQuery} placeholder="Search products" />
+          {/* A handheld scanner types the code and presses Enter here; the product goes into the sale. */}
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (codes.length && query.trim() && addByCode(query, true)) setQuery("");
+            }}
+          >
+            <div className="min-w-0 flex-1 sm:flex-none">
+              <SearchInput
+                value={query}
+                onChange={setQuery}
+                placeholder={codes.length ? "Search or scan products" : "Search products"}
+              />
+            </div>
+            {codes.length ? (
+              <Button type="button" variant="outline" onClick={() => setScanning(true)}>
+                <BarcodeIcon data-icon="inline-start" />
+                Scan
+              </Button>
+            ) : null}
+          </form>
+          {codes.length ? (
+            <ScanDialog
+              open={scanning}
+              onOpenChange={setScanning}
+              title="Scan a product"
+              description={`Scan its ${codes[0].name.toLowerCase()} to add it to the sale.`}
+              onScan={(code) => addByCode(code)}
+            />
+          ) : null}
           {categoryField?.options ? (
             <SegmentedControl
               label="Category"

@@ -25,6 +25,7 @@ import { GROUP_KINDS, validateBlueprint } from "@/lib/blueprint/validate";
 import { CATALOG } from "@/lib/catalog";
 import { samplesThisYear } from "@/lib/catalog/shift";
 import { actorTypeFor } from "@/lib/engine/actors";
+import { allActions } from "@/lib/engine/branches";
 import { computeAll } from "@/lib/engine/compute";
 import { dashboardSystem, suggestWidgets } from "@/lib/engine/dashboard-suggest";
 import { impliedRules, linePriceRules, widenMovements } from "@/lib/engine/implied-rules";
@@ -1111,7 +1112,7 @@ export function toRecords(bp: Blueprint, samples: Design["samples"], now: Date):
   // would otherwise read as twelve added.
   const subtracted = new Set(
     (bp.rules ?? []).flatMap((rule) =>
-      rule.actions.flatMap((a) => {
+      allActions(rule).flatMap((a) => {
         const m =
           a.type === "adjust_number" ? /^\s*(?:0\s*)?-\s*([a-z_][a-z0-9_]*)\s*$/i.exec(a.delta) : null;
         return m ? [`${rule.trigger.entityId}.${m[1]}`] : [];

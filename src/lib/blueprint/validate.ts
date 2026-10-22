@@ -1,5 +1,6 @@
 import { publicProblems, sharedTableProblems } from "@/lib/components/public-safety";
 import { componentDef, layoutItems, type Ref } from "@/lib/components/registry";
+import { allActions } from "@/lib/engine/branches";
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
 import { isCurrency } from "@/lib/format";
@@ -49,6 +50,15 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
       errors.push({ path: kind, message: `Duplicate ${kind} id "${id}"` });
 
   bp.entities.forEach((entity, ei) => {
+    const by = entity.access?.by;
+    if (by && by !== "created_by") {
+      const field = entity.fields.find((f) => f.id === by);
+      if (!field || !["person", "email", "text"].includes(field.type))
+        errors.push({
+          path: `entities.${ei}.access`,
+          message: `${entity.name}'s access needs a person, email or text field naming who it's for, or created_by`,
+        });
+    }
     const fieldIds = new Set<string>();
     entity.fields.forEach((field, fi) => {
       const path = `entities.${ei}.fields.${fi}`;
@@ -362,8 +372,16 @@ function checkRule(bp: Blueprint, source: Entity, rule: Rule, path: string, erro
         `${status.name} has no option "${t.to}" (options: ${(status.options ?? []).map((o) => o.id).join(", ")})`,
       );
   }
-  if (!rule.actions.length) say("it has no actions");
-  for (const action of rule.actions) {
+  const branches = rule.branches ?? [];
+  if (!rule.actions.length && !branches.some((b) => b.actions.length)) say("it has no actions");
+  branches.forEach((b, i) => {
+    const which = i === 0 ? "the if" : b.when?.trim() ? `else if #${i}` : "the otherwise";
+    if (b.when?.trim()) checkExpr(bp, source, b.when, path, errors);
+    else if (i !== branches.length - 1)
+      say(`${which} branch needs a condition; only the last one can be the otherwise`);
+    if (!b.actions.length) say(`${which} branch has no actions`);
+  });
+  for (const action of allActions(rule)) {
     if (action.type === "notify") {
       if (!action.message.trim()) say("the notice has no message");
       continue;

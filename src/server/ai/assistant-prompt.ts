@@ -43,7 +43,7 @@ export const assistantRule = rule.extend({
       type: z
         .string()
         .describe(
-          "set_field, adjust_number, notify, notify_people, send_email, create_record, link_record or call_api",
+          "set_field, adjust_number, notify, notify_people, send_email, create_record, link_record or call_api; if, else_if, else start a branch",
         ),
       fieldId: z
         .string()
@@ -55,7 +55,7 @@ export const assistantRule = rule.extend({
         .string()
         .optional()
         .describe(
-          'set_field: formula for the new value. adjust_number: leave empty; the amount goes in delta (qty, -qty). send_email: the email, its subject on the first line and the message after it. create_record: JSON of field id to formula on the trigger record, e.g. {"amount":"price"}. link_record: formula for what to match, e.g. date. call_api: the JSON to post, or empty to send the record',
+          'set_field: formula for the new value. adjust_number: leave empty; the amount goes in delta (qty, -qty). send_email: the email, its subject on the first line and the message after it. create_record: JSON of field id to formula on the trigger record, e.g. {"amount":"price"}. link_record: formula for what to match, e.g. date. call_api: the JSON to post, or empty to send the record. if/else_if: the condition',
         ),
     }),
   ),
@@ -462,6 +462,9 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   clickable" or "check phone numbers" is redefining that text field as email or phone. Email, phone and file
   fields never show on public pages or shared tables. A rollup can count only some children with rollup.filter
   (paid payments: status == 'paid'), e.g. "only count paid lines in the total".
+- Barcode / QR scanning: a text field named Barcode, SKU, Serial number, Asset tag, Tracking number, ISBN, Product
+  code or QR code can be scanned with the camera or a handheld scanner (tables get a Scan button; the register adds
+  the scanned product). "Let me scan products" is adding such a field (named Barcode) if the record type has none.
 - rating (1 to 5 stars) and duration (minutes, shown as "1 h 30 min") are their own types: "add a star rating",
   "track how long each job took". Redefining a number field that holds ratings or minutes is the same change.
 - A signature someone draws (a waiver, a rental agreement, proof of delivery) is a file field named Signature (or
@@ -536,6 +539,11 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   else gets it by email. So "notify the owner and the person who booked" is one notify_people with fieldId
   "owner, {{email}}". notify (no _people) only shows a passing notice to whoever saved, so never use it to tell
   someone something.
+- If / else: one automation can do different things depending on the record ("when a booking is saved: if it's paid,
+  thank them; otherwise remind them to pay"). In actions, an action of type if (value: the condition, a formula like
+  when) starts the branch; the actions after it run when it holds. else_if (value: its condition) starts the next
+  branch, and else starts the one that runs when none held. Actions before the first if always run. Use this
+  instead of two automations with opposite whens. A record takes one branch, read as it was saved.
 - Pages: each sidebar page is a system; its views are the tabs on that page. A new page for something that already
   exists ("a separate page for courts", "give the calendar its own page") is add_system plus add_view (a new view
   of that record type) or move_view (move an existing tab there; the old page keeps its other tabs). Give every

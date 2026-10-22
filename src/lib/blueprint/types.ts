@@ -109,6 +109,12 @@ export type Entity = {
     closesAt: string;
     slotMinutes: 15 | 30 | 60 | 90 | 120;
   };
+  /**
+   * Staff and viewers see only their own records of this type: by is the field naming them (a person or email field
+   * holding their name or email), or "created_by" for the records they added (src/lib/engine/access.ts).
+   * Without it everyone in the workspace sees every record.
+   */
+  access?: { by: string };
 };
 
 export type Sort = { fieldId: string; dir: "asc" | "desc" };
@@ -508,7 +514,15 @@ export type Rule = {
   };
   when?: string;
   actions: Action[];
+  /**
+   * If / else: after actions, the first branch whose when holds runs its actions too; a last branch without a when
+   * is the otherwise (src/lib/engine/branches.ts). Older rules have none.
+   */
+  branches?: RuleBranch[];
 };
+
+/** One way an automation can go: its condition (a formula on the record) and what it does then. */
+export type RuleBranch = { when?: string; actions: Action[] };
 
 export type System = {
   id: string;

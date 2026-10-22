@@ -23,6 +23,7 @@ import {
   isTimeRange,
 } from "@/lib/format";
 import { addDays, dateKey, minutesOf, todayKey, zonedParts } from "@/lib/time";
+import { actionsFor, allActions, mapActions } from "./branches";
 import { recordContext } from "./context";
 import { run, truthy } from "./expr";
 import { newId } from "./ids";
@@ -63,8 +64,8 @@ const SAVE_EVENTS = new Set(["created", "updated", "status_changed"]);
 export const isOn = (rule: Rule) => rule.enabled !== false;
 export const isTimed = (rule: Rule) =>
   rule.trigger.event === "schedule" || rule.trigger.event === "date_reached";
-export const sendsEmail = (rule: Rule) => rule.actions.some((a) => a.type === "send_email");
-export const callsApi = (rule: Rule) => rule.actions.some((a) => a.type === "call_api");
+export const sendsEmail = (rule: Rule) => allActions(rule).some((a) => a.type === "send_email");
+export const callsApi = (rule: Rule) => allActions(rule).some((a) => a.type === "call_api");
 
 /**
  * What a call_api action posts for a record. With a body template, its {{placeholders}} are filled as JSON string
@@ -222,7 +223,9 @@ export function applyActions(
   const out: RuleOutcome = { records: rows, notices: [], emails: [], calls: [], alerts: [], created: [] };
   const entity = entityOf(bp, record.entityId);
   if (!entity) return out;
-  for (const raw of rule.actions) {
+  // Which branch runs is read from the record as it was saved, before this rule's own actions change it.
+  const chosen = actionsFor(rule, recordContext(bp, entity, record.data, rows, now));
+  for (const raw of chosen) {
     // Saved automations with the stock field or amount left blank still do what their name says.
     const action = completeAction(bp, rule, raw);
     if (!action) continue;
@@ -415,13 +418,13 @@ export function runSaveRules(
       isOn(rule) &&
       rule.trigger.entityId === record.entityId &&
       SAVE_EVENTS.has(rule.trigger.event) &&
-      rule.actions.some((a) => a.type === "link_record");
+      allActions(rule).some((a) => a.type === "link_record");
     if (!fires && !keepsFiled) continue;
     const current = out.records.find((r) => r.id === record.id) ?? record;
     const ctx = recordContext(bp, entity, current.data, out.records, now);
     if (rule.when && !truthy(run(rule.when, ctx))) continue;
     const only = keepsFiled
-      ? { ...rule, actions: rule.actions.filter((a) => a.type === "link_record") }
+      ? mapActions(rule, (actions) => actions.filter((a) => a.type === "link_record"))
       : rule;
     const done = applyActions(bp, out.records, only, current, now, depth);
     out.records = done.records;
@@ -461,7 +464,8 @@ export function saveRuns(bp: Blueprint, changes: SavedChange[], records: DataRec
       if (!matchesSave(rule, after, event, changed)) continue;
       const ctx = recordContext(bp, entity, after.data, records, now);
       if (rule.when && !truthy(run(rule.when, ctx))) continue;
-      const emails = rule.actions.flatMap((a) =>
+      const chosen = actionsFor(rule, ctx);
+      const emails = chosen.flatMap((a) =>
         a.type === "send_email"
           ? [
               {
@@ -472,12 +476,12 @@ export function saveRuns(bp: Blueprint, changes: SavedChange[], records: DataRec
             ]
           : [],
       );
-      const calls = rule.actions.flatMap((a) =>
+      const calls = chosen.flatMap((a) =>
         a.type === "call_api"
           ? [{ endpointId: a.endpointId, body: callBody(bp, rule, a, entity, after, records, now) }]
           : [],
       );
-      const alerts = rule.actions.flatMap((a) =>
+      const alerts = chosen.flatMap((a) =>
         a.type === "notify_people" ? [alertOf(bp, a, entity, after, records, now)] : [],
       );
       runs.push({ rule, record: after, emails, calls, alerts });
@@ -630,9 +634,14 @@ export function describeTrigger(bp: Blueprint, rule: Rule): string {
 }
 
 /** One line per action: "Email {{email}}: Your booking is tomorrow", "Set Status to …". */
-export function describeActions(bp: Blueprint, rule: Rule, endpoints?: Record<string, string>): string[] {
+export function describeActions(
+  bp: Blueprint,
+  rule: Rule,
+  endpoints?: Record<string, string>,
+  actions: Rule["actions"] = rule.actions,
+): string[] {
   const source = entityOf(bp, rule.trigger.entityId);
-  return rule.actions.map((a) => {
+  return actions.map((a) => {
     switch (a.type) {
       case "notify":
         return `Show a notice: ${a.message}`;

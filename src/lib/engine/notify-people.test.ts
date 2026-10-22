@@ -40,6 +40,22 @@ describe("notify_people automations", () => {
     expect(run.emails).toEqual([]);
   });
 
+  it("notifies from the branch an if / else automation takes", () => {
+    const branched: Rule = {
+      ...RULE,
+      actions: [],
+      branches: [
+        {
+          when: "status == 'nope'",
+          actions: [{ type: "notify_people", to: "owner", title: "Wrong branch" }],
+        },
+        { actions: [{ type: "notify_people", to: "owner", title: "Otherwise: {{player.name}}" }] },
+      ],
+    };
+    const [run] = saveRuns({ ...bp, rules: [branched] }, [{ after: booking }], records, NOW);
+    expect(run.alerts.map((a) => a.title)).toEqual([expect.stringMatching(/^Otherwise: /)]);
+  });
+
   it("is described in Settings and checked by validation", () => {
     expect(describeActions(bp, RULE)).toEqual([
       "Notify owner, frontdesk@court.ph: New booking: {{player.name}}",
