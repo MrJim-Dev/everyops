@@ -1,3 +1,4 @@
+import { displayKind } from "@/lib/blueprint/field-kind";
 import { findRecord } from "@/lib/blueprint/lookup";
 import { walkPath } from "@/lib/blueprint/paths";
 import type {
@@ -52,12 +53,23 @@ export const sendsEmail = (rule: Rule) => rule.actions.some((a) => a.type === "s
 const entityOf = (bp: Blueprint, id: string) => bp.entities.find((e) => e.id === id);
 
 /** A value as people read it: ₱1,200.00, Oct 16, the option's label, the linked record's name. */
-function readable(bp: Blueprint, field: Field | undefined, value: FieldValue, records: DataRecord[]): string {
+export function readable(
+  bp: Blueprint,
+  field: Field | undefined,
+  value: FieldValue,
+  records: DataRecord[],
+): string {
   if (Array.isArray(value))
     return value.map((v) => field?.options?.find((o) => o.id === v)?.label ?? v).join(", ");
   if (isTimeRange(value)) return `${formatDate(value.start)} · ${formatRange(value)}`;
   if (!field) return String(value);
-  const type = field.type === "formula" ? field.formula?.resultType : field.type;
+  // A rollup of money (an order's total) reads as money too, not as a bare number.
+  const type =
+    field.type === "rollup"
+      ? displayKind(bp, field)
+      : field.type === "formula"
+        ? field.formula?.resultType
+        : field.type;
   const option = field.options?.find((o) => o.id === value);
   if (option) return option.label;
   if (typeof value === "number") {

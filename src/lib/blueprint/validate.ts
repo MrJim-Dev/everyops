@@ -285,6 +285,17 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
     }
   });
 
+  const templateIds = new Set<string>();
+  (bp.printTemplates ?? []).forEach((template, ti) => {
+    const path = `printTemplates.${ti}`;
+    if (templateIds.has(template.id))
+      errors.push({ path, message: `Duplicate print template id "${template.id}"` });
+    templateIds.add(template.id);
+    if (!template.name.trim()) errors.push({ path, message: "A print template needs a name" });
+    if (!entityIds.has(template.entityId))
+      errors.push({ path, message: `${template.name} prints a missing record type` });
+  });
+
   return errors;
 }
 
