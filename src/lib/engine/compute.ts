@@ -63,6 +63,15 @@ function computeFormulas(
   return next;
 }
 
+/**
+ * Record types this browser has only a window of (src/lib/engine/window.ts). Totals over them are worked out on the
+ * server from every record, so here they keep the value they came with. Always empty on the server.
+ */
+let partial: ReadonlySet<string> = new Set();
+export function setPartialTypes(ids: Iterable<string>) {
+  partial = new Set(ids);
+}
+
 function computeRollups(
   bp: Blueprint,
   entity: Entity,
@@ -77,6 +86,8 @@ function computeRollups(
   for (const field of rollups) {
     const spec = field.rollup;
     if (!spec) continue;
+    // Children the browser has only some of (a windowed type, docs/server-paging.md): the server's total stays.
+    if (partial.has(spec.childEntityId)) continue;
     const childEntity = spec.filter ? findEntity(bp, spec.childEntityId) : undefined;
     // A filtered rollup counts only the children its formula is true for (paid lines, open tasks).
     const children = records.filter(

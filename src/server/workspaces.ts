@@ -3,8 +3,9 @@ import { sql } from "kysely";
 import { notesFromSetup } from "@/lib/assistant/memory";
 import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { freshSample } from "@/lib/catalog/shift";
-import { guardWrites, isLimited } from "@/lib/engine/access";
+import { guardWrites, isLimited, settleTotals } from "@/lib/engine/access";
 import { renumberTaken } from "@/lib/engine/sequence";
+import { WINDOW_AT, windowRecords } from "@/lib/engine/window";
 import { htmlDocKeys } from "@/lib/public/html-page";
 import {
   blueprintOf,
@@ -433,6 +434,7 @@ export async function patchWorkspace(
         enterZone(rulesBp);
         // Members who see only their own records change only those; totals are worked out here from every record
         // (src/lib/engine/access.ts), since their browser has only some of them.
+        let settled = false;
         if (!manager && rulesBp) {
           const viewer = await viewerOf(trx, userId, access.role);
           if (isLimited(rulesBp, viewer)) {
@@ -446,6 +448,19 @@ export async function patchWorkspace(
             );
             if (!checked.ok) throw new Conflict({ ok: false, status: 403, message: checked.message });
             puts = checked.puts;
+            settled = true;
+          }
+        }
+        // Large record types reach the browser as a recent window (src/lib/engine/window.ts), so totals over them
+        // are the server's: worked out here from every record. A count first, so small workspaces skip the read.
+        if (rulesBp && !settled && (puts.length || patch.records.delete.length)) {
+          const { rows: large } = await sql<{ n: number }>`
+            select count(*)::int as n from workspace_record where workspace_id = ${slug}
+            group by entity_id having count(*) > ${WINDOW_AT} limit 1`.execute(trx);
+          if (large.length) {
+            const stored = await readRecords(trx, slug);
+            if (Object.keys(windowRecords(rulesBp, stored, new Date()).windowed).length)
+              puts = settleTotals(rulesBp, stored, puts, patch.records.delete, new Date());
           }
         }
         const watching = fireOnSave(rulesBp);

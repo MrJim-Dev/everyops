@@ -83,6 +83,23 @@ export function guardWrites(
       };
     }
   }
+  return { ok: true, puts: settleTotals(bp, stored, puts, deletes, now) };
+}
+
+/**
+ * A save whose browser has only some records (a limited member, src/lib/engine/access.ts; or a windowed record
+ * type, src/lib/engine/window.ts), completed on the server: changes that only move formulas and rollups are dropped,
+ * since that browser worked them out from part of the records, and totals are worked out here from every record.
+ * Rollups that change on records nobody sent (a player's total when one of their bookings is paid) are saved too.
+ */
+export function settleTotals(
+  bp: Blueprint,
+  stored: { record: DataRecord; rev: number }[],
+  puts: RecordPut[],
+  deletes: { id: string }[],
+  now: Date,
+): RecordPut[] {
+  const byId = new Map(stored.map((s) => [s.record.id, s]));
   const kept = puts.filter((p) => {
     const was = byId.get(p.record.id);
     return !was || editedBy(bp, was.record, p.record);
@@ -109,5 +126,5 @@ export function guardWrites(
     );
     if (was && changed) out.push({ record: r, rev: was.rev });
   }
-  return { ok: true, puts: out };
+  return out;
 }

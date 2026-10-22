@@ -9,6 +9,7 @@ import type { AttachmentRef } from "@/lib/assistant/attachments";
 import type { Blueprint, DataRecord, WorkspaceData } from "@/lib/blueprint/types";
 import { DEMO_WORKSPACES } from "@/lib/catalog/demo-workspaces";
 import type { ChangePlan, RecordChange } from "@/lib/engine/changes";
+import type { WindowInfo } from "@/lib/engine/window";
 
 export type Role = "owner" | "admin" | "staff" | "viewer";
 export type MemberRole = Exclude<Role, "owner">;
@@ -137,6 +138,11 @@ export type Workspace = {
    * Never stored.
    */
   loaded?: boolean;
+  /**
+   * Large record types this copy has only a recent window of, with how many there are (src/lib/engine/window.ts).
+   * Their tables page on the server. Absent when everything is here.
+   */
+  windowed?: Record<string, WindowInfo>;
   /** The current blueprint, sent with list summaries instead of every version. */
   current?: Blueprint;
   /** Record counts, sent with list summaries. */
