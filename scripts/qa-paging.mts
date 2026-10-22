@@ -64,6 +64,18 @@ async function main() {
     totals: true,
   });
   bp.systems.find((s) => s.viewIds.includes("all_bookings"))?.viewIds.push("every_booking");
+  // A board by payment, and bookings listed on their player's panel (as line items), for the older-records loaders.
+  bp.views.push({
+    id: "payment_board",
+    entityId: "booking",
+    name: "Payment board",
+    type: "kanban",
+    statusFieldId: "status",
+    cardFieldIds: ["slot", "court"],
+  });
+  bp.systems.find((s) => s.viewIds.includes("all_bookings"))?.viewIds.push("payment_board");
+  const booking = bp.entities.find((e) => e.id === "booking");
+  if (booking) booking.parent = { entityId: "player", fieldId: "player" };
   const owner = await ownerId();
   await sql`delete from workspace where id = ${SLUG}`.execute(db);
   const at = now.toISOString();

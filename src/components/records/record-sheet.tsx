@@ -1,7 +1,7 @@
 "use client";
 
 import { DotsThreeIcon, PencilSimpleIcon, PlusIcon, PrinterIcon, TrashIcon } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PrintDialog } from "@/components/print/print-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -31,11 +31,15 @@ import type { DataRecord, Entity, PrintTemplate, RecordData } from "@/lib/bluepr
 import { renderPrint, starterTemplate, templatesFor } from "@/lib/engine/print";
 import type { FieldError } from "@/lib/engine/records";
 import { formatDateTime } from "@/lib/format";
-import { canEdit } from "@/lib/store/workspaces";
+import { loadAll } from "@/lib/store/server-records";
+import { canEdit, useWorkspaces } from "@/lib/store/workspaces";
 import { FieldValue } from "./field-value";
 import { RecordFieldsForm } from "./record-fields-form";
 import { useRecordPanels } from "./record-panels";
 import { StatusMenu } from "./status-menu";
+
+/** Line items a panel lists before "Show more". */
+const LINES_SHOWN = 50;
 
 /**
  * One record: properties, its line items, and the next sensible action. A drawer from the right; while the
@@ -75,7 +79,7 @@ function RecordSheetBody({
   entity: Entity;
   onClose: () => void;
 }) {
-  const { blueprint, records, role } = useWorkspace();
+  const { blueprint, records, role, id: workspaceId, mode } = useWorkspace();
   const { openCreate } = useRecordPanels();
   const editable = canEdit(role);
   const actions = useRecordActions();
@@ -85,6 +89,8 @@ function RecordSheetBody({
   const [base, setBase] = useState<RecordData>(record.data);
   const [errors, setErrors] = useState<FieldError[]>([]);
   const [printing, setPrinting] = useState<PrintTemplate | null>(null);
+  // Line items drawn per type before "Show more": a player with 1,700 bookings would draw them all.
+  const [linesShown, setLinesShown] = useState<Record<string, number>>({});
   // The record type's print templates; without any, one built from its fields so every record can print.
   const printables = useMemo(() => {
     const own = templatesFor(blueprint, entity.id);
@@ -97,6 +103,24 @@ function RecordSheetBody({
   // The next sensible step is the first "success" option the record isn't in yet (e.g. Paid, Approved).
   const next = status?.options?.find((o) => o.tone === "success" && o.id !== current?.id);
   const children = blueprint.entities.filter((e) => e.parent?.entityId === entity.id);
+  // Line items of a windowed type (src/lib/engine/window.ts) that are older than this copy's window: read from the
+  // server when the record opens, so the panel lists all of them.
+  const windowed = useWorkspaces((s) => s.workspaces[workspaceId]?.windowed);
+  const windowedChildren =
+    mode === "live"
+      ? children
+          .filter((c) => windowed?.[c.id])
+          .map((c) => c.id)
+          .join(",")
+      : "";
+  useEffect(() => {
+    if (!windowedChildren) return;
+    for (const id of windowedChildren.split(",")) {
+      const child = blueprint.entities.find((e) => e.id === id);
+      if (child?.parent)
+        void loadAll(workspaceId, { entityId: id, field: child.parent.fieldId, equals: record.id });
+    }
+  }, [windowedChildren, workspaceId, record.id, blueprint]);
 
   const startEditing = () => {
     setDraft(record.data);
@@ -180,6 +204,11 @@ function RecordSheetBody({
               <section key={child.id} className="mt-6">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <h3 className="text-[12px] font-medium text-muted-foreground">{child.pluralName}</h3>
+                  {lines.length > LINES_SHOWN ? (
+                    <span className="text-[12px] text-muted-foreground tabular">
+                      {lines.length.toLocaleString("en-PH")}
+                    </span>
+                  ) : null}
                   {editable ? (
                     <Button
                       size="sm"
@@ -195,7 +224,7 @@ function RecordSheetBody({
                 </div>
                 {lines.length ? (
                   <ul className="divide-y rounded-md border">
-                    {lines.map((line) => (
+                    {lines.slice(0, linesShown[child.id] ?? LINES_SHOWN).map((line) => (
                       <li key={line.id} className="flex items-center gap-3 px-3 py-2 text-[13px]">
                         {shown.map((f, i) => (
                           <span key={f.id} className={i === 0 ? "min-w-0 flex-1 truncate" : "shrink-0"}>
@@ -204,6 +233,24 @@ function RecordSheetBody({
                         ))}
                       </li>
                     ))}
+                    {lines.length > (linesShown[child.id] ?? LINES_SHOWN) ? (
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLinesShown((s) => ({
+                              ...s,
+                              [child.id]: (s[child.id] ?? LINES_SHOWN) + LINES_SHOWN * 4,
+                            }))
+                          }
+                          className="w-full px-3 py-2 text-left text-[12.5px] text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:bg-muted"
+                        >
+                          Show more (
+                          {(lines.length - (linesShown[child.id] ?? LINES_SHOWN)).toLocaleString("en-PH")}{" "}
+                          left)
+                        </button>
+                      </li>
+                    ) : null}
                   </ul>
                 ) : (
                   <p className="rounded-md border border-dashed px-3 py-2.5 text-[12.5px] text-muted-foreground">

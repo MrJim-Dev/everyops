@@ -28,6 +28,14 @@ checks are unaffected: a new booking can only clash with recent or upcoming ones
   access. It returns the page with revs, the count, column totals and group sizes and totals over every matching
   row. Rows read from the server join the browser's copy (`absorb` in the store), so they open and edit like
   any other. Exports read every matching row from the server.
+- **Calendars and schedules:** when the month, week or day on screen starts before the window, its records are read
+  from the server (`GET /api/workspaces/:id/records/find?entityId&dateField&from&to`, src/server/find-records.ts)
+  and join the browser's copy. The read waits 250 ms after the date stops changing, so stepping back through
+  months reads only the one that stays on screen.
+- **Boards:** a lane draws 100 cards, then 100 more on request. Past the window, "Show older" reads that lane's
+  older cards from the server, 100 at a time, newest first; a lane with none says so.
+- **Record panels:** opening a record reads all of its line items of a windowed type (a player's bookings), 1,000
+  per request until done. The panel lists 50, then more on request, with the full count in its header.
 - **The assistant, MCP, REST, automations and public pages** run on the server over every record, as before.
 
 ## Measured (local, 20,227 bookings)
@@ -39,13 +47,11 @@ checks are unaffected: a new booking can only clash with recent or upcoming ones
 | Next page | 0.24 s | 0.14–0.2 s |
 | Search "Kevin" (1,687 matches) | 0.3 s | 0.85 s (on the server) |
 | Save on that workspace | | about 0.3 s, totals worked out from all 20,227 |
+| A month before the window (Feb 2026) | | 582 bookings read from the server |
+| A player's panel (Bianca Reyes) | recent bookings only | all 1,684, matching the database |
 
 ## Not covered
 
-- Calendars, schedules and boards of a windowed type show the window: the last 200 days and everything upcoming.
-  Older records are in its tables.
-- A record's panel lists linked records the browser has. A player's panel shows their recent bookings, while
-  their totals count all of them.
 - Server pages read every record of the workspace per request (0.2–0.9 s at 20,000). Moving the query to SQL is
   the next step if it's needed.
 - Windowing starts above 5,000 records of a type (`WINDOW_AT`). The window is 200 days (`WINDOW_DAYS`).
