@@ -85,6 +85,29 @@ describe("toAssistantRule", () => {
     });
     expect(plain.actions).toEqual([{ type: "call_api", endpointId: "ep_9" }]);
   });
+  it("reads notify_people: who in fieldId, the title then the message in value", () => {
+    const rule = toAssistantRule({
+      id: "n",
+      name: "N",
+      trigger: { entityId: "bookings", event: "created" },
+      actions: [
+        {
+          type: "notify_people",
+          fieldId: "owner, {{email}}",
+          value: "New booking\n{{name}} booked {{court}}",
+        },
+      ],
+    });
+    expect(rule.actions).toEqual([
+      {
+        type: "notify_people",
+        to: "owner, {{email}}",
+        title: "New booking",
+        body: "{{name}} booked {{court}}",
+      },
+    ]);
+  });
+
   it("reads if / else_if / else steps as branches", () => {
     const rule = toAssistantRule({
       id: "follow_up",

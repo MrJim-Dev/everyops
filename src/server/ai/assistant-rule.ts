@@ -64,6 +64,13 @@ export function toAssistantRule(r: AssistantRule): Rule {
         const body = a.message?.trim() ? a.message : rest.join("\n").trim() || first;
         return { type: "send_email", to: a.fieldId ?? "", subject: first.trim(), body };
       }
+      // notify_people: fieldId is who (owner, admins, team, staff, addresses, {{fields}}), value the title on its
+      // first line and the message after it.
+      if (a.type === "notify_people") {
+        const [first = "", ...rest] = (a.value ?? "").split("\n");
+        const body = a.message?.trim() ? a.message : rest.join("\n").trim();
+        return { type: "notify_people", to: a.fieldId ?? "", title: first.trim(), ...(body ? { body } : {}) };
+      }
       if (a.type === "create_record") {
         let values: Record<string, string> = {};
         try {

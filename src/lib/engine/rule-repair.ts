@@ -21,6 +21,7 @@ export function completeAction(bp: Blueprint, rule: Rule, action: Action): Actio
   if (action.type === "notify") return action.message.trim() ? action : undefined;
   if (action.type === "send_email") return action.to.trim() && action.subject.trim() ? action : undefined;
   if (action.type === "call_api") return action.endpointId?.trim() ? action : undefined;
+  if (action.type === "notify_people") return action.to.trim() && action.title.trim() ? action : undefined;
   if (action.type === "create_record")
     return bp.entities.some((e) => e.id === action.entityId) ? action : undefined;
   if (action.type === "link_record") {

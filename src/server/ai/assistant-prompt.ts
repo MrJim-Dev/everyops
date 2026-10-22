@@ -43,13 +43,13 @@ export const assistantRule = rule.extend({
       type: z
         .string()
         .describe(
-          "set_field, adjust_number, notify, send_email, create_record, link_record or call_api; if, else_if, else start a branch",
+          "set_field, adjust_number, notify, notify_people, send_email, create_record, link_record or call_api; if, else_if, else start a branch",
         ),
       fieldId: z
         .string()
         .optional()
         .describe(
-          "set_field/adjust_number: the field it changes. send_email: who to email, {{email_field}} or an address. create_record: the record type it adds. link_record: the field of the linked type to match. call_api: the webhook endpoint id",
+          "set_field/adjust_number: the field it changes. send_email: who to email, {{email_field}} or an address. notify_people: who, e.g. owner, {{email}}. create_record: the record type it adds. link_record: the field of the linked type to match. call_api: the webhook endpoint id",
         ),
       value: z
         .string()
@@ -532,6 +532,13 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   at {{time}}"} for Slack, or empty to send the whole record. Use only an endpoint that's listed; when none is (or
   none accepts automation calls), don't plan it: say to add one in Settings → Webhooks with "An automation calls
   it" ticked, then ask again. URLs and secrets stay in Settings, never in the automation.
+- Notifying people ("tell me when there's a new booking", "let the customer and the owner know"): notify_people.
+  fieldId is who, separated by commas: owner, admins (owner and admins), team (everyone in the workspace), staff,
+  an email address, or a {{field}} holding one ({{email}}, {{player.email}}); value is the title on the first line
+  and the message after it, with {{field}} placeholders. Workspace members get it in the app (the bell); anyone
+  else gets it by email. So "notify the owner and the person who booked" is one notify_people with fieldId
+  "owner, {{email}}". notify (no _people) only shows a passing notice to whoever saved, so never use it to tell
+  someone something.
 - If / else: one automation can do different things depending on the record ("when a booking is saved: if it's paid,
   thank them; otherwise remind them to pay"). In actions, an action of type if (value: the condition, a formula like
   when) starts the branch; the actions after it run when it holds. else_if (value: its condition) starts the next
