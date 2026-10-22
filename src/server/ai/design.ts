@@ -174,10 +174,18 @@ export function toView(v: Design["views"][number]): View {
 }
 
 /**
+ * Names that mean a drawn signature: anything ending in the word signature (Signature, Staff signature, Driver's
+ * signature, E-signature) or Signed by. "Signature date" or "Signed contract" stay what they are.
+ */
+export const SIGNATURE_NAME = /^(.{0,40}[\s'’-])?(e-?)?signature$|^signed by$/i;
+
+/**
  * A text field named exactly like contact details becomes that type ("Email" → email, "Phone" → phone, "Website"
  * → url), for designs that still used text for them. Only plain names: "Email template" stays text.
  */
 function contactType(f: { id: string; name: string; type: Field["type"] }): Field["type"] {
+  // A file field named Signature is a signature pad (the designer's schema has no signature type).
+  if (f.type === "file" && SIGNATURE_NAME.test(`${f.name}`.trim())) return "signature";
   if (f.type !== "text") return f.type;
   const name = `${f.name}`.trim().toLowerCase();
   const id = f.id.toLowerCase();

@@ -1,4 +1,4 @@
-import { isEmail, isFilePath, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
+import { isEmail, isFilePath, isPhone, isSignaturePath, normalizeUrl } from "@/lib/blueprint/contact";
 import { findRecord, getEntity, optionOf } from "@/lib/blueprint/lookup";
 import type {
   Blueprint,
@@ -90,6 +90,11 @@ export function validateRecord(
       case "file":
         if (!isFilePath(value))
           errors.push({ fieldId: field.id, message: `Upload ${field.name.toLowerCase()} again` });
+        break;
+      case "signature":
+        // A preview keeps the drawing in the page; a saved workspace stores it as a document.
+        if (!isSignaturePath(value, { preview: true }))
+          errors.push({ fieldId: field.id, message: `Sign ${field.name.toLowerCase()} again` });
         break;
     }
   }

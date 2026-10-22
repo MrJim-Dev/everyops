@@ -456,6 +456,8 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   clickable" or "check phone numbers" is redefining that text field as email or phone. Email, phone and file
   fields never show on public pages or shared tables. A rollup can count only some children with rollup.filter
   (paid payments: status == 'paid'), e.g. "only count paid lines in the total".
+- A signature someone draws (a waiver, a rental agreement, proof of delivery) is a file field named Signature (or
+  "Customer signature", "Renter signature"): it becomes a signature pad, on public forms too.
 - Options: keep every existing option id when you change a select or status field's options (rename labels freely).
   To retire an option that records use, also update_record each of those records to the option that replaces it.
 - Columns: to reorder, show or hide a table's columns (or a board's card fields), use update_view with fieldIds:

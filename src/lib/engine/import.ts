@@ -30,7 +30,7 @@ export type Table = { headers: string[]; rows: string[][] };
 export const MAX_IMPORT_ROWS = 5000;
 
 /** Fields an import can write: not computed ones, nor uploads (an import has no files). */
-export const importable = (f: Field) => !["formula", "rollup", "image", "file"].includes(f.type);
+export const importable = (f: Field) => !["formula", "rollup", "image", "file", "signature"].includes(f.type);
 
 /* ---------- Reading CSV ---------- */
 

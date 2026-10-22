@@ -2,7 +2,14 @@
 
 import { ArrowUpRightIcon, CheckIcon, FileIcon } from "@phosphor-icons/react";
 import { useWorkspace } from "@/components/workspace/workspace-context";
-import { fileName, isFilePath, normalizeUrl, telHref, urlLabel } from "@/lib/blueprint/contact";
+import {
+  fileName,
+  isFilePath,
+  isSignaturePath,
+  normalizeUrl,
+  telHref,
+  urlLabel,
+} from "@/lib/blueprint/contact";
 import { displayKind } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { Field, FieldValue as Value } from "@/lib/blueprint/types";
@@ -136,6 +143,17 @@ export function FieldValue({
         <span className={cn("truncate", className)}>{String(value)}</span>
       );
     }
+    case "signature":
+      return isSignaturePath(value, { preview: true }) ? (
+        // biome-ignore lint/performance/noImgElement: a private upload served to the team, not an optimizable asset
+        <img
+          src={value}
+          alt={`${field.name} (signed)`}
+          className={cn("h-8 w-auto max-w-[140px] rounded-sm bg-white object-contain px-1", className)}
+        />
+      ) : (
+        <Empty />
+      );
     case "file":
       return isFilePath(value) ? (
         <a

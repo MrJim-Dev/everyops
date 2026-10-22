@@ -5,10 +5,12 @@ import { useEffect, useState } from "react";
 import { ExtrasPicker } from "@/components/forms/extras-picker";
 import { StepIndicator } from "@/components/forms/step-indicator";
 import { BookingPicker } from "@/components/public/booking-pickers";
+import { SignaturePad } from "@/components/records/signature-pad";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { SIGNATURE_FILE } from "@/lib/blueprint/contact";
 import type { FieldValue } from "@/lib/blueprint/types";
 import { formatDate, formatDateTime, formatRange, isTimeRange } from "@/lib/format";
 import { isHeic, MAX_SOURCE_BYTES, prepareImage } from "@/lib/prepare-image";
@@ -551,6 +553,10 @@ function PublicInput({
           onChange={onChange}
         />
       );
+    case "signature":
+      return (
+        <PublicSignatureInput id={id} field={field} invalid={invalid} upload={upload} onChange={onChange} />
+      );
     default:
       return (
         <Input
@@ -618,6 +624,75 @@ function RangeFields({
 }
 
 /** A picture a public form asks for (a proof of payment): picked, shrunk if large, then uploaded right away. */
+/**
+ * A visitor signs on the pad; the drawing goes to the workspace's private documents (they can't read it back, so the
+ * pad keeps showing what they drew). Previews keep it in the page.
+ */
+function PublicSignatureInput({
+  id,
+  field,
+  invalid,
+  upload,
+  onChange,
+}: {
+  id: string;
+  field: PublicField;
+  invalid: boolean;
+  upload: { slug: string; viewId: string; preview?: boolean };
+  onChange: (v: FieldValue) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const signed = async (png: Blob | null) => {
+    setProblem(null);
+    setSaved(false);
+    if (!png) return onChange(null);
+    // Previews keep the drawing in the page; nothing is uploaded.
+    if (upload.preview)
+      return onChange(
+        await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.readAsDataURL(png);
+        }),
+      );
+    setBusy(true);
+    try {
+      const body = new FormData();
+      body.set("file", new File([png], SIGNATURE_FILE, { type: "image/png" }));
+      const res = await fetch(`/api/public/${upload.slug}/${upload.viewId}/upload`, { method: "POST", body });
+      const json = (await res.json().catch(() => null)) as {
+        ok: boolean;
+        url?: string;
+        message?: string;
+      } | null;
+      if (!json?.ok || !json.url)
+        throw new Error(json?.message ?? "Couldn't save your signature. Sign again.");
+      onChange(json.url);
+      setSaved(true);
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : "Couldn't save your signature. Sign again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-col gap-1">
+      <SignaturePad
+        id={id}
+        value={null}
+        label={field.name}
+        invalid={invalid}
+        busy={busy}
+        saved={saved}
+        onSigned={signed}
+      />
+      {problem ? <p className="text-[12px] text-destructive">{problem}</p> : null}
+    </div>
+  );
+}
+
 function PublicImageInput({
   id,
   invalid,

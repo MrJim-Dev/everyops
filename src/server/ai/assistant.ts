@@ -78,7 +78,7 @@ import {
 import { toAssistantRule } from "./assistant-rule";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
 import { reviewCoverage } from "./coverage";
-import { fillNotesView, tidyBlocks, toEntity, toFieldValue, toView } from "./design";
+import { fillNotesView, SIGNATURE_NAME, tidyBlocks, toEntity, toFieldValue, toView } from "./design";
 import { view } from "./design-prompt";
 import { dataDigest } from "./digest";
 import { generateJsonHedged } from "./gemini";
@@ -391,10 +391,16 @@ export function toDesignOps(
       case "add_field":
         if (o.entityId && o.field) {
           const owner = bp.entities.find((e) => e.id === o.entityId)?.name ?? o.entityId;
+          // A file field named Signature is a signature pad (the schema has no signature type of its own).
+          const field = o.field as Field;
+          const typed =
+            field.type === "file" && SIGNATURE_NAME.test(field.name.trim())
+              ? { ...field, type: "signature" as const }
+              : field;
           ops.push({
             op: "add_field",
             entityId: o.entityId,
-            field: withStatusOptions(o.field as Field, owner),
+            field: withStatusOptions(typed, owner),
           });
         } else errors.push(`${at}: needs entityId and field`);
         break;

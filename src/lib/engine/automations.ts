@@ -57,6 +57,7 @@ function readable(bp: Blueprint, field: Field | undefined, value: FieldValue, re
     return value.map((v) => field?.options?.find((o) => o.id === v)?.label ?? v).join(", ");
   if (isTimeRange(value)) return `${formatDate(value.start)} · ${formatRange(value)}`;
   if (!field) return String(value);
+  if (field.type === "signature") return "Signed";
   const type = field.type === "formula" ? field.formula?.resultType : field.type;
   const option = field.options?.find((o) => o.id === value);
   if (option) return option.label;

@@ -264,6 +264,9 @@ export function formatCell(
   switch (kind) {
     case "image":
       return { ...base, kind: "image", text: typeof value === "string" ? value : "" };
+    case "signature":
+      // The drawing is the team's; anywhere it's listed it only says it's there.
+      return { ...base, kind: "text", text: "Signed" };
     case "long_text":
       return { ...base, kind: "markdown", text: String(value) };
     case "money":

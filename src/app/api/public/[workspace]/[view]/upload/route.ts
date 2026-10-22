@@ -1,7 +1,10 @@
 import { allowSubmission, uploadPublicImage } from "@/server/public";
 import { MAX_UPLOAD_BYTES } from "@/server/storage";
 
-/** A visitor uploads a picture a public form asks for (a proof of payment). No account needed; limited per address. */
+/**
+ * A visitor uploads a picture a public form asks for (a proof of payment), or their drawn signature. No account
+ * needed; limited per address.
+ */
 export async function POST(
   request: Request,
   { params }: RouteContext<"/api/public/[workspace]/[view]/upload">,
@@ -19,6 +22,11 @@ export async function POST(
     return Response.json({ ok: false, message: "Choose a file." }, { status: 400 });
   if (file.size > MAX_UPLOAD_BYTES)
     return Response.json({ ok: false, message: "That picture is over 5 MB." }, { status: 413 });
-  const result = await uploadPublicImage(workspace, view, new Uint8Array(await file.arrayBuffer()));
+  const result = await uploadPublicImage(
+    workspace,
+    view,
+    new Uint8Array(await file.arrayBuffer()),
+    file instanceof File ? file.name : "",
+  );
   return Response.json(result, { status: result.ok ? 200 : result.status });
 }

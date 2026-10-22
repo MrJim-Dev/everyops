@@ -1,6 +1,6 @@
 import "server-only";
 import { sql } from "kysely";
-import { normalizeUrl } from "@/lib/blueprint/contact";
+import { isSignaturePath, normalizeUrl, SIGNATURE_FILE } from "@/lib/blueprint/contact";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, FieldValue, FormView, RecordData } from "@/lib/blueprint/types";
 import { createRecord, isImagePath } from "@/lib/engine/records";
@@ -35,7 +35,7 @@ import { takeToken } from "./ai/rate-limit";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
 import { db } from "./db";
 import { managePath } from "./manage";
-import { saveImage } from "./storage";
+import { imageType, saveDocument, saveImage } from "./storage";
 import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, putRecords, readCurrent, readRecords } from "./workspace-data";
 
@@ -202,6 +202,10 @@ function draftFromVisitor(
       case "image":
         // Only a picture this workspace's public upload stored (a proof of payment); never a link elsewhere.
         value = isImagePath(v) && v.startsWith(`/api/files/${slug}/`) ? v : undefined;
+        break;
+      case "signature":
+        // Only a signature this workspace's public upload stored, in its own documents.
+        value = isSignaturePath(v) && v.startsWith(`/api/files/${slug}/docs/`) ? v : undefined;
         break;
     }
     if (value !== undefined) input[f.id] = value;
@@ -510,12 +514,21 @@ export async function uploadPublicImage(
   slug: string,
   viewId: string,
   bytes: Uint8Array,
+  filename = "",
 ): Promise<UploadResult> {
   const doc = await readDoc(slug);
   if (!doc || doc.meta.setup) return { ok: false, status: 404, message: "This page doesn't exist." };
   const view = doc.blueprint.views.find((v) => v.id === viewId);
   if (view?.type !== "form" || !view.public) return { ok: false, status: 404, message: "No such form." };
-  if (!publicFieldsOf(doc.blueprint, view).some((f) => f.type === "image"))
+  const fields = publicFieldsOf(doc.blueprint, view);
+  // A drawn signature goes to the workspace's private documents, never with the public pictures.
+  if (filename === SIGNATURE_FILE && fields.some((f) => f.type === "signature")) {
+    if (imageType(bytes)?.ext !== "png")
+      return { ok: false, status: 415, message: "That signature didn't come through. Sign again." };
+    const url = await saveDocument(slug, bytes, SIGNATURE_FILE);
+    return url ? { ok: true, url } : { ok: false, status: 415, message: "Sign again." };
+  }
+  if (!fields.some((f) => f.type === "image"))
     return { ok: false, status: 403, message: "This form doesn't take uploads." };
   const url = await saveImage(slug, bytes);
   if (!url)

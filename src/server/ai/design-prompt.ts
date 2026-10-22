@@ -618,6 +618,8 @@ Rules for a valid blueprint:
 - Contact details and documents have their own types: email (an email address), phone (a phone number), url (a
   website or link) and file (a document such as a PDF receipt, contract or ID scan; the team uploads it). Use
   them instead of text for those, and keep names plain (Email, Phone, Website, Contract).
+- A signature someone draws (waivers, rental agreements, proof of delivery) is a file field named Signature (or
+  Customer signature, Renter signature); it becomes a signature pad people sign on screen, on public forms too.
 - Kanban boards use a status field. Calendars use a date, datetime or time_range field.
 - Bookings of courts, rooms, tables or similar: always a resource record type (courts) with resource hours, and a
   booking record type with booking settings: resourceFieldId (a required relation to the resource), timeFieldId (a

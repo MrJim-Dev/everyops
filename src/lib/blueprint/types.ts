@@ -47,6 +47,11 @@ export type FieldType =
   | "url"
   /** An uploaded document (a PDF receipt, a contract): the app path, with its name, served only to the team. */
   | "file"
+  /**
+   * A drawn signature (a waiver, a rental agreement, a delivery receipt): a PNG in the workspace's private documents,
+   * like a file field's, served only to the team. Signed on a pad in the app or on a public form.
+   */
+  | "signature"
   | "formula"
   | "rollup";
 

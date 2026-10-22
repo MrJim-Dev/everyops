@@ -327,6 +327,9 @@ export function formSnippet(form: PublicForm): string {
           .join("\n");
       case "relation":
         return `  <label>${label}<select name="${f.id}"${req}>\n      <option value="">Choose…</option>\n${options((form.choices[f.id] ?? []).map((c) => ({ id: c.id, label: c.title })))}\n    </select></label>`;
+      case "signature":
+        // Custom pages can't draw signatures yet: point visitors to the standard form for this one.
+        return `  <!-- ${label}: signatures are signed on the standard form (${form.viewId}), not on custom pages -->`;
       default: {
         const type =
           f.type === "email" || /email/i.test(f.name)

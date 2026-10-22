@@ -31,6 +31,7 @@ import {
 } from "./design";
 import type { Design, DesignPatch } from "./design-prompt";
 import {
+  designEntities,
   hoursFromBrief,
   noProgress,
   rebindTemplateSamples,
@@ -179,7 +180,7 @@ describe("rebindTemplateSamples", () => {
       workspaceName: "Courts",
       summary: "Courts",
       systems: [],
-      entities: bp.entities,
+      entities: designEntities(bp.entities),
       views: [],
       widgets: [],
       rules: [],
