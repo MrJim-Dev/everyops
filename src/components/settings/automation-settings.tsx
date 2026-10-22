@@ -7,6 +7,7 @@ import {
   LightningIcon,
   PlayIcon,
   PlusCircleIcon,
+  WebhooksLogoIcon,
 } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -65,7 +66,9 @@ function ActionIcon({ line }: { line: string }) {
     ? EnvelopeSimpleIcon
     : line.startsWith("Add a")
       ? PlusCircleIcon
-      : null;
+      : line.startsWith("Call")
+        ? WebhooksLogoIcon
+        : null;
   return Icon ? (
     <Icon className="size-3.5 shrink-0" />
   ) : (
@@ -82,7 +85,30 @@ export function AutomationSettings() {
   const applyChange = useWorkspaces((s) => s.applyChange);
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [running, setRunning] = useState<string | null>(null);
+  // Webhook endpoints by id, so a Call step names where it goes ("Call Slack #bookings"). Owners and admins only.
+  const [endpoints, setEndpoints] = useState<Record<string, string>>({});
   const rules = ws.blueprint.rules;
+
+  useEffect(() => {
+    if (!manager || !rules.some((r) => r.actions.some((a) => a.type === "call_api"))) return;
+    fetch(`/api/workspaces/${ws.id}/webhooks`)
+      .then(
+        (res) =>
+          res.json() as Promise<{
+            ok: boolean;
+            endpoints?: { id: string; url: string; description: string | null }[];
+          }>,
+      )
+      .then((body) => {
+        if (!body.ok) return;
+        setEndpoints(
+          Object.fromEntries(
+            (body.endpoints ?? []).map((e) => [e.id, e.description || new URL(e.url).hostname]),
+          ),
+        );
+      })
+      .catch(() => {});
+  }, [manager, rules, ws.id]);
 
   const load = useCallback(async () => {
     try {
@@ -170,7 +196,7 @@ export function AutomationSettings() {
                         ) : null}
                       </span>
                       <ul className="flex flex-col gap-1">
-                        {describeActions(ws.blueprint, rule).map((line, i) => (
+                        {describeActions(ws.blueprint, rule, endpoints).map((line, i) => (
                           <li
                             // biome-ignore lint/suspicious/noArrayIndexKey: actions have no ids and never reorder here
                             key={i}
@@ -221,7 +247,7 @@ export function AutomationSettings() {
 
       <SettingsSection
         title="Recent runs"
-        description="What each automation did, on which record, and whether its emails went out."
+        description="What each automation did, on which record, and whether its emails and calls went out."
       >
         {runs === null ? (
           <div className="flex flex-col gap-2">

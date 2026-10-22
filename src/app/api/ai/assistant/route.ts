@@ -8,6 +8,7 @@ import { noteMemory } from "@/server/ai/memory";
 import { takeAiToken } from "@/server/ai/rate-limit";
 import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { apiUser, sameOrigin } from "@/server/session-api";
+import { listEndpoints } from "@/server/webhooks";
 import { readMemory, rememberEdits } from "@/server/workspace-memory";
 import { loadTeam, loadWorkspace } from "@/server/workspaces";
 import { enterZone } from "@/server/zone";
@@ -51,9 +52,19 @@ export async function POST(request: Request) {
   enterAiUsage(parsed.data.workspaceId, { userId: user.id, feature: "assistant" });
   const manager = canManage(found.role);
   const workspaceId = parsed.data.workspaceId;
-  const [team, memory] = await Promise.all([
+  const [team, memory, endpoints] = await Promise.all([
     manager ? loadTeam(workspaceId) : undefined,
     readMemory(workspaceId),
+    // Endpoints by id and name (the URL's host), never their URLs' paths or secrets.
+    manager
+      ? listEndpoints(workspaceId).then((list) =>
+          list.map((e) => ({
+            id: e.id,
+            label: e.description || new URL(e.url).hostname,
+            acceptsCalls: e.enabled && e.events.includes("automation.call"),
+          })),
+        )
+      : undefined,
   ]);
   const blueprint = blueprintOf(found.workspace);
   enterZone(blueprint);
@@ -92,6 +103,7 @@ export async function POST(request: Request) {
           team,
           workspaceName: found.workspace.name,
           summary: found.workspace.summary,
+          endpoints,
           memory,
           onStatus: (text) => send({ type: "status", text }),
           signal: request.signal,

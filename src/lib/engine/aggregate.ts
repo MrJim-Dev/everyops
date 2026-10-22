@@ -10,7 +10,11 @@ const numberOf = (v: FieldValue | undefined) => (typeof v === "number" ? v : Num
 export function metricOf(widget: Pick<Widget, "metric">, rows: DataRecord[]): number {
   const { op, fieldId } = widget.metric;
   if (op === "count") return rows.length;
-  const values = rows.map((r) => numberOf(fieldId ? r.data[fieldId] : 0));
+  // An average skips blanks, like a spreadsheet's: a job nobody rated yet isn't a zero-star job.
+  const filled = (v: FieldValue | undefined) => v !== undefined && v !== null && v !== "";
+  const values = (op === "avg" && fieldId ? rows.filter((r) => filled(r.data[fieldId])) : rows).map((r) =>
+    numberOf(fieldId ? r.data[fieldId] : 0),
+  );
   const sum = values.reduce((a, b) => a + b, 0);
   return op === "sum" ? sum : values.length ? sum / values.length : 0;
 }

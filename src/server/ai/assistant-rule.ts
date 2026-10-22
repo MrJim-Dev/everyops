@@ -60,6 +60,13 @@ export function toAssistantRule(r: AssistantRule): Rule {
           fieldId: a.fieldId ?? "",
           value: a.value ?? "",
         };
+      // call_api: fieldId is the webhook endpoint, value the JSON to post (empty sends the record).
+      if (a.type === "call_api")
+        return {
+          type: "call_api",
+          endpointId: a.fieldId ?? "",
+          ...(a.value?.trim() ? { body: a.value } : {}),
+        };
       if (a.type !== "set_field" && a.type !== "adjust_number" && a.type !== "notify")
         return { type: "notify", message: "" };
       return base.actions[i];

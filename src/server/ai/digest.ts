@@ -22,6 +22,8 @@ export function kindOf(f: Field): Kind {
     case "number":
     case "money":
     case "percent":
+    case "rating":
+    case "duration":
     case "rollup":
       return "number";
     case "formula": {
