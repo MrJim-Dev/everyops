@@ -2,6 +2,7 @@
 
 import {
   CaretUpDownIcon,
+  DownloadSimpleIcon,
   HouseIcon,
   SignOutIcon,
   SquaresFourIcon,
@@ -34,6 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { signOut, useAuthReady, useCurrentUser } from "@/lib/auth/client";
 import { initials } from "@/lib/format";
+import { useInstall } from "@/lib/pwa/install";
 import { cn } from "@/lib/utils";
 
 function useSignOut() {
@@ -53,6 +55,8 @@ export function UserMenu({ variant }: { variant: "topbar" | "sidebar" }) {
   const ready = useAuthReady();
   const [confirmOut, setConfirmOut] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const { state: installState, install } = useInstall();
+  const [iosSteps, setIosSteps] = useState(false);
 
   if (!ready) return <span aria-hidden="true" className={variant === "sidebar" ? "h-9 flex-1" : "h-8 w-8"} />;
 
@@ -139,6 +143,23 @@ export function UserMenu({ variant }: { variant: "topbar" | "sidebar" }) {
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
+            {installState === "prompt" || installState === "ios" ? (
+              <DropdownMenuItem
+                onClick={() => {
+                  if (installState === "ios") setIosSteps(true);
+                  else
+                    void install().then((ok) => {
+                      if (ok)
+                        toast.success("EveryOps is installed", {
+                          description: "Open it from your home screen or dock.",
+                        });
+                    });
+                }}
+              >
+                <DownloadSimpleIcon />
+                Install app
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem onClick={() => setConfirmOut(true)}>
               <SignOutIcon />
               Sign out
@@ -165,6 +186,30 @@ export function UserMenu({ variant }: { variant: "topbar" | "sidebar" }) {
             >
               {signingOut ? "Signing out…" : "Sign out"}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={iosSteps} onOpenChange={setIosSteps}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Add EveryOps to your home screen</AlertDialogTitle>
+            <AlertDialogDescription>
+              It opens full screen, like an app, so the front desk tablet can keep it one tap away.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-[13.5px]">
+            <li>
+              Tap <span className="font-medium">Share</span> in Safari's toolbar.
+            </li>
+            <li>
+              Choose <span className="font-medium">Add to Home Screen</span>.
+            </li>
+            <li>
+              Tap <span className="font-medium">Add</span>.
+            </li>
+          </ol>
+          <AlertDialogFooter>
+            <AlertDialogAction>Done</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
