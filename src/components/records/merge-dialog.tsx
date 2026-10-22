@@ -141,8 +141,8 @@ export function MergeDialog({
         </fieldset>
         <p className="text-[12.5px] text-muted-foreground">
           {recordTitle(entity, drop)}'s {linked.length ? linked.join(" and ") : "links"} move to{" "}
-          {recordTitle(entity, keep)}. Details {recordTitle(entity, keep)} is missing are copied from the other
-          record.{ws.mode === "live" ? " This can't be undone." : ""}
+          {recordTitle(entity, keep)}. Details {recordTitle(entity, keep)} is missing are copied from the
+          other record.{ws.mode === "live" ? " This can't be undone." : ""}
         </p>
         {error ? (
           <p role="alert" className="text-[13px] text-destructive">

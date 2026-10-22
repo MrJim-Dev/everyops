@@ -1,6 +1,13 @@
 "use client";
 
-import { DotsThreeIcon, PencilSimpleIcon, PlusIcon, PrinterIcon, TrashIcon } from "@phosphor-icons/react";
+import {
+  ArrowsClockwiseIcon,
+  DotsThreeIcon,
+  PencilSimpleIcon,
+  PlusIcon,
+  PrinterIcon,
+  TrashIcon,
+} from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 import { PrintDialog } from "@/components/print/print-dialog";
 import { Button } from "@/components/ui/button";
@@ -13,6 +20,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -31,6 +40,7 @@ import type { DataRecord, Entity, PrintTemplate, RecordData } from "@/lib/bluepr
 import { findDuplicates } from "@/lib/engine/duplicates";
 import { renderPrint, starterTemplate, templatesFor } from "@/lib/engine/print";
 import type { FieldError } from "@/lib/engine/records";
+import { repeatText, seriesOf } from "@/lib/engine/recurrence";
 import { formatDateTime } from "@/lib/format";
 import { loadAll } from "@/lib/store/server-records";
 import { canEdit, useWorkspaces } from "@/lib/store/workspaces";
@@ -96,6 +106,9 @@ function RecordSheetBody({
     [entity, record, records],
   );
   const [merging, setMerging] = useState<DataRecord | null>(null);
+  // A record of a series (src/lib/engine/recurrence.ts): where it falls, and whether an edit goes to the rest too.
+  const series = useMemo(() => seriesOf(records, record, entity), [records, record, entity]);
+  const [scope, setScope] = useState<"one" | "following">("one");
   const [printing, setPrinting] = useState<PrintTemplate | null>(null);
   // Line items drawn per type before "Show more": a player with 1,700 bookings would draw them all.
   const [linesShown, setLinesShown] = useState<Record<string, number>>({});
@@ -143,7 +156,10 @@ function RecordSheetBody({
     const edited = Object.fromEntries(
       Object.entries(draft).filter(([id, value]) => JSON.stringify(value) !== JSON.stringify(base[id])),
     );
-    const result = actions.update(record.id, edited);
+    const result =
+      scope === "following" && series?.following.length
+        ? actions.updateFollowing(record.id, edited)
+        : actions.update(record.id, edited);
     if (result.ok) {
       setEditing(false);
       setErrors([]);
@@ -191,31 +207,68 @@ function RecordSheetBody({
           </div>
         ) : null}
         {editing ? (
-          <RecordFieldsForm
-            entity={entity}
-            values={draft}
-            errors={errors}
-            idPrefix={`edit-${record.id}`}
-            onChange={(fieldId, value) => setDraft((d) => ({ ...d, [fieldId]: value }))}
-          />
+          <>
+            <RecordFieldsForm
+              entity={entity}
+              values={draft}
+              errors={errors}
+              idPrefix={`edit-${record.id}`}
+              onChange={(fieldId, value) => setDraft((d) => ({ ...d, [fieldId]: value }))}
+            />
+            {series?.following.length ? (
+              <Field className="mt-4">
+                <FieldLabel htmlFor={`scope-${record.id}`}>Save changes to</FieldLabel>
+                <NativeSelect
+                  id={`scope-${record.id}`}
+                  className="w-full"
+                  value={scope}
+                  onChange={(e) => setScope(e.target.value as "one" | "following")}
+                >
+                  <NativeSelectOption value="one">This {entity.name.toLowerCase()} only</NativeSelectOption>
+                  <NativeSelectOption value="following">
+                    This and the {series.following.length} after it
+                  </NativeSelectOption>
+                </NativeSelect>
+              </Field>
+            ) : null}
+            {errors.some((e) => !e.fieldId) ? (
+              <p role="alert" className="mt-3 text-[13px] text-destructive">
+                {errors.find((e) => !e.fieldId)?.message}
+              </p>
+            ) : null}
+          </>
         ) : (
-          // Values wrap (long notes keep their line breaks) instead of widening the panel past its edge.
-          <dl className="grid grid-cols-[minmax(96px,32%)_minmax(0,1fr)] gap-x-4 gap-y-3 text-[13px]">
-            {entity.fields
-              .filter((f) => f.id !== entity.primaryFieldId && f.id !== status?.id)
-              .map((field) => (
-                <div key={field.id} className="contents">
-                  <dt className="text-muted-foreground">{field.name}</dt>
-                  <dd className="min-w-0 [overflow-wrap:anywhere] [&_.truncate]:whitespace-pre-line">
-                    <FieldValue
-                      field={field}
-                      value={record.data[field.id]}
-                      className={field.type === "image" ? "size-40" : undefined}
-                    />
-                  </dd>
-                </div>
-              ))}
-          </dl>
+          <>
+            {series ? (
+              <p className="mb-4 flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-[12.5px]">
+                <ArrowsClockwiseIcon className="size-4 text-muted-foreground" aria-hidden />
+                <span>
+                  Repeats {series.repeat ? repeatText(series.repeat) : ""}
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {series.index + 1} of {series.members.length}
+                  </span>
+                </span>
+              </p>
+            ) : null}
+            {/* Values wrap (long notes keep their line breaks) instead of widening the panel past its edge. */}
+            <dl className="grid grid-cols-[minmax(96px,32%)_minmax(0,1fr)] gap-x-4 gap-y-3 text-[13px]">
+              {entity.fields
+                .filter((f) => f.id !== entity.primaryFieldId && f.id !== status?.id)
+                .map((field) => (
+                  <div key={field.id} className="contents">
+                    <dt className="text-muted-foreground">{field.name}</dt>
+                    <dd className="min-w-0 [overflow-wrap:anywhere] [&_.truncate]:whitespace-pre-line">
+                      <FieldValue
+                        field={field}
+                        value={record.data[field.id]}
+                        className={field.type === "image" ? "size-40" : undefined}
+                      />
+                    </dd>
+                  </div>
+                ))}
+            </dl>
+          </>
         )}
 
         {!editing &&
@@ -344,7 +397,7 @@ function RecordSheetBody({
               >
                 <DotsThreeIcon />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" className="min-w-60">
                 <DropdownMenuGroup>
                   {status?.options
                     ?.filter((o) => o.id !== current?.id && o.id !== next?.id)
@@ -363,6 +416,36 @@ function RecordSheetBody({
                     </DropdownMenuItem>
                   ))}
                   <DropdownMenuSeparator />
+                  {series?.following.length ? (
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => {
+                        actions.removeMany(
+                          [record.id, ...series.following.map((r) => r.id)],
+                          entity.pluralName.toLowerCase(),
+                        );
+                        onClose();
+                      }}
+                    >
+                      <TrashIcon />
+                      Delete this and the {series.following.length} after it
+                    </DropdownMenuItem>
+                  ) : null}
+                  {series && series.members.length > 1 && series.index > 0 ? (
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => {
+                        actions.removeMany(
+                          series.members.map((r) => r.id),
+                          entity.pluralName.toLowerCase(),
+                        );
+                        onClose();
+                      }}
+                    >
+                      <TrashIcon />
+                      Delete the whole series ({series.members.length})
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem
                     variant="destructive"
                     onClick={() => {
