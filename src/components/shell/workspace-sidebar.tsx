@@ -27,6 +27,7 @@ import { usePageGroups, useSidebar } from "@/lib/store/sidebar";
 import { canManage } from "@/lib/store/workspaces";
 import { cn } from "@/lib/utils";
 import { useCommandMenu } from "./command-menu";
+import { NotificationsButton } from "./notifications-button";
 import { OrganizePagesDialog } from "./organize-pages";
 import { RailTip } from "./rail-tip";
 import {
@@ -171,6 +172,7 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
         </RailTip>
         {ws.mode === "live" ? (
           <>
+            <NotificationsButton rail={rail} />
             {/*
               One way in for everyone: the panel beside the page. Owners and admins can expand it to the full
               Ask EveryOps page, which is the same conversation; it's highlighted there too.

@@ -42,12 +42,14 @@ export const assistantRule = rule.extend({
     rule.shape.actions.element.extend({
       type: z
         .string()
-        .describe("set_field, adjust_number, notify, send_email, create_record, link_record or call_api"),
+        .describe(
+          "set_field, adjust_number, notify, notify_people, send_email, create_record, link_record or call_api",
+        ),
       fieldId: z
         .string()
         .optional()
         .describe(
-          "set_field/adjust_number: the field it changes. send_email: who to email, {{email_field}} or an address. create_record: the record type it adds. link_record: the field of the linked type to match. call_api: the webhook endpoint id",
+          "set_field/adjust_number: the field it changes. send_email: who to email, {{email_field}} or an address. notify_people: who, e.g. owner, {{email}}. create_record: the record type it adds. link_record: the field of the linked type to match. call_api: the webhook endpoint id",
         ),
       value: z
         .string()
@@ -527,6 +529,13 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
   at {{time}}"} for Slack, or empty to send the whole record. Use only an endpoint that's listed; when none is (or
   none accepts automation calls), don't plan it: say to add one in Settings → Webhooks with "An automation calls
   it" ticked, then ask again. URLs and secrets stay in Settings, never in the automation.
+- Notifying people ("tell me when there's a new booking", "let the customer and the owner know"): notify_people.
+  fieldId is who, separated by commas: owner, admins (owner and admins), team (everyone in the workspace), staff,
+  an email address, or a {{field}} holding one ({{email}}, {{player.email}}); value is the title on the first line
+  and the message after it, with {{field}} placeholders. Workspace members get it in the app (the bell); anyone
+  else gets it by email. So "notify the owner and the person who booked" is one notify_people with fieldId
+  "owner, {{email}}". notify (no _people) only shows a passing notice to whoever saved, so never use it to tell
+  someone something.
 - Pages: each sidebar page is a system; its views are the tabs on that page. A new page for something that already
   exists ("a separate page for courts", "give the calendar its own page") is add_system plus add_view (a new view
   of that record type) or move_view (move an existing tab there; the old page keeps its other tabs). Give every

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BellIcon,
   CalendarCheckIcon,
   ClockIcon,
   EnvelopeSimpleIcon,
@@ -64,11 +65,13 @@ function TriggerIcon({ rule }: { rule: Rule }) {
 function ActionIcon({ line }: { line: string }) {
   const Icon = line.startsWith("Email")
     ? EnvelopeSimpleIcon
-    : line.startsWith("Add a")
-      ? PlusCircleIcon
-      : line.startsWith("Call")
-        ? WebhooksLogoIcon
-        : null;
+    : line.startsWith("Notify")
+      ? BellIcon
+      : line.startsWith("Add a")
+        ? PlusCircleIcon
+        : line.startsWith("Call")
+          ? WebhooksLogoIcon
+          : null;
   return Icon ? (
     <Icon className="size-3.5 shrink-0" />
   ) : (

@@ -449,6 +449,13 @@ export type Action =
    */
   | { type: "send_email"; to: string; subject: string; body: string }
   /**
+   * Notifies people: to is a list of who, separated by commas: owner, admins (owner and admins), team (everyone in
+   * the workspace), staff, an email address, or a {{field}} holding one ({{player.email}}). Workspace members get it
+   * in the app (the bell), and by email too when email is true; anyone else gets an email. title and body are text
+   * with {{field}} placeholders. Sent by the server after the save, like emails.
+   */
+  | { type: "notify_people"; to: string; title: string; body?: string; email?: boolean }
+  /**
    * Adds a record of another type, e.g. an invoice when a booking is confirmed. values maps its field ids to
    * formulas read on the triggering record; a link back to the triggering record's type is filled in by itself.
    */

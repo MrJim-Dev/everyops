@@ -309,6 +309,8 @@ export function validateBlueprint(bp: Blueprint): ValidationError[] {
 
 const NUMERIC = new Set(["number", "money", "percent", "rating", "duration"]);
 const list = (items: { id: string }[]) => items.map((f) => f.id).join(", ") || "none";
+/** Who a notification can go to by role (src/server/notifications.ts). */
+export const RECIPIENT_GROUPS = new Set(["owner", "admins", "team", "staff"]);
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const resolvesPath = (bp: Blueprint, entity: Entity, ref: string) =>
   !walkPath(bp, entity, ref.split(".")).error;
@@ -372,6 +374,31 @@ function checkRule(bp: Blueprint, source: Entity, rule: Rule, path: string, erro
       if (!action.subject.trim()) say("the email has no subject");
       if (!action.body.trim()) say("the email has no message");
       for (const text of [action.to, action.subject, action.body])
+        for (const m of text.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g))
+          if (!resolvesPath(bp, source, m[1]))
+            say(`{{${m[1]}}} isn't a field of ${source.name} (fields: ${list(source.fields)})`);
+      continue;
+    }
+    if (action.type === "notify_people") {
+      if (!action.title.trim()) say("the notification has no title");
+      const who = action.to
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      if (!who.length)
+        say(
+          "the notification has no one to notify; to is owner, admins, team, staff, an address or a {{field}}",
+        );
+      for (const t of who)
+        if (
+          !RECIPIENT_GROUPS.has(t.toLowerCase()) &&
+          !/^\{\{\s*[\w.]+\s*\}\}$/.test(t) &&
+          !/^\S+@\S+\.\S+$/.test(t)
+        )
+          say(
+            `"${t}" isn't someone to notify; use owner, admins, team, staff, an email address or a {{field}}`,
+          );
+      for (const text of [action.to, action.title, action.body ?? ""])
         for (const m of text.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g))
           if (!resolvesPath(bp, source, m[1]))
             say(`{{${m[1]}}} isn't a field of ${source.name} (fields: ${list(source.fields)})`);
