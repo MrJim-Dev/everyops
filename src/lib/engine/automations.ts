@@ -11,6 +11,7 @@ import type {
   Rule,
 } from "@/lib/blueprint/types";
 import {
+  currencyOf,
   formatDate,
   formatDateTime,
   formatDuration,
@@ -116,7 +117,7 @@ export function readable(
   const option = field.options?.find((o) => o.id === value);
   if (option) return option.label;
   if (typeof value === "number") {
-    if (type === "money") return formatMoney(value);
+    if (type === "money") return formatMoney(value, { currency: currencyOf(bp) });
     if (type === "percent") return formatPercent(value);
     if (type === "rating") return formatRating(value);
     if (type === "duration") return formatDuration(value);

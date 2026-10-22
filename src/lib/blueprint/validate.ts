@@ -2,6 +2,7 @@ import { publicProblems, sharedTableProblems } from "@/lib/components/public-saf
 import { componentDef, layoutItems, type Ref } from "@/lib/components/registry";
 import { formulaOrder } from "@/lib/engine/compute";
 import { parseExpr } from "@/lib/engine/expr";
+import { isCurrency } from "@/lib/format";
 import { isTimeZone } from "@/lib/time";
 import { displayKind, isNumericKind } from "./field-kind";
 import { walkPath } from "./paths";
@@ -31,6 +32,8 @@ function checkExpr(bp: Blueprint, entity: Entity, src: string, path: string, err
 /** Returns every problem in a blueprint, each with a path and a plain message. */
 export function validateBlueprint(bp: Blueprint): ValidationError[] {
   const errors: ValidationError[] = [];
+  if (bp.currency !== undefined && !isCurrency(bp.currency))
+    errors.push({ path: "currency", message: `"${bp.currency}" isn't a currency EveryOps supports` });
   if (bp.timeZone !== undefined && !isTimeZone(bp.timeZone))
     errors.push({ path: "timeZone", message: `"${bp.timeZone}" isn't a time zone` });
   const entityIds = new Set(bp.entities.map((e) => e.id));

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useCurrency } from "@/components/workspace/currency";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { getEntity, getField } from "@/lib/blueprint/lookup";
 import type { Sort } from "@/lib/blueprint/types";
@@ -70,6 +71,7 @@ export function DailyChartView({
   data: ChartData;
 }) {
   const [range, setRange] = useState<keyof typeof RANGES>("30d");
+  const currency = useCurrency();
   const points = data.points.slice(-RANGES[range]);
   const config: ChartConfig = Object.fromEntries(
     data.series.map((s, i) => [s.key, { label: s.label, color: chartColor(i) }]),
@@ -117,7 +119,9 @@ export function DailyChartView({
             content={
               <ChartTooltipContent
                 indicator="dot"
-                formatter={(v, n) => `${config[String(n)]?.label}: ${formatValue(data.kind, Number(v))}`}
+                formatter={(v, n) =>
+                  `${config[String(n)]?.label}: ${formatValue(data.kind, Number(v), currency)}`
+                }
               />
             }
           />
@@ -303,6 +307,7 @@ function BarRow({
 }
 
 export function LeaderboardView({ title, ranked, kind }: { title: string; ranked: Ranked; kind: ValueKind }) {
+  const currency = useCurrency();
   const top = ranked[0]?.value || 1;
   return (
     <PartCard title={title}>
@@ -313,7 +318,7 @@ export function LeaderboardView({ title, ranked, kind }: { title: string; ranked
               key={r.label}
               lead={String(i + 1)}
               label={r.label}
-              value={formatValue(kind, r.value)}
+              value={formatValue(kind, r.value, currency)}
               ratio={r.value / top}
               color={chartColor(i)}
             />

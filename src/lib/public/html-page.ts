@@ -11,7 +11,7 @@
  */
 
 import type { Blueprint, FieldValue, HtmlPageView } from "@/lib/blueprint/types";
-import { formatRating, parseDuration, parseRating } from "@/lib/format";
+import { formatRating, parseDuration, parseRating, stripMoney } from "@/lib/format";
 import { at } from "@/lib/time";
 import type { PublicField, PublicForm } from "./resolve";
 
@@ -245,7 +245,7 @@ export function formValues(form: PublicForm, raw: RawFormValues): Record<string,
       case "number":
       case "money":
       case "percent": {
-        const n = Number(v.replace(/[₱,\s]/g, ""));
+        const n = Number(stripMoney(v));
         if (v && Number.isFinite(n)) out[f.id] = n;
         break;
       }

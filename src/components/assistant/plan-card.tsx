@@ -12,6 +12,7 @@ import {
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useCurrency } from "@/components/workspace/currency";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type { AssistantTurn } from "@/lib/assistant/panel-store";
 import { displayKind } from "@/lib/blueprint/field-kind";
@@ -155,6 +156,7 @@ export function PlanCard({
   onOpenPage?: () => void;
 }) {
   const waiting = !state || state === "pending";
+  const currency = useCurrency();
   const impact = useImpact(plan, waiting);
   const words = useWordChanges(plan);
   const [showAll, setShowAll] = useState(false);
@@ -342,9 +344,11 @@ export function PlanCard({
                     <tr key={row.id}>
                       <td className="max-w-0 truncate px-3 py-1.5">{row.title}</td>
                       <td className="px-3 py-1.5 text-right font-mono text-muted-foreground tabular">
-                        {formatMoney(row.before)}
+                        {formatMoney(row.before, { currency })}
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono tabular">{formatMoney(row.after)}</td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular">
+                        {formatMoney(row.after, { currency })}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

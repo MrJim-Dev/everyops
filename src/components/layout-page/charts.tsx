@@ -23,6 +23,7 @@ import {
   YAxis,
 } from "recharts";
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
+import { useCurrency } from "@/components/workspace/currency";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import {
   type ChartData,
@@ -58,7 +59,8 @@ export function CartesianView({
   stacked?: boolean;
 }) {
   const config = configOf(data);
-  const format = (v: number) => formatValue(data.kind, v);
+  const currency = useCurrency();
+  const format = (v: number) => formatValue(data.kind, v, currency);
   const tooltip = (
     <ChartTooltip
       cursor={shape === "bar" ? { fill: "var(--muted)" } : true}
@@ -175,7 +177,8 @@ export function CartesianPart({
 }
 
 export function PieView({ head, data, donut }: { head: Head; data: ChartData; donut: boolean }) {
-  const format = (v: number) => formatValue(data.kind, v);
+  const currency = useCurrency();
+  const format = (v: number) => formatValue(data.kind, v, currency);
   const slices = data.points
     .map((p, i) => ({ label: p.label, value: Number(p.value ?? 0), fill: chartColor(i) }))
     .filter((d) => d.value > 0);
@@ -252,6 +255,7 @@ export function PiePart({ props }: P<ChartProps & { donut: boolean }>) {
 }
 
 export function RadarView({ head, data }: { head: Head; data: ChartData }) {
+  const currency = useCurrency();
   return (
     <PartCard title={head.title} description={head.description}>
       {isEmpty(data) ? (
@@ -260,7 +264,7 @@ export function RadarView({ head, data }: { head: Head; data: ChartData }) {
         <ChartContainer config={configOf(data)} className="mx-auto aspect-square h-[240px]">
           <RadarChart data={data.points}>
             <ChartTooltip
-              content={<ChartTooltipContent formatter={(v) => formatValue(data.kind, Number(v))} />}
+              content={<ChartTooltipContent formatter={(v) => formatValue(data.kind, Number(v), currency)} />}
             />
             <PolarAngleAxis dataKey="label" />
             <PolarGrid />
@@ -279,7 +283,8 @@ export function RadarPart({ props }: P<ChartProps>) {
 
 export function RadialView({ data }: { data: GoalData }) {
   const ratio = Math.max(0, Math.min(1, data.value / data.target));
-  const format = (v: number) => formatValue(data.kind, v);
+  const currency = useCurrency();
+  const format = (v: number) => formatValue(data.kind, v, currency);
   const config: ChartConfig = { value: { label: data.title, color: chartColor(0) } };
   return (
     <PartCard

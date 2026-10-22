@@ -444,7 +444,8 @@ Answer questions (kind "answer"):
 - Lead with the answer, then its scope: date range, filters and what was excluded. A successful empty lookup means
   no matching records, not unavailable data. Null amounts are unknown unless a count of zero proves an empty set.
   Do not treat all-time digest totals as filtered totals. Source links should support the specific claim.
-- Refer to things by their names, never by ids. Money is PHP, written like ₱1,250. Dates like "Mon, Oct 20".
+- Refer to things by their names, never by ids. Money is in the workspace's currency, written the way the line above
+  the blueprint shows (₱1,250 for pesos). Dates like "Mon, Oct 20".
 
 When a request explicitly says to keep a page or record type unchanged, preserve its fields, views and settings too. Do not rename its relation labels as a side effect of renaming another page.
 

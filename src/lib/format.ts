@@ -1,23 +1,117 @@
 import type { FieldValue, TimeRange } from "@/lib/blueprint/types";
 import { at, isDateKey, zone } from "@/lib/time";
 
-const pesoWhole = new Intl.NumberFormat("en-PH", {
-  style: "currency",
-  currency: "PHP",
-  maximumFractionDigits: 0,
-});
-const pesoCents = new Intl.NumberFormat("en-PH", {
-  style: "currency",
-  currency: "PHP",
-  minimumFractionDigits: 2,
-});
 const plain = new Intl.NumberFormat("en-PH", { maximumFractionDigits: 2 });
 
-export function formatMoney(value: number, { signed = false } = {}): string {
-  const formatter = Number.isInteger(value) ? pesoWhole : pesoCents;
-  const text = formatter.format(Math.abs(value));
+/**
+ * Currencies a workspace can keep its money in, with the locale whose symbol reads naturally there (₱, S$, RM).
+ * Money is stored as a plain number; the currency only changes how it reads. PHP is the default.
+ */
+export const CURRENCIES = [
+  { code: "PHP", name: "Philippine peso", locale: "en-PH" },
+  { code: "USD", name: "US dollar", locale: "en-US" },
+  { code: "SGD", name: "Singapore dollar", locale: "en-SG" },
+  { code: "MYR", name: "Malaysian ringgit", locale: "en-MY" },
+  { code: "IDR", name: "Indonesian rupiah", locale: "id-ID" },
+  { code: "THB", name: "Thai baht", locale: "th-TH" },
+  { code: "VND", name: "Vietnamese dong", locale: "vi-VN" },
+  { code: "JPY", name: "Japanese yen", locale: "ja-JP" },
+  { code: "KRW", name: "South Korean won", locale: "ko-KR" },
+  { code: "CNY", name: "Chinese yuan", locale: "zh-CN" },
+  { code: "HKD", name: "Hong Kong dollar", locale: "en-HK" },
+  { code: "TWD", name: "New Taiwan dollar", locale: "zh-TW" },
+  { code: "INR", name: "Indian rupee", locale: "en-IN" },
+  { code: "AUD", name: "Australian dollar", locale: "en-AU" },
+  { code: "NZD", name: "New Zealand dollar", locale: "en-NZ" },
+  { code: "EUR", name: "Euro", locale: "en-IE" },
+  { code: "GBP", name: "British pound", locale: "en-GB" },
+] as const;
+
+export type CurrencyCode = (typeof CURRENCIES)[number]["code"];
+export const DEFAULT_CURRENCY: CurrencyCode = "PHP";
+
+export const isCurrency = (code: unknown): code is CurrencyCode =>
+  typeof code === "string" && CURRENCIES.some((c) => c.code === code);
+
+/** A workspace's currency: its own when it set one, otherwise pesos. */
+export const currencyOf = (holder: { currency?: string } | undefined): CurrencyCode =>
+  isCurrency(holder?.currency) ? holder.currency : DEFAULT_CURRENCY;
+
+const formatters = new Map<string, Intl.NumberFormat>();
+/** Dollars outside the US read with their country, so S$400 never passes for US$400. */
+const SYMBOLS: Partial<Record<CurrencyCode, string>> = {
+  SGD: "S$",
+  HKD: "HK$",
+  AUD: "A$",
+  NZD: "NZ$",
+  TWD: "NT$",
+};
+
+function withSymbol(f: Intl.NumberFormat, code: CurrencyCode, value: number): string {
+  const symbol = SYMBOLS[code];
+  if (!symbol) return f.format(value);
+  return f
+    .formatToParts(value)
+    .map((p) => (p.type === "currency" ? symbol : p.value))
+    .join("");
+}
+function moneyFormat(code: CurrencyCode, cents: boolean): Intl.NumberFormat {
+  const key = `${code}:${cents}`;
+  let f = formatters.get(key);
+  if (!f) {
+    const locale = CURRENCIES.find((c) => c.code === code)?.locale ?? "en-PH";
+    const base = new Intl.NumberFormat(locale, { style: "currency", currency: code });
+    // Whole amounts drop the cents (₱400); others keep the currency's own decimals (yen has none).
+    f = new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: code,
+      ...(cents
+        ? { minimumFractionDigits: base.resolvedOptions().maximumFractionDigits }
+        : { maximumFractionDigits: 0 }),
+    });
+    formatters.set(key, f);
+  }
+  return f;
+}
+
+/** The symbol a money input shows before the amount: ₱, $, S$, RM. */
+export function currencySymbol(code: string = DEFAULT_CURRENCY): string {
+  const c = isCurrency(code) ? code : DEFAULT_CURRENCY;
+  return (
+    SYMBOLS[c] ??
+    moneyFormat(c, false)
+      .formatToParts(0)
+      .find((p) => p.type === "currency")?.value ??
+    c
+  );
+}
+
+/** Money as people read it, in the currency named (the workspace's), pesos when none is. */
+export function formatMoney(
+  value: number,
+  { signed = false, currency }: { signed?: boolean; currency?: string } = {},
+): string {
+  const code = isCurrency(currency) ? currency : DEFAULT_CURRENCY;
+  const formatter = moneyFormat(code, !Number.isInteger(value));
+  const text = withSymbol(formatter, code, Math.abs(value));
   if (value < 0) return `−${text}`;
   return signed && value > 0 ? `+${text}` : text;
+}
+
+const CODES = CURRENCIES.map((c) => c.code).join("|");
+/** Text that shows an amount is money: a currency symbol (₱, $, €), a code (PHP, SGD) or RM / Rp. */
+const MONEY_MARK = new RegExp(`\\p{Sc}|\\b(?:${CODES}|RM|Rp)\\b`, "iu");
+export const looksLikeMoney = (text: string) => MONEY_MARK.test(text);
+
+/** An amount typed or pasted with its currency ("₱1,250", "S$ 1,250.50", "RM 300", "USD 99") as plain digits. */
+export function stripMoney(text: string): string {
+  return (
+    text
+      .trim()
+      // A code or RM/Rp, or the letters of S$, US$, HK$ (the $ itself goes below).
+      .replace(new RegExp(`^(?:${CODES}|RM|Rp|[a-z]{1,3}(?=\\p{Sc}))\\s*`, "iu"), "")
+      .replace(/[\p{Sc},\s]/gu, "")
+  );
 }
 
 export function formatNumber(value: number): string {

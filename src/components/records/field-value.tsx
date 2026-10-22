@@ -14,6 +14,7 @@ import { displayKind } from "@/lib/blueprint/field-kind";
 import { findEntity, findRecord, optionOf, recordTitle } from "@/lib/blueprint/lookup";
 import type { Field, FieldValue as Value } from "@/lib/blueprint/types";
 import {
+  currencyOf,
   formatDate,
   formatDateTime,
   formatDuration,
@@ -47,7 +48,9 @@ export function FieldValue({
   switch (kind) {
     case "money":
       return (
-        <span className={cn("font-mono tabular text-[12.5px]", className)}>{formatMoney(Number(value))}</span>
+        <span className={cn("font-mono tabular text-[12.5px]", className)}>
+          {formatMoney(Number(value), { currency: currencyOf(blueprint) })}
+        </span>
       );
     case "number":
       return (

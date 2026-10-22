@@ -28,6 +28,7 @@ import type {
 import { applyFilter, sortRecords } from "@/lib/engine/query";
 import { autoReferenceFields } from "@/lib/engine/references";
 import {
+  currencyOf,
   formatDate,
   formatDateTime,
   formatDuration,
@@ -194,6 +195,8 @@ export type PublicSite = {
   pages: { id: string; name: string; type: "landing" | "form" | "html" | "layout" }[];
   /** The header's button: the main public form, named for what it does ("Book a court"). */
   book?: { id: string; label: string };
+  /** The currency the site's prices read in. */
+  currency?: string;
   /** The workspace's time zone, for the dates visitors see. */
   timeZone?: string;
 };
@@ -250,6 +253,7 @@ export function siteOf(slug: string, name: string, bp: Blueprint): PublicSite | 
     slug,
     name,
     pages,
+    currency: currencyOf(bp),
     timeZone: timeZoneOf(bp),
     ...(book ? { book: { id: formPageOf(bp, book) ?? book.id, label: bookLabel(bp, book.id) } } : {}),
   };
@@ -279,7 +283,7 @@ export function formatCell(
     case "long_text":
       return { ...base, kind: "markdown", text: String(value) };
     case "money":
-      return { ...base, kind: "number", text: formatMoney(Number(value)) };
+      return { ...base, kind: "number", text: formatMoney(Number(value), { currency: currencyOf(bp) }) };
     case "number":
       return { ...base, kind: "number", text: formatNumber(Number(value)) };
     case "percent":
@@ -592,7 +596,9 @@ export function publicExtras(
     return {
       id: r.id,
       title: recordTitle(items, r),
-      ...(Number.isFinite(price) ? { price, priceText: formatMoney(price) } : {}),
+      ...(Number.isFinite(price)
+        ? { price, priceText: formatMoney(price, { currency: currencyOf(bp) }) }
+        : {}),
     };
   });
   return offered.length

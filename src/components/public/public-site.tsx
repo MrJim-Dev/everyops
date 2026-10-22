@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { CurrencyProvider } from "@/components/workspace/currency";
 import { publicHref } from "@/lib/domains";
 import type { PublicPageData, PublicSite } from "@/lib/public/resolve";
 import { setBrowserZone } from "@/lib/time";
@@ -12,7 +13,16 @@ import { PublicFormView } from "./public-form";
 import { PublicLayoutView } from "./public-layout";
 
 /** A workspace's public site in EveryOps's standard look: header with its pages, the page, and a footer. */
-export function PublicSiteView({
+/** A workspace's public site; its prices read in the workspace's currency. */
+export function PublicSiteView(props: Parameters<typeof PublicSiteBody>[0]) {
+  return (
+    <CurrencyProvider currency={props.site.currency}>
+      <PublicSiteBody {...props} />
+    </CurrencyProvider>
+  );
+}
+
+function PublicSiteBody({
   site,
   page,
   preview,

@@ -523,6 +523,8 @@ export type Blueprint = {
   views: View[];
   widgets: Widget[];
   rules: Rule[];
+  /** ISO 4217 code money reads in (PHP, USD, SGD). Amounts are plain numbers; older blueprints mean PHP. */
+  currency?: string;
   /** The IANA time zone the workspace's dates, schedules and "today" are read in. Older blueprints mean Asia/Manila. */
   timeZone?: string;
   /** Printable documents (invoices, quotes, agreements). Older blueprints have none. */

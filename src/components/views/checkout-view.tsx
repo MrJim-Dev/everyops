@@ -10,6 +10,7 @@ import { RelationInput } from "@/components/records/relation-input";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
+import { useCurrency } from "@/components/workspace/currency";
 import { useRecordActions } from "@/components/workspace/use-record-actions";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useReportView } from "@/lib/assistant/screen-store";
@@ -36,7 +37,7 @@ import {
   stickyField,
   stockFieldOf,
 } from "@/lib/engine/register";
-import { formatMoney } from "@/lib/format";
+import { currencySymbol, formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { type Receipt, SaleReceipt } from "./sale-receipt";
 import { SearchInput } from "./search-input";
@@ -58,6 +59,7 @@ function resolve(entity: Entity, type: Field["type"], prefer?: string) {
 
 export function CheckoutView({ view }: { view: CheckoutConfig }) {
   const { blueprint, records, id: workspaceId, name: workspaceName, mode } = useWorkspace();
+  const currency = useCurrency();
   const actions = useRecordActions();
   const user = useCurrentUser();
   const product = getEntity(blueprint, view.productEntityId);
@@ -295,7 +297,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
                       {recordTitle(product, p)}
                     </span>
                     <span className="block font-mono text-[12px] text-muted-foreground tabular">
-                      {formatMoney(price(p))}
+                      {formatMoney(price(p), { currency })}
                     </span>
                   </span>
                   {left === 0 ? (
@@ -351,7 +353,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
                         {p ? recordTitle(product, p) : "Removed"}
                       </span>
                       <span className="block font-mono text-[11.5px] text-muted-foreground tabular">
-                        {formatMoney(price(p))}
+                        {formatMoney(price(p), { currency })}
                       </span>
                     </span>
                     <div className="flex items-center rounded-md border">
@@ -374,7 +376,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
                       </Button>
                     </div>
                     <span className="w-16 text-right font-mono text-[13px] tabular">
-                      {formatMoney(price(p) * item.qty)}
+                      {formatMoney(price(p) * item.qty, { currency })}
                     </span>
                     <Button
                       variant="ghost"
@@ -395,7 +397,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
           <div className="flex items-baseline justify-between">
             <span className="text-[13px] text-muted-foreground">Total</span>
             <AnimatedValue
-              value={formatMoney(total)}
+              value={formatMoney(total, { currency })}
               className="font-mono text-[22px] font-semibold tabular"
             />
           </div>
@@ -457,7 +459,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
                 </Label>
                 <InputGroup className="h-9">
                   <InputGroupAddon>
-                    <InputGroupText>₱</InputGroupText>
+                    <InputGroupText>{currencySymbol(currency)}</InputGroupText>
                   </InputGroupAddon>
                   <InputGroupInput
                     id="cash-received"
@@ -476,7 +478,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
                 <span
                   className={cn("font-mono text-[15px] font-medium tabular", shortBy > 0 && "text-warning")}
                 >
-                  {formatMoney(shortBy > 0 ? shortBy : Math.max(0, cashValue - total))}
+                  {formatMoney(shortBy > 0 ? shortBy : Math.max(0, cashValue - total), { currency })}
                 </span>
               </div>
             </div>
@@ -497,7 +499,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
                   Sale {justSold} completed
                 </>
               ) : (
-                <>Complete sale · {formatMoney(total)}</>
+                <>Complete sale · {formatMoney(total, { currency })}</>
               )}
             </span>
           </Button>
@@ -526,7 +528,7 @@ export function CheckoutView({ view }: { view: CheckoutConfig }) {
             className="h-11 w-full text-[14px]"
             onClick={() => orderRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
           >
-            Review order · {formatMoney(total)}
+            Review order · {formatMoney(total, { currency })}
           </Button>
         </div>
       ) : null}

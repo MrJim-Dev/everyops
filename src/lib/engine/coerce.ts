@@ -1,7 +1,7 @@
 import { isEmail, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { Blueprint, DataRecord, Entity, Field, FieldValue, RecordData } from "@/lib/blueprint/types";
-import { parseDuration, parseRating, RATING_MAX } from "@/lib/format";
+import { parseDuration, parseRating, RATING_MAX, stripMoney } from "@/lib/format";
 import { at, fromLocal } from "@/lib/time";
 
 /**
@@ -48,7 +48,7 @@ function one(
     case "number":
     case "money":
     case "percent": {
-      const n = typeof value === "number" ? value : Number(text.replace(/[₱,\s%]/g, ""));
+      const n = typeof value === "number" ? value : Number(stripMoney(text).replace(/%/g, ""));
       return Number.isFinite(n) ? { value: n } : { error: `needs a number, not "${text}"` };
     }
     case "checkbox":

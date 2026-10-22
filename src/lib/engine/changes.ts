@@ -41,6 +41,8 @@ export type ChangeOp =
       patch: Partial<Pick<Widget, "title" | "filter" | "metric" | "calc" | "target">>;
     }
   | { op: "rename_workspace"; name: string }
+  /** The currency the workspace's money reads in. Amounts stay as they are; only how they read changes. */
+  | { op: "set_currency"; currency: string }
   /** The time zone the workspace's clock runs on. Stored times stay the same instants; how they read changes. */
   | { op: "set_time_zone"; timeZone: string }
   | { op: "add_entity"; entity: Entity }
@@ -402,6 +404,9 @@ export function applyOps(bp: Blueprint, ops: ChangeOp[]): Blueprint {
       }
       case "rename_workspace":
         next.workspaceName = op.name;
+        break;
+      case "set_currency":
+        next.currency = op.currency;
         break;
       case "set_time_zone":
         next.timeZone = op.timeZone;

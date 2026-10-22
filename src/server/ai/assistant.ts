@@ -1,3 +1,4 @@
+import { currencyOf, formatMoney } from "@/lib/format";
 import { htmlConnectionProblems } from "@/lib/public/html-connections";
 import "server-only";
 import type { Part } from "@google/genai";
@@ -1215,6 +1216,8 @@ ${about || "Nothing saved yet. Work it out from the workspace's pages and record
 
 Sidebar pages (in order), with their tabs:
 ${sidebar}
+
+Money is in ${currencyOf(bp)}, written like ${formatMoney(1250, { currency: currencyOf(bp) })}.
 
 Blueprint:
 ${JSON.stringify(bp)}

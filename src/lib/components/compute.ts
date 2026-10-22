@@ -45,8 +45,9 @@ export function valueKind(bp: Blueprint, m: Metric, format?: ValueKind): ValueKi
   return kind === "money" ? "money" : kind === "duration" ? "duration" : "number";
 }
 
-export function formatValue(kind: ValueKind, v: number): string {
-  if (kind === "money") return formatMoney(Math.round(v));
+/** Without a currency it reads in the one on screen (the workspace or public site being shown). */
+export function formatValue(kind: ValueKind, v: number, currency?: string): string {
+  if (kind === "money") return formatMoney(Math.round(v), { currency });
   if (kind === "percent") return formatPercent(Math.round(v * 10) / 10);
   if (kind === "duration") return formatDuration(v);
   return formatNumber(Math.round(v * 10) / 10);
