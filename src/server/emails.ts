@@ -184,3 +184,49 @@ export function waitlistApprovedEmail(p: { to: string; name: string | null; url:
   });
   return { to: p.to, subject, text, html };
 }
+
+/** A short note to the site admins (an upgrade asked for, the AI safety switch). */
+export function adminNoticeEmail(p: {
+  to: string;
+  subject: string;
+  heading: string;
+  lines: string[];
+  action: { label: string; url: string };
+}): Mail {
+  return {
+    to: p.to,
+    subject: p.subject,
+    text: [...p.lines, "", `${p.action.label}: ${p.action.url}`].join("\n"),
+    html: layout({
+      heading: esc(p.heading),
+      preview: p.lines[0] ?? p.heading,
+      lines: p.lines.map(esc),
+      action: p.action,
+      footnote: "You get this because you're a site admin of EveryOps.",
+    }),
+  };
+}
+
+/** The link that proves someone owns their email address (needed before AI features). */
+export function verifyEmailEmail(p: { to: string; name: string; url: string }): Mail {
+  const text = [
+    `Hi ${p.name},`,
+    "",
+    "Confirm this is your email address to start using AI in EveryOps:",
+    p.url,
+    "",
+    "The link works for one hour. If you didn't create an EveryOps account, ignore this email.",
+  ].join("\n");
+  const html = layout({
+    heading: "Confirm your email",
+    preview: "One click to start using AI in EveryOps.",
+    lines: [
+      `Hi ${esc(p.name)},`,
+      "Confirm this is your email address to start using AI in EveryOps: setting up workspaces, Ask EveryOps and voice input.",
+    ],
+    action: { label: "Confirm my email", url: p.url },
+    footnote:
+      "The link works for one hour. If you didn't create an EveryOps account, you can ignore this email.",
+  });
+  return { to: p.to, subject: "Confirm your email for EveryOps", text, html };
+}

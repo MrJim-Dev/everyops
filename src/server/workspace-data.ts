@@ -4,6 +4,7 @@ import type { Blueprint, DataRecord, RecordActor } from "@/lib/blueprint/types";
 import { editedBy, withActorValues } from "@/lib/engine/actors";
 import type { ChangeEntry, PageDoc, WorkspaceDoc } from "@/lib/store/workspace-model";
 import type { RecordChanges, RecordPut, StoredRecord, WorkspaceMeta } from "@/lib/store/workspace-sync";
+import { assertRecordRoom } from "./billing/limits";
 import type { Database } from "./db";
 
 /**
@@ -152,13 +153,16 @@ export async function currentBlueprint(ex: Ex, id: string): Promise<Blueprint | 
   return rows[0]?.blueprint;
 }
 
-/** Fills a workspace's tables from a whole document (new workspaces, demo seeding and resets). */
+/**
+ * Fills a workspace's tables from a whole document (starter workspaces, demo seeding and resets). EveryOps writes
+ * these itself, so their sample records don't count against the owner's plan when they're written.
+ */
 export async function writeContent(trx: Ex, id: string, doc: WorkspaceDoc) {
   if (doc.versions.length)
     await sql`insert into workspace_version (workspace_id, version, blueprint)
       select ${id}, v.n::int, v.bp from jsonb_array_elements(${JSON.stringify(doc.versions)}::jsonb) with ordinality as v(bp, n)
       on conflict (workspace_id, version) do update set blueprint = excluded.blueprint`.execute(trx);
-  await insertRecords(trx, id, doc.records);
+  await insertRecords(trx, id, doc.records, undefined, { seed: true });
   if (doc.changes.length)
     await sql`insert into workspace_change (workspace_id, id, applied_at, entry)
       select ${id}, c->>'id', (c->>'appliedAt')::timestamptz, c from jsonb_array_elements(${JSON.stringify(doc.changes)}::jsonb) c
@@ -176,8 +180,12 @@ export async function insertRecords(
   id: string,
   records: DataRecord[],
   by?: RecordActor,
+  /** seed: EveryOps' own sample records (starter workspaces, demo resets), not checked against the plan. */
+  options: { seed?: boolean } = {},
 ): Promise<string[]> {
   if (!records.length) return [];
+  // Every write path adds records here: browser saves, the API and MCP, public forms, imports and Sheets sync.
+  if (!options.seed) await assertRecordRoom(trx, id, records.length);
   const stamp = by ? JSON.stringify(by) : null;
   const { rows } = await sql<{ id: string }>`
     insert into workspace_record (workspace_id, id, entity_id, data, created_at, updated_at, created_by, updated_by)

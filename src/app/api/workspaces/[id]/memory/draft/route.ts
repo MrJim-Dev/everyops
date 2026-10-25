@@ -21,7 +21,7 @@ export async function POST(request: Request, { params }: RouteContext<"/api/work
     );
   const limit = await takeAiToken(user.id);
   if (!limit.ok) return Response.json({ ok: false, message: "Try again in a few minutes." }, { status: 429 });
-  const overBudget = await startAiUsage(id);
+  const overBudget = await startAiUsage(id, { userId: user.id, feature: "memory" });
   if (overBudget) return overBudget;
   enterAiUsage(id, { userId: user.id, feature: "memory" });
   try {

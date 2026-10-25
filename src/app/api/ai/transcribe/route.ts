@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       { ok: false, message: "That's a lot of voice messages. Wait a few minutes and try again." },
       { status: 429 },
     );
-  const overBudget = await startAiUsage(`account:${user.id}`);
+  const overBudget = await startAiUsage(`account:${user.id}`, { userId: user.id, feature: "voice" });
   if (overBudget) return overBudget;
   enterAiUsage(`account:${user.id}`, { feature: "voice" });
   const mime = type.mime.replace(/^video\//, "audio/");

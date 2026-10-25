@@ -35,7 +35,7 @@ export async function GET(request: Request) {
       { ok: false, message: "Checked a lot already. Try again in a few minutes." },
       { status: 429 },
     );
-  const overBudget = await startAiUsage(workspaceId);
+  const overBudget = await startAiUsage(workspaceId, { userId: user.id, feature: "checkup" });
   if (overBudget) return overBudget;
   enterAiUsage(workspaceId, { userId: user.id, feature: "checkup" });
   try {

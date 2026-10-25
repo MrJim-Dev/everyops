@@ -25,7 +25,7 @@ Automations used to run only at the moment a record was saved, and could only se
 - `src/lib/engine/automations.ts` is the shared logic: which rules fire on a save, what their actions do, which timed rules are due (`dueRuns`), and the plain-language descriptions. The browser, public bookings and the server use the same code.
 - Saves (`patchWorkspace`) and public bookings (`submitPublicForm`) log every automation that fired in `automation_run` inside the same transaction, with emails as `pending`. They're sent after the response (`after()`).
 - `POST /api/cron/automations` (Bearer `CRON_SECRET`) runs due schedules and dates and retries pending emails. Each timed run claims a `run_key` (rule, record, day), so it happens once however often the runner is called or how many instances call it.
-- Email safety: the shared demo account never sends; a workspace sends at most `AUTOMATION_EMAIL_DAILY_LIMIT` (100) automation emails a day; addresses are checked before sending; failures retry up to three times.
+- Email safety: the shared demo account never sends; an owner's workspaces together send at most their plan's automation emails a day (Free 20, Starter 100, Pro 500, Business 2,000; `AUTOMATION_EMAIL_DAILY_LIMIT` caps it further when set; see docs/billing.md); a suspended account sends none; addresses are checked before sending; failures retry up to three times.
 
 Production needs a Cloud Scheduler job, created at deploy time:
 

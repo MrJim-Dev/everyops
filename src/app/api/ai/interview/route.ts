@@ -43,7 +43,10 @@ export async function POST(request: Request) {
       { ok: false, message: "That's a lot of messages. Wait a few minutes and try again." },
       { status: 429 },
     );
-  const overBudget = await startAiUsage(`account:${user.id}`);
+  const overBudget = await startAiUsage(`account:${user.id}`, {
+    userId: user.id,
+    feature: "setup-interview",
+  });
   if (overBudget) return overBudget;
   enterAiUsage(`account:${user.id}`, { feature: "setup-interview" });
   // JSON lines: the reply as Gemini writes it ({ type: "partial" }, or partial: null when a rejected answer is being

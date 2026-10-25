@@ -44,7 +44,7 @@ const summary = (plan: ChangePlan) => ({
 export async function askEveryOps(ctx: Ctx, message: string, screen: Screen) {
   const limit = await takeAiToken(ctx.caller.user.id);
   if (!limit.ok) throw new ToolError(`Too many questions. Try again in ${limit.retryAfterSeconds} seconds.`);
-  const over = await startAiUsage(ctx.workspaceId);
+  const over = await startAiUsage(ctx.workspaceId, { userId: ctx.caller.user.id, feature: "assistant" });
   if (over) throw new ToolError(((await over.json()) as { message: string }).message);
   const found = await loadWorkspace(ctx.workspaceId, ctx.caller.user.id);
   if (!found) throw new ToolError("Workspace not found.", 404);

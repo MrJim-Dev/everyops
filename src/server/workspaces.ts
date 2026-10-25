@@ -25,6 +25,7 @@ import type { PatchResult, WorkspaceMeta, WorkspacePatch } from "@/lib/store/wor
 import { limitWorkspace, viewerOf } from "./access";
 import { logActivity, personActor, recordActor, recordEntries } from "./activity";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
+import { assertTeamRoom, assertWorkspaceRoom, PlanLimitError } from "./billing/limits";
 import { db } from "./db";
 import { inviteEmail } from "./emails";
 import { appUrl, sendMail } from "./mail";
@@ -99,7 +100,8 @@ async function seedIfNew(userId: string) {
       );
       ws.openedAt = new Date(now.getTime() - i * 60_000).toISOString();
       const doc = toDoc(ws);
-      await sql`insert into workspace (id, owner_id, doc) values (${ws.slug}, ${userId}, ${JSON.stringify(metaFrom(doc))}::jsonb)`.execute(
+      // Starter workspaces don't count toward the plan's workspaces (src/server/billing/limits.ts).
+      await sql`insert into workspace (id, owner_id, doc, starter) values (${ws.slug}, ${userId}, ${JSON.stringify(metaFrom(doc))}::jsonb, true)`.execute(
         trx,
       );
       await writeContent(trx, ws.slug, doc);
@@ -319,6 +321,12 @@ export async function patchWorkspace(
   if (!access) {
     if (!patch.create || !patch.meta || !patch.versions?.length)
       return { ok: false, status: 404, message: "Workspace not found." };
+    try {
+      await assertWorkspaceRoom(userId);
+    } catch (e) {
+      if (e instanceof PlanLimitError) return { ok: false, status: 403, message: e.message };
+      throw e;
+    }
     const created = await sql`insert into workspace (id, owner_id, doc)
       values (${slug}, ${userId}, ${JSON.stringify(metaFrom(patch.meta))}::jsonb) on conflict (id) do nothing`.execute(
       db,
@@ -572,6 +580,8 @@ export async function patchWorkspace(
       if (manager && patch.team) {
         // The team: managers can change roles and remove people; joining only happens by accepting an invite.
         const keep = patch.team.members.filter((m) => m.accountId !== ownerId);
+        // Invites the demo account sends are dropped below, so they don't count either.
+        await assertTeamRoom(trx, slug, keep.length + (options.demo ? 0 : patch.team.invites.length));
         const keepIds = keep.map((m) => m.accountId);
         await sql`delete from workspace_member where workspace_id = ${slug} and not (user_id = any(${keepIds}))`.execute(
           trx,
@@ -601,6 +611,7 @@ export async function patchWorkspace(
     });
   } catch (e) {
     if (e instanceof Conflict) return e.result;
+    if (e instanceof PlanLimitError) return { ok: false, status: 403, message: e.message };
     throw e;
   }
   // After the commit, so an email never points at an invite that was rolled back. The sender's name
