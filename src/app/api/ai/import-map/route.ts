@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return Response.json({ ok: false, message: "Nothing to match." }, { status: 400 });
   if (!(await takeAiToken(user.id)).ok)
     return Response.json({ ok: false, message: "Wait a few minutes and try again." }, { status: 429 });
-  const overBudget = await startAiUsage(`account:${user.id}`);
+  const overBudget = await startAiUsage(`account:${user.id}`, { userId: user.id, feature: "import" });
   if (overBudget) return overBudget;
   const into = parsed.data.workspaceId;
   const workspaceId = into && (await roleIn(into, user.id)) ? into : undefined;

@@ -1,0 +1,2112 @@
+[
+  {
+    "step": "disposable sign-up count",
+    "status": 200,
+    "body": {
+      "users": "0"
+    }
+  },
+  {
+    "step": "lara sign-up",
+    "status": 200,
+    "body": {
+      "token": "[redacted]",
+      "user": {
+        "name": "Lara Reyes",
+        "email": "lara.reyes.60968@everyops.test",
+        "emailVerified": false,
+        "image": null,
+        "createdAt": "2026-10-25T18:44:27.479Z",
+        "updatedAt": "2026-10-25T18:44:27.479Z",
+        "id": "VhbeFpJgGwyKiIZ46Sz2gwgwU3I13sFL"
+      }
+    }
+  },
+  {
+    "step": "lara workspaces (starters seeded)",
+    "status": 200,
+    "body": {
+      "ok": true,
+      "workspaces": [
+        {
+          "name": "Court House PH",
+          "summary": "Bookings and payments",
+          "createdAt": "2026-10-25T18:44:27.663Z",
+          "openedAt": "2026-10-25T18:44:27.663Z",
+          "currentVersion": 1,
+          "source": {
+            "version": "1.2",
+            "systemId": "court-bookings"
+          },
+          "slug": "court-house-3aaa",
+          "loaded": false,
+          "versions": [],
+          "current": {
+            "rules": [],
+            "views": [
+              {
+                "id": "schedule",
+                "name": "Schedule",
+                "type": "slot_grid",
+                "entityId": "booking"
+              },
+              {
+                "id": "all_bookings",
+                "name": "List",
+                "sort": [
+                  {
+                    "dir": "asc",
+                    "fieldId": "slot"
+                  }
+                ],
+                "type": "table",
+                "filter": "is_upcoming(slot)",
+                "totals": true,
+                "entityId": "booking",
+                "fieldIds": [
+                  "slot",
+                  "court",
+                  "player",
+                  "status",
+                  "method",
+                  "amount"
+                ],
+                "groupByFieldId": "status"
+              },
+              {
+                "id": "booking_calendar",
+                "name": "Calendar",
+                "type": "calendar",
+                "entityId": "booking",
+                "dateFieldId": "slot",
+                "titleFieldId": "player_name"
+              },
+              {
+                "id": "new_booking",
+                "name": "New booking",
+                "type": "form",
+                "intro": "Book a court for a player at the front desk.",
+                "steps": [
+                  {
+                    "id": "when",
+                    "title": "Court and time",
+                    "fieldIds": [
+                      "court",
+                      "slot"
+                    ]
+                  },
+                  {
+                    "id": "who",
+                    "title": "Player",
+                    "fieldIds": [
+                      "player"
+                    ]
+                  },
+                  {
+                    "id": "pay",
+                    "title": "Payment",
+                    "fieldIds": [
+                      "status",
+                      "method",
+                      "source"
+                    ]
+                  }
+                ],
+                "review": true,
+                "entityId": "booking",
+                "fieldIds": [
+                  "court",
+                  "slot",
+                  "player",
+                  "status",
+                  "method",
+                  "source"
+                ],
+                "submitLabel": "Book court"
+              },
+              {
+                "id": "courts_table",
+                "name": "All courts",
+                "type": "table",
+                "entityId": "court",
+                "fieldIds": [
+                  "name",
+                  "surface",
+                  "bookings"
+                ]
+              },
+              {
+                "id": "players_table",
+                "name": "All players",
+                "sort": [
+                  {
+                    "dir": "desc",
+                    "fieldId": "spent"
+                  }
+                ],
+                "type": "table",
+                "entityId": "player",
+                "fieldIds": [
+                  "name",
+                  "phone",
+                  "visits",
+                  "spent"
+                ]
+              }
+            ],
+            "systems": [
+              {
+                "id": "overview",
+                "icon": "gauge",
+                "name": "Overview",
+                "layout": "overview",
+                "viewIds": [],
+                "widgetIds": [
+                  "bookings_today",
+                  "revenue_today",
+                  "unpaid_today",
+                  "revenue_month",
+                  "today_schedule",
+                  "unpaid_list",
+                  "busy_hours"
+                ]
+              },
+              {
+                "id": "bookings",
+                "icon": "calendar",
+                "name": "Bookings",
+                "viewIds": [
+                  "schedule",
+                  "all_bookings",
+                  "booking_calendar",
+                  "new_booking"
+                ],
+                "widgetIds": []
+              },
+              {
+                "id": "courts",
+                "icon": "court",
+                "name": "Courts",
+                "viewIds": [
+                  "courts_table"
+                ],
+                "widgetIds": []
+              },
+              {
+                "id": "players",
+                "icon": "users",
+                "name": "Players",
+                "viewIds": [
+                  "players_table"
+                ],
+                "widgetIds": []
+              }
+            ],
+            "version": 1,
+            "widgets": [
+              {
+                "id": "bookings_today",
+                "type": "stat",
+                "title": "Bookings today",
+                "filter": "status != 'cancelled'",
+                "metric": {
+                  "op": "count"
+                },
+                "compare": {
+                  "period": "day",
+                  "dateFieldId": "slot"
+                },
+                "entityId": "booking",
+                "sparkline": true
+              },
+              {
+                "id": "revenue_today",
+                "type": "stat",
+                "title": "Collected today",
+                "filter": "status == 'paid'",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "amount"
+                },
+                "compare": {
+                  "period": "day",
+                  "dateFieldId": "slot"
+                },
+                "entityId": "booking",
+                "sparkline": true
+              },
+              {
+                "id": "unpaid_today",
+                "type": "stat",
+                "title": "Unpaid today",
+                "filter": "is_today(slot) && status == 'unpaid'",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "amount"
+                },
+                "entityId": "booking"
+              },
+              {
+                "id": "revenue_month",
+                "type": "chart",
+                "chart": {
+                  "kind": "bar",
+                  "bucket": "day",
+                  "dateFieldId": "slot"
+                },
+                "title": "Revenue this month",
+                "filter": "status == 'paid'",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "amount"
+                },
+                "entityId": "booking"
+              },
+              {
+                "id": "today_schedule",
+                "type": "agenda",
+                "title": "Today's schedule",
+                "agenda": {
+                  "fieldIds": [
+                    "court",
+                    "status"
+                  ],
+                  "dateFieldId": "slot"
+                },
+                "filter": "status != 'cancelled'",
+                "metric": {
+                  "op": "count"
+                },
+                "entityId": "booking"
+              },
+              {
+                "id": "busy_hours",
+                "type": "heatmap",
+                "title": "Busy hours",
+                "width": "two_thirds",
+                "filter": "status != 'cancelled'",
+                "metric": {
+                  "op": "count"
+                },
+                "heatmap": {
+                  "weeks": 6,
+                  "dateFieldId": "slot"
+                },
+                "entityId": "booking"
+              },
+              {
+                "id": "unpaid_list",
+                "list": {
+                  "sort": [
+                    {
+                      "dir": "asc",
+                      "fieldId": "slot"
+                    }
+                  ],
+                  "limit": 5,
+                  "viewId": "all_bookings",
+                  "fieldIds": [
+                    "slot",
+                    "court",
+                    "amount"
+                  ]
+                },
+                "type": "list",
+                "title": "Upcoming unpaid",
+                "filter": "status == 'unpaid' && is_upcoming(slot)",
+                "metric": {
+                  "op": "count"
+                },
+                "entityId": "booking"
+              }
+            ],
+            "entities": [
+              {
+                "id": "court",
+                "name": "Court",
+                "fields": [
+                  {
+                    "id": "name",
+                    "name": "Name",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "surface",
+                    "name": "Surface",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "indoor",
+                        "tone": "neutral",
+                        "label": "Indoor"
+                      },
+                      {
+                        "id": "outdoor",
+                        "tone": "neutral",
+                        "label": "Outdoor"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "bookings",
+                    "name": "Bookings",
+                    "type": "rollup",
+                    "rollup": {
+                      "op": "count",
+                      "viaFieldId": "court",
+                      "childEntityId": "booking"
+                    }
+                  }
+                ],
+                "resource": {
+                  "opensAt": "06:00",
+                  "closesAt": "23:00",
+                  "slotMinutes": 60
+                },
+                "pluralName": "Courts",
+                "primaryFieldId": "name"
+              },
+              {
+                "id": "player",
+                "name": "Player",
+                "fields": [
+                  {
+                    "id": "name",
+                    "name": "Name",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "phone",
+                    "name": "Phone",
+                    "type": "text"
+                  },
+                  {
+                    "id": "visits",
+                    "name": "Bookings",
+                    "type": "rollup",
+                    "rollup": {
+                      "op": "count",
+                      "viaFieldId": "player",
+                      "childEntityId": "booking"
+                    }
+                  },
+                  {
+                    "id": "spent",
+                    "name": "Total spent",
+                    "type": "rollup",
+                    "rollup": {
+                      "op": "sum",
+                      "fieldId": "amount",
+                      "viaFieldId": "player",
+                      "childEntityId": "booking"
+                    }
+                  }
+                ],
+                "pluralName": "Players",
+                "primaryFieldId": "name"
+              },
+              {
+                "id": "booking",
+                "name": "Booking",
+                "fields": [
+                  {
+                    "id": "player_name",
+                    "name": "Booking",
+                    "type": "formula",
+                    "formula": {
+                      "expr": "player.name",
+                      "resultType": "text"
+                    }
+                  },
+                  {
+                    "id": "player",
+                    "name": "Player",
+                    "type": "relation",
+                    "relation": {
+                      "entityId": "player"
+                    },
+                    "required": true
+                  },
+                  {
+                    "id": "court",
+                    "name": "Court",
+                    "type": "relation",
+                    "relation": {
+                      "entityId": "court"
+                    },
+                    "required": true
+                  },
+                  {
+                    "id": "slot",
+                    "name": "Time",
+                    "type": "time_range",
+                    "required": true
+                  },
+                  {
+                    "id": "status",
+                    "name": "Payment",
+                    "type": "status",
+                    "options": [
+                      {
+                        "id": "unpaid",
+                        "tone": "warning",
+                        "label": "Unpaid"
+                      },
+                      {
+                        "id": "paid",
+                        "tone": "success",
+                        "label": "Paid"
+                      },
+                      {
+                        "id": "cancelled",
+                        "tone": "neutral",
+                        "label": "Cancelled"
+                      }
+                    ],
+                    "required": true
+                  },
+                  {
+                    "id": "method",
+                    "name": "Method",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "cash",
+                        "tone": "neutral",
+                        "label": "Cash"
+                      },
+                      {
+                        "id": "gcash",
+                        "tone": "neutral",
+                        "label": "GCash"
+                      },
+                      {
+                        "id": "maya",
+                        "tone": "neutral",
+                        "label": "Maya"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "source",
+                    "name": "Booked via",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "walk_in",
+                        "tone": "neutral",
+                        "label": "Walk-in"
+                      },
+                      {
+                        "id": "messenger",
+                        "tone": "neutral",
+                        "label": "Messenger"
+                      },
+                      {
+                        "id": "phone",
+                        "tone": "neutral",
+                        "label": "Phone"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "rate",
+                    "name": "Rate per hour",
+                    "type": "formula",
+                    "formula": {
+                      "expr": "400",
+                      "freezeWhen": "status == 'paid' || !is_upcoming(slot)",
+                      "resultType": "money"
+                    }
+                  },
+                  {
+                    "id": "amount",
+                    "name": "Amount",
+                    "type": "formula",
+                    "formula": {
+                      "expr": "rate * duration_hours(slot)",
+                      "freezeWhen": "status == 'paid' || !is_upcoming(slot)",
+                      "resultType": "money"
+                    }
+                  }
+                ],
+                "booking": {
+                  "timeFieldId": "slot",
+                  "statusFieldId": "status",
+                  "resourceFieldId": "court",
+                  "blockingStatuses": [
+                    "unpaid",
+                    "paid"
+                  ]
+                },
+                "pluralName": "Bookings",
+                "primaryFieldId": "player_name"
+              }
+            ],
+            "workspaceName": "Court House PH"
+          },
+          "records": [],
+          "changes": [],
+          "stats": {
+            "records": 243,
+            "recordsThisWeek": 243
+          },
+          "ownerId": "VhbeFpJgGwyKiIZ46Sz2gwgwU3I13sFL",
+          "owner": {
+            "name": "Lara Reyes",
+            "email": "lara.reyes.60968@everyops.test"
+          },
+          "members": [],
+          "invites": []
+        },
+        {
+          "name": "Tita Nena's Canteen",
+          "summary": "Register and stock",
+          "createdAt": "2026-10-25T18:44:27.663Z",
+          "openedAt": "2026-10-25T18:43:27.663Z",
+          "currentVersion": 1,
+          "source": {
+            "version": "1.2",
+            "systemId": "canteen-pos"
+          },
+          "slug": "tita-nenas-canteen-048d",
+          "loaded": false,
+          "versions": [],
+          "current": {
+            "rules": [
+              {
+                "id": "deduct_stock",
+                "name": "Deduct stock on sale",
+                "actions": [
+                  {
+                    "type": "adjust_number",
+                    "delta": "-qty",
+                    "target": {
+                      "kind": "relation",
+                      "fieldId": "product"
+                    },
+                    "fieldId": "stock"
+                  }
+                ],
+                "trigger": {
+                  "event": "created",
+                  "entityId": "order_line"
+                }
+              }
+            ],
+            "views": [
+              {
+                "id": "checkout",
+                "name": "Checkout",
+                "type": "checkout",
+                "entityId": "order",
+                "lineEntityId": "order_line",
+                "paymentFieldId": "payment",
+                "productEntityId": "product"
+              },
+              {
+                "id": "order_table",
+                "name": "Today",
+                "sort": [
+                  {
+                    "dir": "desc",
+                    "fieldId": "placed_at"
+                  }
+                ],
+                "type": "table",
+                "filter": "is_today(placed_at)",
+                "entityId": "order",
+                "fieldIds": [
+                  "code",
+                  "placed_at",
+                  "items",
+                  "payment",
+                  "status",
+                  "total"
+                ]
+              },
+              {
+                "id": "product_table",
+                "name": "All products",
+                "type": "table",
+                "entityId": "product",
+                "fieldIds": [
+                  "name",
+                  "category",
+                  "price",
+                  "stock",
+                  "low_stock"
+                ]
+              }
+            ],
+            "systems": [
+              {
+                "id": "register",
+                "icon": "storefront",
+                "name": "Register",
+                "viewIds": [
+                  "checkout"
+                ],
+                "widgetIds": []
+              },
+              {
+                "id": "orders",
+                "icon": "receipt",
+                "name": "Orders",
+                "viewIds": [
+                  "order_table"
+                ],
+                "widgetIds": []
+              },
+              {
+                "id": "products",
+                "icon": "package",
+                "name": "Products",
+                "viewIds": [
+                  "product_table"
+                ],
+                "widgetIds": []
+              },
+              {
+                "id": "overview",
+                "icon": "gauge",
+                "name": "Overview",
+                "viewIds": [],
+                "widgetIds": [
+                  "sales_today",
+                  "orders_today",
+                  "avg_order",
+                  "sales_month",
+                  "low_stock"
+                ]
+              }
+            ],
+            "version": 1,
+            "widgets": [
+              {
+                "id": "sales_today",
+                "type": "stat",
+                "title": "Sales today",
+                "filter": "is_today(placed_at) && status == 'completed'",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "total"
+                },
+                "entityId": "order"
+              },
+              {
+                "id": "orders_today",
+                "type": "stat",
+                "title": "Orders today",
+                "filter": "is_today(placed_at) && status == 'completed'",
+                "metric": {
+                  "op": "count"
+                },
+                "entityId": "order"
+              },
+              {
+                "id": "avg_order",
+                "type": "stat",
+                "title": "Average order",
+                "filter": "is_today(placed_at) && status == 'completed'",
+                "metric": {
+                  "op": "avg",
+                  "fieldId": "total"
+                },
+                "entityId": "order"
+              },
+              {
+                "id": "sales_month",
+                "type": "chart",
+                "chart": {
+                  "kind": "bar",
+                  "bucket": "day",
+                  "dateFieldId": "placed_at"
+                },
+                "title": "Sales this month",
+                "filter": "status == 'completed'",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "total"
+                },
+                "entityId": "order"
+              },
+              {
+                "id": "low_stock",
+                "list": {
+                  "limit": 5,
+                  "viewId": "product_table",
+                  "fieldIds": [
+                    "stock",
+                    "price"
+                  ]
+                },
+                "type": "list",
+                "title": "Running low",
+                "filter": "low_stock",
+                "metric": {
+                  "op": "count"
+                },
+                "entityId": "product"
+              }
+            ],
+            "entities": [
+              {
+                "id": "product",
+                "name": "Product",
+                "fields": [
+                  {
+                    "id": "name",
+                    "name": "Name",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "category",
+                    "name": "Category",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "meals",
+                        "tone": "neutral",
+                        "label": "Meals"
+                      },
+                      {
+                        "id": "snacks",
+                        "tone": "neutral",
+                        "label": "Snacks"
+                      },
+                      {
+                        "id": "drinks",
+                        "tone": "neutral",
+                        "label": "Drinks"
+                      }
+                    ],
+                    "required": true
+                  },
+                  {
+                    "id": "price",
+                    "name": "Price",
+                    "type": "money",
+                    "required": true
+                  },
+                  {
+                    "id": "stock",
+                    "name": "Stock",
+                    "type": "number",
+                    "required": true
+                  },
+                  {
+                    "id": "low_stock",
+                    "name": "Low stock",
+                    "type": "formula",
+                    "formula": {
+                      "expr": "stock <= 5",
+                      "resultType": "checkbox"
+                    }
+                  }
+                ],
+                "pluralName": "Products",
+                "primaryFieldId": "name"
+              },
+              {
+                "id": "order",
+                "name": "Order",
+                "fields": [
+                  {
+                    "id": "code",
+                    "name": "Order",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "placed_at",
+                    "name": "Time",
+                    "type": "datetime",
+                    "required": true
+                  },
+                  {
+                    "id": "payment",
+                    "name": "Payment",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "cash",
+                        "tone": "neutral",
+                        "label": "Cash"
+                      },
+                      {
+                        "id": "gcash",
+                        "tone": "neutral",
+                        "label": "GCash"
+                      },
+                      {
+                        "id": "maya",
+                        "tone": "neutral",
+                        "label": "Maya"
+                      }
+                    ],
+                    "required": true
+                  },
+                  {
+                    "id": "status",
+                    "name": "Status",
+                    "type": "status",
+                    "options": [
+                      {
+                        "id": "completed",
+                        "tone": "success",
+                        "label": "Completed"
+                      },
+                      {
+                        "id": "held",
+                        "tone": "warning",
+                        "label": "Held"
+                      }
+                    ],
+                    "required": true
+                  },
+                  {
+                    "id": "items",
+                    "name": "Items",
+                    "type": "rollup",
+                    "rollup": {
+                      "op": "sum",
+                      "fieldId": "qty",
+                      "viaFieldId": "order",
+                      "childEntityId": "order_line"
+                    }
+                  },
+                  {
+                    "id": "total",
+                    "name": "Total",
+                    "type": "rollup",
+                    "rollup": {
+                      "op": "sum",
+                      "fieldId": "line_total",
+                      "viaFieldId": "order",
+                      "childEntityId": "order_line"
+                    }
+                  },
+                  {
+                    "id": "cash_received",
+                    "name": "Cash received",
+                    "type": "money"
+                  },
+                  {
+                    "id": "change_due",
+                    "name": "Change",
+                    "type": "formula",
+                    "formula": {
+                      "expr": "payment == 'cash' && cash_received > 0 ? cash_received - total : 0",
+                      "resultType": "money"
+                    }
+                  }
+                ],
+                "pluralName": "Orders",
+                "primaryFieldId": "code"
+              },
+              {
+                "id": "order_line",
+                "name": "Order line",
+                "fields": [
+                  {
+                    "id": "order",
+                    "name": "Order",
+                    "type": "relation",
+                    "relation": {
+                      "entityId": "order"
+                    },
+                    "required": true
+                  },
+                  {
+                    "id": "product",
+                    "name": "Product",
+                    "type": "relation",
+                    "relation": {
+                      "entityId": "product"
+                    },
+                    "required": true
+                  },
+                  {
+                    "id": "product_name",
+                    "name": "Item",
+                    "type": "formula",
+                    "formula": {
+                      "expr": "product.name",
+                      "resultType": "text"
+                    }
+                  },
+                  {
+                    "id": "qty",
+                    "name": "Qty",
+                    "type": "number",
+                    "required": true
+                  },
+                  {
+                    "id": "price",
+                    "name": "Price",
+                    "type": "money",
+                    "required": true
+                  },
+                  {
+                    "id": "line_total",
+                    "name": "Line total",
+                    "type": "formula",
+                    "formula": {
+                      "expr": "qty * price",
+                      "resultType": "money"
+                    }
+                  }
+                ],
+                "parent": {
+                  "fieldId": "order",
+                  "entityId": "order"
+                },
+                "pluralName": "Order lines",
+                "primaryFieldId": "product_name"
+              }
+            ],
+            "workspaceName": "Tita Nena's Canteen"
+          },
+          "records": [],
+          "changes": [],
+          "stats": {
+            "records": 1284,
+            "recordsThisWeek": 1284
+          },
+          "ownerId": "VhbeFpJgGwyKiIZ46Sz2gwgwU3I13sFL",
+          "owner": {
+            "name": "Lara Reyes",
+            "email": "lara.reyes.60968@everyops.test"
+          },
+          "members": [],
+          "invites": []
+        },
+        {
+          "name": "Kapé Ilaya",
+          "summary": "Social media content",
+          "createdAt": "2026-10-25T18:44:27.663Z",
+          "openedAt": "2026-10-25T18:42:27.663Z",
+          "currentVersion": 1,
+          "source": {
+            "version": "1.2",
+            "systemId": "content-calendar"
+          },
+          "slug": "kape-ilaya-09c2",
+          "loaded": false,
+          "versions": [],
+          "current": {
+            "rules": [
+              {
+                "id": "review_notice",
+                "name": "Tell the reviewer",
+                "actions": [
+                  {
+                    "type": "notify",
+                    "message": "Mila was asked to review “{{title}}”."
+                  }
+                ],
+                "trigger": {
+                  "to": "review",
+                  "event": "status_changed",
+                  "fieldId": "status",
+                  "entityId": "post"
+                }
+              }
+            ],
+            "views": [
+              {
+                "id": "board",
+                "name": "Board",
+                "type": "kanban",
+                "filter": "status != 'posted'",
+                "entityId": "post",
+                "cardFieldIds": [
+                  "channel",
+                  "owner",
+                  "publish_on"
+                ],
+                "statusFieldId": "status"
+              },
+              {
+                "id": "content_calendar",
+                "name": "Calendar",
+                "type": "calendar",
+                "entityId": "post",
+                "dateFieldId": "publish_on",
+                "titleFieldId": "title"
+              },
+              {
+                "id": "content_list",
+                "name": "List",
+                "sort": [
+                  {
+                    "dir": "asc",
+                    "fieldId": "publish_on"
+                  }
+                ],
+                "type": "table",
+                "entityId": "post",
+                "fieldIds": [
+                  "title",
+                  "channel",
+                  "pillar",
+                  "status",
+                  "owner",
+                  "publish_on"
+                ]
+              }
+            ],
+            "systems": [
+              {
+                "id": "content",
+                "icon": "megaphone",
+                "name": "Content",
+                "viewIds": [
+                  "board",
+                  "content_calendar",
+                  "content_list"
+                ],
+                "widgetIds": []
+              },
+              {
+                "id": "overview",
+                "icon": "gauge",
+                "name": "Overview",
+                "viewIds": [],
+                "widgetIds": [
+                  "in_review",
+                  "scheduled",
+                  "posted_month",
+                  "review_list"
+                ]
+              }
+            ],
+            "version": 1,
+            "widgets": [
+              {
+                "id": "in_review",
+                "type": "stat",
+                "title": "In review",
+                "filter": "status == 'review'",
+                "metric": {
+                  "op": "count"
+                },
+                "entityId": "post"
+              },
+              {
+                "id": "scheduled",
+                "type": "stat",
+                "title": "Scheduled",
+                "filter": "status == 'scheduled'",
+                "metric": {
+                  "op": "count"
+                },
+                "entityId": "post"
+              },
+              {
+                "id": "posted_month",
+                "type": "stat",
+                "title": "Published this month",
+                "filter": "status == 'posted' && is_this_month(publish_on)",
+                "metric": {
+                  "op": "count"
+                },
+                "entityId": "post"
+              },
+              {
+                "id": "review_list",
+                "list": {
+                  "limit": 5,
+                  "viewId": "board",
+                  "fieldIds": [
+                    "channel",
+                    "publish_on"
+                  ]
+                },
+                "type": "list",
+                "title": "Waiting for review",
+                "filter": "status == 'review'",
+                "metric": {
+                  "op": "count"
+                },
+                "entityId": "post"
+              }
+            ],
+            "entities": [
+              {
+                "id": "post",
+                "name": "Post",
+                "fields": [
+                  {
+                    "id": "title",
+                    "name": "Title",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "caption",
+                    "name": "Caption",
+                    "type": "long_text"
+                  },
+                  {
+                    "id": "channel",
+                    "name": "Channel",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "instagram",
+                        "tone": "neutral",
+                        "label": "Instagram"
+                      },
+                      {
+                        "id": "facebook",
+                        "tone": "neutral",
+                        "label": "Facebook"
+                      },
+                      {
+                        "id": "tiktok",
+                        "tone": "neutral",
+                        "label": "TikTok"
+                      }
+                    ],
+                    "required": true
+                  },
+                  {
+                    "id": "pillar",
+                    "name": "Pillar",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "product",
+                        "tone": "neutral",
+                        "label": "Product"
+                      },
+                      {
+                        "id": "people",
+                        "tone": "neutral",
+                        "label": "People"
+                      },
+                      {
+                        "id": "community",
+                        "tone": "neutral",
+                        "label": "Community"
+                      },
+                      {
+                        "id": "education",
+                        "tone": "neutral",
+                        "label": "Education"
+                      },
+                      {
+                        "id": "promo",
+                        "tone": "neutral",
+                        "label": "Promo"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "status",
+                    "name": "Stage",
+                    "type": "status",
+                    "options": [
+                      {
+                        "id": "idea",
+                        "tone": "neutral",
+                        "label": "Ideas"
+                      },
+                      {
+                        "id": "draft",
+                        "tone": "neutral",
+                        "label": "Drafts"
+                      },
+                      {
+                        "id": "review",
+                        "tone": "warning",
+                        "label": "In review"
+                      },
+                      {
+                        "id": "scheduled",
+                        "tone": "accent",
+                        "label": "Scheduled"
+                      },
+                      {
+                        "id": "posted",
+                        "tone": "success",
+                        "label": "Published"
+                      }
+                    ],
+                    "required": true
+                  },
+                  {
+                    "id": "owner",
+                    "name": "Owner",
+                    "type": "person"
+                  },
+                  {
+                    "id": "publish_on",
+                    "name": "Publish on",
+                    "type": "date"
+                  }
+                ],
+                "pluralName": "Posts",
+                "primaryFieldId": "title"
+              }
+            ],
+            "workspaceName": "Kapé Ilaya"
+          },
+          "records": [],
+          "changes": [],
+          "stats": {
+            "records": 14,
+            "recordsThisWeek": 14
+          },
+          "ownerId": "VhbeFpJgGwyKiIZ46Sz2gwgwU3I13sFL",
+          "owner": {
+            "name": "Lara Reyes",
+            "email": "lara.reyes.60968@everyops.test"
+          },
+          "members": [],
+          "invites": []
+        },
+        {
+          "name": "Sunrise Bakeshop",
+          "summary": "Finances and team leave",
+          "createdAt": "2026-10-25T18:44:27.663Z",
+          "openedAt": "2026-10-25T18:41:27.663Z",
+          "currentVersion": 1,
+          "slug": "sunrise-bakeshop-cbfa",
+          "loaded": false,
+          "versions": [],
+          "current": {
+            "rules": [
+              {
+                "id": "deduct_balance",
+                "name": "Deduct approved leave",
+                "actions": [
+                  {
+                    "type": "adjust_number",
+                    "delta": "-days",
+                    "target": {
+                      "kind": "relation",
+                      "fieldId": "employee"
+                    },
+                    "fieldId": "leave_balance"
+                  },
+                  {
+                    "type": "notify",
+                    "message": "Approved. {{days}} days deducted from the leave balance."
+                  }
+                ],
+                "trigger": {
+                  "to": "approved",
+                  "event": "status_changed",
+                  "fieldId": "status",
+                  "entityId": "leave_request"
+                }
+              }
+            ],
+            "views": [
+              {
+                "id": "transaction_table",
+                "name": "All transactions",
+                "sort": [
+                  {
+                    "dir": "desc",
+                    "fieldId": "date"
+                  }
+                ],
+                "type": "table",
+                "entityId": "transaction",
+                "fieldIds": [
+                  "date",
+                  "description",
+                  "type",
+                  "category",
+                  "account",
+                  "signed"
+                ]
+              },
+              {
+                "id": "budget_table",
+                "name": "This month",
+                "type": "table",
+                "entityId": "budget_category",
+                "fieldIds": [
+                  "name",
+                  "budget",
+                  "spent",
+                  "used"
+                ]
+              },
+              {
+                "id": "approvals",
+                "name": "Needs review",
+                "type": "approval_queue",
+                "reject": "declined",
+                "approve": "approved",
+                "pending": "pending",
+                "entityId": "leave_request",
+                "rejectLabel": "Decline",
+                "approveLabel": "Approve",
+                "statusFieldId": "status",
+                "detailFieldIds": [
+                  "kind",
+                  "dates",
+                  "days",
+                  "reason"
+                ]
+              },
+              {
+                "id": "leave_table",
+                "name": "All requests",
+                "sort": [
+                  {
+                    "dir": "desc",
+                    "fieldId": "dates"
+                  }
+                ],
+                "type": "table",
+                "entityId": "leave_request",
+                "fieldIds": [
+                  "employee",
+                  "kind",
+                  "dates",
+                  "days",
+                  "status"
+                ]
+              },
+              {
+                "id": "people_table",
+                "name": "Everyone",
+                "type": "table",
+                "entityId": "employee",
+                "fieldIds": [
+                  "name",
+                  "position",
+                  "team",
+                  "leave_balance"
+                ]
+              }
+            ],
+            "systems": [
+              {
+                "id": "overview",
+                "icon": "gauge",
+                "name": "Overview",
+                "viewIds": [],
+                "widgetIds": [
+                  "revenue",
+                  "expenses",
+                  "net",
+                  "cashflow",
+                  "leave_pending",
+                  "budget",
+                  "recent"
+                ]
+              },
+              {
+                "id": "transactions",
+                "icon": "receipt",
+                "name": "Transactions",
+                "viewIds": [
+                  "transaction_table"
+                ],
+                "widgetIds": []
+              },
+              {
+                "id": "budget",
+                "icon": "wallet",
+                "name": "Budget",
+                "viewIds": [
+                  "budget_table"
+                ],
+                "widgetIds": []
+              },
+              {
+                "id": "leave",
+                "icon": "airplane",
+                "name": "Leave",
+                "viewIds": [
+                  "approvals",
+                  "leave_table"
+                ],
+                "widgetIds": []
+              },
+              {
+                "id": "people",
+                "icon": "users",
+                "name": "People",
+                "viewIds": [
+                  "people_table"
+                ],
+                "widgetIds": []
+              }
+            ],
+            "version": 1,
+            "widgets": [
+              {
+                "id": "revenue",
+                "type": "stat",
+                "title": "Revenue",
+                "filter": "type == 'income' && is_this_month(date)",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "amount"
+                },
+                "entityId": "transaction"
+              },
+              {
+                "id": "expenses",
+                "type": "stat",
+                "title": "Expenses",
+                "filter": "type == 'expense' && is_this_month(date)",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "amount"
+                },
+                "entityId": "transaction"
+              },
+              {
+                "id": "net",
+                "type": "stat",
+                "title": "Net income",
+                "filter": "is_this_month(date)",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "signed"
+                },
+                "entityId": "transaction"
+              },
+              {
+                "id": "cashflow",
+                "type": "chart",
+                "chart": {
+                  "kind": "line",
+                  "bucket": "day",
+                  "dateFieldId": "date",
+                  "splitByFieldId": "type"
+                },
+                "title": "Revenue & expenses",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "amount"
+                },
+                "entityId": "transaction"
+              },
+              {
+                "id": "budget",
+                "type": "progress",
+                "title": "Monthly budget",
+                "filter": "type == 'expense' && is_this_month(date)",
+                "metric": {
+                  "op": "sum",
+                  "fieldId": "amount"
+                },
+                "target": 140000,
+                "entityId": "transaction"
+              },
+              {
+                "id": "recent",
+                "list": {
+                  "sort": [
+                    {
+                      "dir": "desc",
+                      "fieldId": "date"
+                    }
+                  ],
+                  "limit": 5,
+                  "viewId": "transaction_table",
+                  "fieldIds": [
+                    "date",
+                    "account",
+                    "signed"
+                  ]
+                },
+                "span": "main",
+                "type": "list",
+                "title": "Recent transactions",
+                "metric": {
+                  "op": "count"
+                },
+                "entityId": "transaction"
+              },
+              {
+                "id": "leave_pending",
+                "list": {
+                  "limit": 5,
+                  "viewId": "approvals",
+                  "fieldIds": [
+                    "dates",
+                    "kind"
+                  ]
+                },
+                "type": "list",
+                "title": "Needs attention",
+                "filter": "status == 'pending'",
+                "metric": {
+                  "op": "count"
+                },
+                "entityId": "leave_request"
+              }
+            ],
+            "entities": [
+              {
+                "id": "transaction",
+                "name": "Transaction",
+                "fields": [
+                  {
+                    "id": "description",
+                    "name": "Description",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "date",
+                    "name": "Date",
+                    "type": "date",
+                    "required": true
+                  },
+                  {
+                    "id": "type",
+                    "name": "Type",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "income",
+                        "tone": "success",
+                        "label": "Income"
+                      },
+                      {
+                        "id": "expense",
+                        "tone": "neutral",
+                        "label": "Expense"
+                      }
+                    ],
+                    "required": true
+                  },
+                  {
+                    "id": "category",
+                    "name": "Budget category",
+                    "type": "relation",
+                    "relation": {
+                      "entityId": "budget_category"
+                    }
+                  },
+                  {
+                    "id": "account",
+                    "name": "Account",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "bdo",
+                        "tone": "neutral",
+                        "label": "BDO"
+                      },
+                      {
+                        "id": "gcash",
+                        "tone": "neutral",
+                        "label": "GCash"
+                      },
+                      {
+                        "id": "cash",
+                        "tone": "neutral",
+                        "label": "Cash"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "amount",
+                    "name": "Amount",
+                    "type": "money",
+                    "required": true
+                  },
+                  {
+                    "id": "signed",
+                    "name": "Net effect",
+                    "type": "formula",
+                    "formula": {
+                      "expr": "type == 'income' ? amount : -amount",
+                      "resultType": "money"
+                    }
+                  }
+                ],
+                "pluralName": "Transactions",
+                "primaryFieldId": "description"
+              },
+              {
+                "id": "budget_category",
+                "name": "Budget category",
+                "fields": [
+                  {
+                    "id": "name",
+                    "name": "Category",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "budget",
+                    "name": "Monthly budget",
+                    "type": "money",
+                    "required": true
+                  },
+                  {
+                    "id": "spent",
+                    "name": "Spent",
+                    "type": "rollup",
+                    "rollup": {
+                      "op": "sum",
+                      "fieldId": "amount",
+                      "viaFieldId": "category",
+                      "childEntityId": "transaction"
+                    }
+                  },
+                  {
+                    "id": "used",
+                    "name": "Used",
+                    "type": "formula",
+                    "formula": {
+                      "expr": "budget > 0 ? round(spent / budget * 100, 1) : 0",
+                      "resultType": "number"
+                    }
+                  }
+                ],
+                "pluralName": "Budget categories",
+                "primaryFieldId": "name"
+              },
+              {
+                "id": "employee",
+                "name": "Employee",
+                "fields": [
+                  {
+                    "id": "name",
+                    "name": "Name",
+                    "type": "text",
+                    "required": true
+                  },
+                  {
+                    "id": "position",
+                    "name": "Position",
+                    "type": "text"
+                  },
+                  {
+                    "id": "team",
+                    "name": "Team",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "kitchen",
+                        "tone": "neutral",
+                        "label": "Kitchen"
+                      },
+                      {
+                        "id": "counter",
+                        "tone": "neutral",
+                        "label": "Counter"
+                      },
+                      {
+                        "id": "admin",
+                        "tone": "neutral",
+                        "label": "Admin"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "leave_balance",
+                    "name": "Leave balance (days)",
+                    "type": "number",
+                    "required": true
+                  }
+                ],
+                "pluralName": "People",
+                "primaryFieldId": "name"
+              },
+              {
+                "id": "leave_request",
+                "name": "Leave request",
+                "fields": [
+                  {
+                    "id": "employee_name",
+                    "name": "Request",
+                    "type": "formula",
+                    "formula": {
+                      "expr": "employee.name",
+                      "resultType": "text"
+                    }
+                  },
+                  {
+                    "id": "employee",
+                    "name": "Employee",
+                    "type": "relation",
+                    "relation": {
+                      "entityId": "employee"
+                    },
+                    "required": true
+                  },
+                  {
+                    "id": "kind",
+                    "name": "Type",
+                    "type": "select",
+                    "options": [
+                      {
+                        "id": "vacation",
+                        "tone": "neutral",
+                        "label": "Vacation"
+                      },
+                      {
+                        "id": "sick",
+                        "tone": "neutral",
+                        "label": "Sick leave"
+                      },
+                      {
+                        "id": "personal",
+                        "tone": "neutral",
+                        "label": "Personal"
+                      }
+                    ],
+                    "required": true
+                  },
+                  {
+                    "id": "dates",
+                    "name": "Dates",
+                    "type": "time_range",
+                    "range": "dates",
+                    "required": true
+                  },
+                  {
+                    "id": "days",
+                    "name": "Days",
+                    "type": "formula",
+                    "formula": {
+                      "expr": "days(dates)",
+                      "resultType": "number"
+                    }
+                  },
+                  {
+                    "id": "reason",
+                    "name": "Reason",
+                    "type": "text"
+                  },
+                  {
+                    "id": "status",
+                    "name": "Status",
+                    "type": "status",
+                    "options": [
+                      {
+                        "id": "pending",
+                        "tone": "warning",
+                        "label": "Pending"
+                      },
+                      {
+                        "id": "approved",
+                        "tone": "success",
+                        "label": "Approved"
+                      },
+                      {
+                        "id": "declined",
+                        "tone": "neutral",
+                        "label": "Declined"
+                      }
+                    ],
+                    "required": true
+                  }
+                ],
+                "pluralName": "Leave requests",
+                "primaryFieldId": "employee_name"
+              }
+            ],
+            "workspaceName": "Sunrise Bakeshop"
+          },
+          "records": [],
+          "changes": [],
+          "stats": {
+            "records": 52,
+            "recordsThisWeek": 52
+          },
+          "ownerId": "VhbeFpJgGwyKiIZ46Sz2gwgwU3I13sFL",
+          "owner": {
+            "name": "Lara Reyes",
+            "email": "lara.reyes.60968@everyops.test"
+          },
+          "members": [],
+          "invites": []
+        }
+      ]
+    }
+  },
+  {
+    "step": "unverified AI checkup",
+    "status": 403,
+    "body": {
+      "ok": false,
+      "code": "verify_email",
+      "message": "Verify your email address to use AI. Send yourself a link from Account → Plan & usage."
+    }
+  },
+  {
+    "step": "lara verified",
+    "status": 200,
+    "body": {
+      "emailVerified": "t"
+    }
+  },
+  {
+    "step": "out of credits AI checkup",
+    "status": 402,
+    "body": {
+      "ok": false,
+      "code": "credits",
+      "message": "You have used this month's AI credits. They renew on the 1st; add credits or upgrade in Account → Plan & usage."
+    }
+  },
+  {
+    "step": "first own workspace",
+    "status": 200,
+    "body": {
+      "ok": true,
+      "revs": {}
+    }
+  },
+  {
+    "step": "second own workspace (Free allows 1)",
+    "status": 403,
+    "body": {
+      "ok": false,
+      "status": 403,
+      "message": "The Free plan includes 1 workspace besides the starter ones. Delete one or upgrade in Account → Plan & usage."
+    }
+  },
+  {
+    "step": "invite 2 (fits)",
+    "status": 200,
+    "body": {
+      "ok": true,
+      "revs": {}
+    }
+  },
+  {
+    "step": "invite 3 (over Free's 2)",
+    "status": 403,
+    "body": {
+      "ok": false,
+      "status": 403,
+      "message": "The Free plan allows 2 team members per workspace, invites included. Upgrade in Account → Plan & usage for more."
+    }
+  },
+  {
+    "step": "record 2,001 (over Free's 2,000)",
+    "status": 403,
+    "body": {
+      "ok": false,
+      "status": 403,
+      "message": "This workspace has reached the Free plan's 2,000 records. Remove old records or upgrade in Account → Plan & usage."
+    }
+  },
+  {
+    "step": "API key on Free",
+    "status": 409,
+    "body": {
+      "ok": false,
+      "message": "API keys come with the Starter plan. Upgrade in Account → Plan & usage."
+    }
+  },
+  {
+    "step": "upgrade request logged",
+    "status": 200,
+    "body": {
+      "events": "checkout_requested {\"item\": \"plan\", \"plan\": \"starter\", \"period\": \"monthly\", \"provider\": \"manual\"}"
+    }
+  },
+  {
+    "step": "webhook with no provider",
+    "status": 501,
+    "body": {
+      "ok": false,
+      "message": "No payment provider is connected."
+    }
+  },
+  {
+    "step": "ben sign-up",
+    "status": 200,
+    "body": {
+      "token": "[redacted]",
+      "user": {
+        "name": "Ben Cruz",
+        "email": "ben.cruz.60968@everyops.test",
+        "emailVerified": false,
+        "image": null,
+        "createdAt": "2026-10-25T18:44:38.745Z",
+        "updatedAt": "2026-10-25T18:44:38.745Z",
+        "id": "SX6Cdl7cYYfILdfGYauGY5dto5Ozrg6h"
+      }
+    }
+  },
+  {
+    "step": "free account while safety switch is on",
+    "status": 402,
+    "body": {
+      "ok": false,
+      "code": "safety_switch",
+      "message": "AI on free accounts is paused for the rest of the day because of unusually high use. It's back tomorrow, or right away on a paid plan."
+    }
+  },
+  {
+    "step": "admin sign-in",
+    "status": 200,
+    "body": {
+      "redirect": false,
+      "token": "[redacted]",
+      "user": {
+        "name": "James Ocampo",
+        "email": "james@everyops.app",
+        "emailVerified": false,
+        "image": null,
+        "createdAt": "2026-10-22T09:27:20.724Z",
+        "updatedAt": "2026-10-22T09:27:20.724Z",
+        "id": "0ZSYa61vQ4o6XCM8Oq9iWfGe20reADSZ"
+      }
+    }
+  },
+  {
+    "step": "ben suspended",
+    "status": 200,
+    "body": {
+      "ok": true
+    }
+  },
+  {
+    "step": "suspended account AI",
+    "status": 403,
+    "body": {
+      "ok": false,
+      "code": "suspended",
+      "message": "AI is paused on your account. Contact the EveryOps team to sort it out."
+    }
+  },
+  {
+    "step": "non-admin on admin API",
+    "status": 404,
+    "body": {
+      "ok": false,
+      "message": "Not found."
+    }
+  },
+  {
+    "step": "starter: write key refused",
+    "status": 409,
+    "body": {
+      "ok": false,
+      "message": "The Starter plan's keys can only read. Remove records:write or upgrade to Pro."
+    }
+  },
+  {
+    "step": "starter: read key allowed",
+    "status": 200,
+    "body": {
+      "ok": true,
+      "key": {
+        "id": "640z39w6",
+        "name": "Reports",
+        "prefix": "eo_live_640z39w6_",
+        "workspaces": null,
+        "permissions": [
+          "records:read"
+        ],
+        "expiresAt": null,
+        "lastUsedAt": null,
+        "lastUsedIp": null,
+        "revokedAt": null,
+        "createdAt": "2026-10-25T18:45:46.688Z"
+      },
+      "secret": "[redacted]"
+    }
+  },
+  {
+    "step": "starter: second own workspace",
+    "status": 200,
+    "body": {
+      "ok": true,
+      "revs": {}
+    }
+  },
+  {
+    "step": "lara plan usage",
+    "status": 200,
+    "body": {
+      "ok": true,
+      "usage": {
+        "plan": "starter",
+        "source": "assigned",
+        "status": "active",
+        "suspended": false,
+        "suspendedReason": null,
+        "verified": true,
+        "email": "lara.reyes.60968@everyops.test",
+        "month": "2026-10-01",
+        "renewsOn": "2026-11-01",
+        "credits": {
+          "used": 1082,
+          "allowance": 5000,
+          "bonus": 2000
+        },
+        "byFeature": [
+          {
+            "feature": "assistant",
+            "credits": 630,
+            "requests": 45
+          },
+          {
+            "feature": "setup-design",
+            "credits": 262,
+            "requests": 2
+          },
+          {
+            "feature": "setup-interview",
+            "credits": 150,
+            "requests": 6
+          },
+          {
+            "feature": "checkup",
+            "credits": 40,
+            "requests": 5
+          }
+        ],
+        "workspaces": {
+          "used": 2,
+          "starter": 4
+        },
+        "members": {
+          "used": 2,
+          "workspace": "Reyes Rentals"
+        },
+        "records": {
+          "used": 2000,
+          "workspace": "Reyes Rentals"
+        },
+        "storageBytes": 0,
+        "emailsToday": 0,
+        "customDomains": 0,
+        "apiKeys": 1,
+        "today": {
+          "designs": 2,
+          "turns": 6
+        },
+        "requests": [
+          {
+            "at": "2026-10-25T18:44:37.425Z",
+            "detail": {
+              "item": "plan",
+              "plan": "starter",
+              "period": "monthly",
+              "provider": "manual"
+            }
+          }
+        ],
+        "paymentsOnline": false,
+        "safetySwitchOn": true
+      }
+    }
+  }
+]

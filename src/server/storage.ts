@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { Storage } from "@google-cloud/storage";
+import { assertStorageRoom, recordUpload } from "./billing/limits";
 
 const BUCKET = process.env.UPLOAD_BUCKET ?? "everyops-prod-uploads";
 export const MAX_UPLOAD_BYTES = 5_000_000;
@@ -37,6 +38,8 @@ export function imageType(bytes: Uint8Array): { ext: string; mime: string } | nu
 export async function saveImage(workspaceId: string, bytes: Uint8Array): Promise<string | null> {
   const type = imageType(bytes);
   if (!type) return null;
+  // Throws PlanLimitError when the owner's plan has no room; callers turn it into a message.
+  await assertStorageRoom(workspaceId, bytes.length);
   const name = `${workspaceId}/${randomUUID()}.${type.ext}`;
   await bucket()
     .file(name)
@@ -45,6 +48,7 @@ export async function saveImage(workspaceId: string, bytes: Uint8Array): Promise
       resumable: false,
       metadata: { cacheControl: "private" },
     });
+  await recordUpload(workspaceId, name, bytes.length);
   return `/api/files/${name}`;
 }
 
@@ -105,6 +109,7 @@ export async function saveDocument(
 ): Promise<string | null> {
   const type = documentType(bytes, filename);
   if (!type) return null;
+  await assertStorageRoom(workspaceId, bytes.length);
   const name = `${workspaceId}/docs/${randomUUID()}.${type.ext}`;
   await bucket()
     .file(name)
@@ -113,6 +118,7 @@ export async function saveDocument(
       resumable: false,
       metadata: { cacheControl: "private" },
     });
+  await recordUpload(workspaceId, name, bytes.length);
   const shown =
     Array.from(filename)
       .filter((c) => c.charCodeAt(0) >= 32 && c !== "/" && c !== "\\")

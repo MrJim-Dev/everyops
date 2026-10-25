@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { PasswordInput } from "@/components/auth/password-input";
 import { PasswordStrength } from "@/components/auth/password-strength";
 import { useFieldIds } from "@/components/auth/use-field-ids";
+import { PlanUsageSection } from "@/components/billing/plan-usage-section";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -84,6 +85,7 @@ export function AccountSettings() {
           reset every night. Create your own account to keep your work.
         </p>
       ) : null}
+      <PlanUsageSection />
       <fieldset disabled={demo} className="contents">
         <SettingsSection title="Profile" description="Shown on workspaces and changes you make.">
           <form onSubmit={saveProfile} className="flex flex-col gap-4">

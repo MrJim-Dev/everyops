@@ -1,10 +1,12 @@
 import "server-only";
 import { allowedIn, PERMISSIONS, type Permission, reaches } from "@/lib/api-keys";
+import { apiAllows } from "@/lib/billing/plans";
 import type { Role } from "@/lib/store/workspace-model";
 import { type Actor, logActivity } from "./activity";
 import { takeToken } from "./ai/rate-limit";
 import { type VerifiedKey, verifyKey } from "./api-keys";
 import { auth } from "./auth";
+import { accountPlan } from "./billing/limits";
 import { db } from "./db";
 import { roleIn } from "./workspaces";
 
@@ -79,8 +81,32 @@ export async function apiCaller(
           "retry-after": String(limit.retryAfterSeconds),
         }),
       };
+    // A key made on a plan that has since changed: Free has no API, a suspended account none at all.
+    const owner = await accountPlan(verified.user.id);
+    if (owner.suspended || owner.plan.limits.api === "none")
+      return {
+        caller: null,
+        error: fail(
+          403,
+          "plan_required",
+          owner.suspended
+            ? "This account is suspended. Contact the EveryOps team."
+            : "The API comes with the Starter plan. Upgrade in Account → Plan & usage.",
+        ),
+      };
     return {
-      caller: { user: verified.user, via: "key", key: verified.key, client, ip, userAgent },
+      caller: {
+        user: verified.user,
+        via: "key",
+        // Keys only keep the permissions the plan allows (Starter reads).
+        key: {
+          ...verified.key,
+          permissions: verified.key.permissions.filter((p) => apiAllows(owner.plan.limits.api, p)),
+        },
+        client,
+        ip,
+        userAgent,
+      },
       error: null,
     };
   }

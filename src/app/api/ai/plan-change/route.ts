@@ -35,7 +35,10 @@ export async function POST(request: Request) {
       { ok: false, message: "You've asked for a lot of changes. Wait a few minutes and try again." },
       { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } },
     );
-  const overBudget = await startAiUsage(`account:${session.user.id}`);
+  const overBudget = await startAiUsage(`account:${session.user.id}`, {
+    userId: session.user.id,
+    feature: "plan-change",
+  });
   if (overBudget) return overBudget;
   enterAiUsage(`account:${session.user.id}`, { feature: "plan-change" });
 

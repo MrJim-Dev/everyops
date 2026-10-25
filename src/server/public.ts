@@ -34,6 +34,7 @@ import { dateKey } from "@/lib/time";
 import { logActivity, recordEntries } from "./activity";
 import { takeToken } from "./ai/rate-limit";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
+import { visitorLimitResult } from "./billing/limits";
 import { db } from "./db";
 import { managePath } from "./manage";
 import { imageType, saveDocument, saveImage } from "./storage";
@@ -412,106 +413,109 @@ export async function submitPublicForm(
   if (!ID.test(slug)) return { ok: false, status: 404, message: "This page doesn't exist." };
   let emailRuns: number[] = [];
   let hooks = 0;
-  const result: SubmitResult = await db.transaction().execute(async (trx): Promise<SubmitResult> => {
-    // The same lock browser saves take, so revs stay put while the booking is checked and written.
-    const { rows } = await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
-    const bp = rows.length ? await currentBlueprint(trx, slug) : undefined;
-    enterZone(bp);
-    if (!bp) return { ok: false, status: 404, message: "This page doesn't exist." } as const;
-    const stored = await readRecords(trx, slug);
-    const doc = { records: stored.map((s) => s.record) };
-    const view = bp.views.find((v) => v.id === viewId);
-    const entity = bp.entities.find((e) => e.id === view?.entityId);
-    if (view?.type !== "form" || !view.public || !entity)
-      return { ok: false, status: 404, message: "This form isn't taking submissions." } as const;
-    const drafted = draftFromVisitor(slug, bp, doc.records, view, entity, raw, rawExtras, now);
-    if (!drafted.ok) return drafted;
-    const { data, record, picked, offered } = drafted;
-    const booking = entity.booking;
-    // Only the new rows and the ones the engine recalculated (totals, roll-ups) are written, each bumping its rev
-    // so an open tab merges them instead of overwriting.
-    const before = new Map(stored.map((s) => [s.record.id, s]));
-    const writes = data.records.flatMap((r): RecordPut[] => {
-      const was = before.get(r.id);
-      if (!was) return [{ record: r, rev: null }];
-      return sameValue(was.record, r) ? [] : [{ record: r, rev: was.rev }];
-    });
-    // Rows the form added read "Public form · <form name>"; totals it recalculated on other rows are its edits too.
-    const saved = await putRecords(trx, slug, writes, {
-      type: "public_form",
-      id: view.id,
-      name: `Public form · ${view.name}`,
-    });
-    if (saved.conflicts.length)
-      throw new Error(`public submission conflicted on ${saved.conflicts.join(", ")}`);
-    hooks = await queueChanges(
-      trx,
-      slug,
-      bp,
-      writes.map((w) => ({ before: before.get(w.record.id)?.record, after: w.record })),
-      [
-        {
-          type: "public_form.submitted",
-          recordType: entity.id,
-          data: {
-            form: view.id,
-            formName: view.name,
-            recordType: entity.id,
-            record: { id: record.id, ...record.data },
-          },
-        },
-      ],
-    );
-    await logActivity(
-      trx,
-      { type: "public_form", id: view.id, name: view.name },
-      recordEntries(slug, writes),
-    );
-    if (fireOnSave(bp))
-      emailRuns = await logSaveRuns(
+  const result: SubmitResult = await db
+    .transaction()
+    .execute(async (trx): Promise<SubmitResult> => {
+      // The same lock browser saves take, so revs stay put while the booking is checked and written.
+      const { rows } = await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
+      const bp = rows.length ? await currentBlueprint(trx, slug) : undefined;
+      enterZone(bp);
+      if (!bp) return { ok: false, status: 404, message: "This page doesn't exist." } as const;
+      const stored = await readRecords(trx, slug);
+      const doc = { records: stored.map((s) => s.record) };
+      const view = bp.views.find((v) => v.id === viewId);
+      const entity = bp.entities.find((e) => e.id === view?.entityId);
+      if (view?.type !== "form" || !view.public || !entity)
+        return { ok: false, status: 404, message: "This form isn't taking submissions." } as const;
+      const drafted = draftFromVisitor(slug, bp, doc.records, view, entity, raw, rawExtras, now);
+      if (!drafted.ok) return drafted;
+      const { data, record, picked, offered } = drafted;
+      const booking = entity.booking;
+      // Only the new rows and the ones the engine recalculated (totals, roll-ups) are written, each bumping its rev
+      // so an open tab merges them instead of overwriting.
+      const before = new Map(stored.map((s) => [s.record.id, s]));
+      const writes = data.records.flatMap((r): RecordPut[] => {
+        const was = before.get(r.id);
+        if (!was) return [{ record: r, rev: null }];
+        return sameValue(was.record, r) ? [] : [{ record: r, rev: was.rev }];
+      });
+      // Rows the form added read "Public form · <form name>"; totals it recalculated on other rows are its edits too.
+      const saved = await putRecords(trx, slug, writes, {
+        type: "public_form",
+        id: view.id,
+        name: `Public form · ${view.name}`,
+      });
+      if (saved.conflicts.length)
+        throw new Error(`public submission conflicted on ${saved.conflicts.join(", ")}`);
+      hooks = await queueChanges(
         trx,
         slug,
         bp,
         writes.map((w) => ({ before: before.get(w.record.id)?.record, after: w.record })),
-        data.records,
-        "booking",
-        now,
+        [
+          {
+            type: "public_form.submitted",
+            recordType: entity.id,
+            data: {
+              form: view.id,
+              formName: view.name,
+              recordType: entity.id,
+              record: { id: record.id, ...record.data },
+            },
+          },
+        ],
       );
-    await sql`update workspace set updated_at = now() where id = ${slug}`.execute(trx);
-    const shown = entity.fields.filter(
-      (f) =>
-        (f.id === booking?.resourceFieldId ||
-          f.id === booking?.timeFieldId ||
-          f.type === "money" ||
-          (f.type === "formula" && f.formula?.resultType === "money")) &&
-        record.data[f.id] !== undefined,
-    );
-    return {
-      ok: true,
-      reference:
-        autoReferenceFields(entity)
-          .map((f) => record.data[f.id])
-          .find((v): v is string => typeof v === "string" && !!v) ?? record.id.slice(-6).toUpperCase(),
-      title: recordTitle(entity, record),
-      manage: managePath({ workspace: slug, view: view.id, record: record.id }, now),
-      summary: [
-        ...shown
-          .filter((f) => f.type !== "money" && !(f.type === "formula" && f.formula?.resultType === "money"))
-          .map((f) => ({ name: f.name, text: formatCell(bp, data.records, f, record.data[f.id]).text })),
-        ...(picked.length
-          ? [
-              {
-                name: offered?.title ?? "Add-ons",
-                text: picked.map((p) => `${p.title} × ${p.quantity}`).join(", "),
-              },
-            ]
-          : []),
-        ...shown
-          .filter((f) => f.type === "money" || (f.type === "formula" && f.formula?.resultType === "money"))
-          .map((f) => ({ name: f.name, text: formatCell(bp, data.records, f, record.data[f.id]).text })),
-      ],
-    } as const;
-  });
+      await logActivity(
+        trx,
+        { type: "public_form", id: view.id, name: view.name },
+        recordEntries(slug, writes),
+      );
+      if (fireOnSave(bp))
+        emailRuns = await logSaveRuns(
+          trx,
+          slug,
+          bp,
+          writes.map((w) => ({ before: before.get(w.record.id)?.record, after: w.record })),
+          data.records,
+          "booking",
+          now,
+        );
+      await sql`update workspace set updated_at = now() where id = ${slug}`.execute(trx);
+      const shown = entity.fields.filter(
+        (f) =>
+          (f.id === booking?.resourceFieldId ||
+            f.id === booking?.timeFieldId ||
+            f.type === "money" ||
+            (f.type === "formula" && f.formula?.resultType === "money")) &&
+          record.data[f.id] !== undefined,
+      );
+      return {
+        ok: true,
+        reference:
+          autoReferenceFields(entity)
+            .map((f) => record.data[f.id])
+            .find((v): v is string => typeof v === "string" && !!v) ?? record.id.slice(-6).toUpperCase(),
+        title: recordTitle(entity, record),
+        manage: managePath({ workspace: slug, view: view.id, record: record.id }, now),
+        summary: [
+          ...shown
+            .filter((f) => f.type !== "money" && !(f.type === "formula" && f.formula?.resultType === "money"))
+            .map((f) => ({ name: f.name, text: formatCell(bp, data.records, f, record.data[f.id]).text })),
+          ...(picked.length
+            ? [
+                {
+                  name: offered?.title ?? "Add-ons",
+                  text: picked.map((p) => `${p.title} × ${p.quantity}`).join(", "),
+                },
+              ]
+            : []),
+          ...shown
+            .filter((f) => f.type === "money" || (f.type === "formula" && f.formula?.resultType === "money"))
+            .map((f) => ({ name: f.name, text: formatCell(bp, data.records, f, record.data[f.id]).text })),
+        ],
+      } as const;
+    })
+    .catch(visitorLimitResult);
   deliverSoon(emailRuns);
   sendSoon(hooks);
   return result;
@@ -547,12 +551,14 @@ export async function uploadPublicImage(
   if (filename === SIGNATURE_FILE && fields.some((f) => f.type === "signature")) {
     if (imageType(bytes)?.ext !== "png")
       return { ok: false, status: 415, message: "That signature didn't come through. Sign again." };
-    const url = await saveDocument(slug, bytes, SIGNATURE_FILE);
+    const url = await saveDocument(slug, bytes, SIGNATURE_FILE).catch(visitorLimitResult);
+    if (typeof url === "object" && url) return url;
     return url ? { ok: true, url } : { ok: false, status: 415, message: "Sign again." };
   }
   if (!fields.some((f) => f.type === "image"))
     return { ok: false, status: 403, message: "This form doesn't take uploads." };
-  const url = await saveImage(slug, bytes);
+  const url = await saveImage(slug, bytes).catch(visitorLimitResult);
+  if (typeof url === "object" && url) return url;
   if (!url)
     return { ok: false, status: 415, message: "Upload a photo or screenshot (PNG, JPG, WebP or GIF)." };
   return { ok: true, url };

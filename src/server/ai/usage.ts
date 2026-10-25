@@ -6,6 +6,7 @@ import path from "node:path";
 import { sql } from "kysely";
 import { type AiFeature, type CallTokens, costMicros } from "@/lib/ai-usage";
 import { todayKey } from "@/lib/time";
+import { checkAi } from "@/server/billing/limits";
 import { db } from "@/server/db";
 
 /**
@@ -50,10 +51,24 @@ export function withAiUsage<T>(scope: string, fn: () => T, meta?: UsageMeta): T 
 }
 
 /**
- * Checks and counts a request for the scope. Returns the response to send when it's over budget; the route then
+ * Checks and counts a request for the scope. Returns the response to send when it's refused; the route then
  * calls enterAiUsage(scope) so its Gemini tokens are counted too.
+ *
+ * The plan check comes first (src/server/billing/limits.ts checkAi): the paying account's AI credits, suspension,
+ * the asker's verified email, the daily safety switch and the plan's daily caps on setup. The refusal carries a
+ * `code` (credits, verify_email, safety_switch, …) so the app can link to Account → Plan & usage.
  */
-export async function startAiUsage(scope: string): Promise<Response | null> {
+export async function startAiUsage(
+  scope: string,
+  meta: { userId?: string; feature: AiFeature },
+): Promise<Response | null> {
+  const plan = await checkAi(scope, meta.userId, meta.feature).catch((error) => {
+    // A broken plan check must not take AI down with it; the per-account rate limit still applies.
+    console.warn(JSON.stringify({ event: "plan_check_error", message: String(error) }));
+    return { ok: true } as const;
+  });
+  if (!plan.ok)
+    return Response.json({ ok: false, code: plan.code, message: plan.message }, { status: plan.status });
   const check = await chargeAiRequest(scope);
   if (!check.ok) return Response.json({ ok: false, message: check.message }, { status: 429 });
   return null;
@@ -119,11 +134,12 @@ export function recordAiCall(call: AiCall) {
   const cost = costMicros(call.model, call.location, t);
   try {
     void sql`insert into ai_call (user_id, workspace_id, request_id, feature, task, model, location, attempt, rounds,
-        outcome, input_tokens, cached_tokens, output_tokens, thinking_tokens, estimated, cost_micros, ms, origin)
+        outcome, input_tokens, cached_tokens, output_tokens, thinking_tokens, estimated, cost_micros, ms, origin, billed_to)
       values (${ctx?.userId ?? null}, ${ctx?.workspaceId ?? null}, ${ctx?.requestId ?? null}, ${feature}, ${call.task},
         ${call.model}, ${call.location}, ${call.attempt}, ${call.rounds}, ${call.outcome}, ${Math.round(t.input)},
         ${Math.round(t.cached)}, ${Math.round(t.output)}, ${Math.round(t.thinking)}, ${call.estimated}, ${cost},
-        ${Math.round(call.ms)}, ${where})`
+        ${Math.round(call.ms)}, ${where},
+        coalesce((select owner_id from workspace where id = ${ctx?.workspaceId ?? null}), ${ctx?.userId ?? null}))`
       .execute(db)
       .catch((error) => console.warn(JSON.stringify({ event: "ai_call_log_error", message: String(error) })));
   } catch (error) {

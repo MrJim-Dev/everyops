@@ -2,9 +2,10 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { DEMO_LOCKED_MESSAGE, isDemoEmail } from "@/lib/auth/demo";
+import { DISPOSABLE_CODE, DISPOSABLE_MESSAGE, isDisposableEmail } from "@/lib/auth/disposable";
 import { googleAccountLinking } from "./auth-linking";
 import { db } from "./db";
-import { resetPasswordEmail } from "./emails";
+import { resetPasswordEmail, verifyEmailEmail } from "./emails";
 import { sendMail } from "./mail";
 import { privateBeta } from "./private-beta";
 
@@ -42,8 +43,31 @@ export const auth = betterAuth({
     },
   },
   socialProviders: google ? { google } : {},
+  // Verified addresses unlock AI (src/server/billing/limits.ts). Sign-in never waits for it, so nobody is locked out;
+  // Google accounts arrive verified.
+  emailVerification: {
+    sendOnSignUp: true,
+    autoSignInAfterVerification: true,
+    expiresIn: 60 * 60,
+    sendVerificationEmail: async ({ user, url }) => {
+      if (isDemoEmail(user.email)) return;
+      await sendMail(verifyEmailEmail({ to: user.email, name: user.name, url }));
+    },
+  },
   ...googleAccountLinking,
-  databaseHooks: { ...googleAccountLinking.databaseHooks, ...privateBeta.databaseHooks },
+  databaseHooks: {
+    ...googleAccountLinking.databaseHooks,
+    user: {
+      create: {
+        before: async (user, ctx) => {
+          // Throwaway inboxes would let one person collect a new Free allowance again and again.
+          if (isDisposableEmail(user.email))
+            throw new APIError("BAD_REQUEST", { code: DISPOSABLE_CODE, message: DISPOSABLE_MESSAGE });
+          return privateBeta.databaseHooks.user.create.before(user, ctx);
+        },
+      },
+    },
+  },
   user: { deleteUser: { enabled: true } },
   session: {
     expiresIn: 60 * 60 * 24 * 30,

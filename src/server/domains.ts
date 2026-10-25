@@ -11,6 +11,7 @@ import {
   recordsFor,
 } from "@/lib/domains";
 import { logActivity, personActor } from "./activity";
+import { assertDomainRoom, planLimitResult } from "./billing/limits";
 import { db } from "./db";
 import { appUrl, sendMail } from "./mail";
 
@@ -161,6 +162,11 @@ export async function addDomain(
   if (mine[0]?.dup) return { ok: false, message: "This workspace already has that domain." };
   if (kind === "custom" && (mine[0]?.n ?? 0) >= MAX_DOMAINS)
     return { ok: false, message: `A workspace can have up to ${MAX_DOMAINS} custom domains.` };
+  if (kind === "custom") {
+    // Custom domains across all the owner's workspaces, by plan (Pro: 1, Business: 3).
+    const room = await assertDomainRoom(workspaceId).catch(planLimitResult);
+    if (room) return { ok: false, message: room.message };
+  }
   const { rows: others } = await sql<{
     status: string;
   }>`select status from workspace_domain where hostname = ${host}`.execute(db);

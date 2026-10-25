@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       { ok: false, message: "That's a lot of questions. Wait a few minutes and try again." },
       { status: 429 },
     );
-  const overBudget = await startAiUsage(parsed.data.workspaceId);
+  const overBudget = await startAiUsage(parsed.data.workspaceId, { userId: user.id, feature: "assistant" });
   if (overBudget) return overBudget;
   enterAiUsage(parsed.data.workspaceId, { userId: user.id, feature: "assistant" });
   const manager = canManage(found.role);

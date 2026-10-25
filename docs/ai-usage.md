@@ -34,7 +34,7 @@ A script run without a database still prints each call (`{"event":"gemini",…}`
 
 ## Limits
 
-The monthly token budget (`AI_MONTHLY_TOKEN_BUDGET`) still reads `ai_usage`, which now also counts the tokens of failed and cancelled calls. Per-account limits can sum `ai_call` by `user_id` over a period (the `ai_call_user` index covers it).
+The monthly token budget (`AI_MONTHLY_TOKEN_BUDGET`) still reads `ai_usage`, which now also counts the tokens of failed and cancelled calls. Plans (docs/billing.md) count AI credits from `ai_call.cost_micros` per paying account (`billed_to`, the workspace's owner), and pause free AI when the day's total passes `AI_DAILY_SPEND_LIMIT_USD`.
 
 ## Checking it locally
 

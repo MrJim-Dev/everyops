@@ -31,7 +31,7 @@ export async function POST(request: Request) {
   const limit = await takeAiToken(user.id);
   if (!limit.ok)
     return Response.json({ ok: false, message: "Wait a few minutes and try again." }, { status: 429 });
-  const overBudget = await startAiUsage(`account:${user.id}`);
+  const overBudget = await startAiUsage(`account:${user.id}`, { userId: user.id, feature: "setup-design" });
   if (overBudget) return overBudget;
   enterAiUsage(`account:${user.id}`, { feature: "setup-design" });
 

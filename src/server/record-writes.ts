@@ -10,6 +10,7 @@ import { type RecordPut, sameValue } from "@/lib/store/workspace-sync";
 import { viewerIn } from "./access";
 import { type Actor, logActivity, recordActor } from "./activity";
 import { deliverSoon, fireOnSave, logSaveRuns } from "./automations";
+import { planLimitResult } from "./billing/limits";
 import { db } from "./db";
 import { queueChanges, sendSoon } from "./webhooks";
 import { currentBlueprint, deleteRecords, putRecords, readRecords, writePages } from "./workspace-data";
@@ -24,7 +25,12 @@ import { enterZone } from "./zone";
 
 export type WriteResult =
   | { ok: true; record: DataRecord | null; rev: number | null; notices: string[] }
-  | { ok: false; status: 400 | 404 | 409; message: string; current?: { record: DataRecord; rev: number } };
+  | {
+      ok: false;
+      status: 400 | 403 | 404 | 409;
+      message: string;
+      current?: { record: DataRecord; rev: number };
+    };
 
 type Change =
   | { kind: "create"; entityId: string; data: RecordData }
@@ -43,129 +49,134 @@ export async function writeRecord(
   let hooks = 0;
   let removed: string[] = [];
   let entityId: string | null = change.kind === "create" ? change.entityId : null;
-  const result = await db.transaction().execute(async (trx) => {
-    const done = await (async (): Promise<WriteResult> => {
-      await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
-      const bp = await currentBlueprint(trx, slug);
-      enterZone(bp);
-      if (!bp) return { ok: false, status: 404, message: "Workspace not found." };
-      const stored = await readRecords(trx, slug);
-      const before = new Map(stored.map((s) => [s.record.id, s]));
-      const ws = { blueprint: bp, records: stored.map((s) => s.record) };
-      const target = change.kind === "create" ? undefined : before.get(change.id);
-      // Records the caller can't see (record-level access) aren't there for them.
-      const dropped = change.kind === "merge" ? before.get(change.dropId) : undefined;
-      if (actor.userId && (target || dropped)) {
-        const viewer = await viewerIn(trx, slug, actor.userId);
-        for (const s of [target, dropped])
-          if (s && viewer && !canSee(bp, viewer, s.record))
-            return { ok: false, status: 404, message: `No record "${s.record.id}".` };
-      }
-      if (target) entityId = target.record.entityId;
-      if (change.kind !== "create") {
-        if (!target) return { ok: false, status: 404, message: `No record "${change.id}".` };
-        if (change.rev !== undefined && change.rev !== target.rev)
-          return {
-            ok: false,
-            status: 409,
-            message:
-              "Someone changed this record since you read it. Here it is now; apply your change to it.",
-            current: target,
-          };
-      }
-      if (change.kind === "merge" && !dropped)
-        return { ok: false, status: 404, message: `No record "${change.dropId}".` };
-      let next: DataRecord[];
-      let saved: DataRecord | null = null;
-      let notices: string[] = [];
-      if (change.kind === "create") {
-        // Reference numbers the app fills in itself (BK-1042) are filled in here too, as for public bookings.
-        const entity = bp.entities.find((e) => e.id === change.entityId);
-        const data = { ...change.data };
-        if (entity)
-          for (const f of autoReferenceFields(entity))
-            if (data[f.id] === undefined || data[f.id] === "")
-              data[f.id] = nextReference(entity, f, ws.records);
-        const made = createRecord(ws, change.entityId, data, now, newId(change.entityId));
-        if (!made.ok)
-          return { ok: false, status: 400, message: made.errors.map((e) => e.message).join("; ") };
-        next = made.data.records;
-        saved = made.record;
-        notices = made.notices;
-      } else if (change.kind === "update") {
-        const made = updateRecord(ws, change.id, change.patch, now);
-        if (!made.ok)
-          return { ok: false, status: 400, message: made.errors.map((e) => e.message).join("; ") };
-        next = made.data.records;
-        saved = made.record;
-        notices = made.notices;
-      } else if (change.kind === "merge") {
-        const made = mergeInto(ws, change.id, change.dropId, now);
-        if (!made.ok) return { ok: false, status: 400, message: made.message };
-        next = made.data.records;
-        saved = made.record;
-        notices = [
-          made.moved ? `Moved ${made.moved} linked ${made.moved === 1 ? "record" : "records"}.` : "",
-        ].filter(Boolean);
-      } else {
-        const done = applyRecordOps(ws, [{ op: "delete_record", recordId: change.id }], now);
-        if (done.errors.length) return { ok: false, status: 400, message: done.errors.join("; ") };
-        next = done.data.records;
-      }
-      const kept = new Set(next.map((r) => r.id));
-      const puts = next.flatMap((r): RecordPut[] => {
-        const was = before.get(r.id);
-        if (!was) return [{ record: r, rev: null }];
-        return sameValue(was.record, r) ? [] : [{ record: r, rev: was.rev }];
-      });
-      const gone = stored.filter((s) => !kept.has(s.record.id)).map((s) => ({ id: s.record.id, rev: s.rev }));
-      removed = gone.map((g) => g.id);
-      const put = await putRecords(trx, slug, puts, await recordActor(trx, actor));
-      const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, gone))];
-      if (conflicts.length) throw new Error(`record write conflicted on ${conflicts.join(", ")}`);
-      hooks = await queueChanges(trx, slug, bp, [
-        ...puts.map((p) => ({ before: before.get(p.record.id)?.record, after: p.record })),
-        ...gone.map((g) => ({ before: before.get(g.id)?.record })),
-      ]);
-      if (fireOnSave(bp) && puts.length)
-        emailRuns = await logSaveRuns(
-          trx,
-          slug,
-          bp,
-          puts.map((p) => ({ before: before.get(p.record.id)?.record, after: p.record })),
-          next,
-          "save",
-          now,
-        );
-      await sql`update workspace set updated_at = now() where id = ${slug}`.execute(trx);
-      const savedId = saved?.id;
-      return {
-        ok: true,
-        record: savedId ? (next.find((r) => r.id === savedId) ?? saved) : null,
-        rev: savedId ? (put.revs[savedId] ?? null) : null,
-        notices,
-      };
-    })();
-    // Logged with the write: what was done, or why it wasn't (a stale rev, a failed check).
-    if (done.ok || done.status !== 404)
-      await logActivity(trx, actor, {
-        workspaceId: slug,
-        action: `record.${change.kind}`,
-        target: entityId,
-        ids:
-          change.kind === "delete" && done.ok
-            ? removed
-            : change.kind === "merge"
-              ? [change.id, change.dropId]
-              : [done.ok && done.record ? done.record.id : change.kind === "create" ? "" : change.id].filter(
-                  Boolean,
-                ),
-        count: change.kind === "merge" ? 2 : 1,
-        result: done.ok ? "ok" : done.status === 409 ? "conflict" : "error",
-        detail: done.ok ? done.notices.join(" ") || null : done.message,
-      });
-    return done;
-  });
+  const result = await db
+    .transaction()
+    .execute(async (trx) => {
+      const done = await (async (): Promise<WriteResult> => {
+        await sql`select 1 from workspace where id = ${slug} for update`.execute(trx);
+        const bp = await currentBlueprint(trx, slug);
+        enterZone(bp);
+        if (!bp) return { ok: false, status: 404, message: "Workspace not found." };
+        const stored = await readRecords(trx, slug);
+        const before = new Map(stored.map((s) => [s.record.id, s]));
+        const ws = { blueprint: bp, records: stored.map((s) => s.record) };
+        const target = change.kind === "create" ? undefined : before.get(change.id);
+        // Records the caller can't see (record-level access) aren't there for them.
+        const dropped = change.kind === "merge" ? before.get(change.dropId) : undefined;
+        if (actor.userId && (target || dropped)) {
+          const viewer = await viewerIn(trx, slug, actor.userId);
+          for (const s of [target, dropped])
+            if (s && viewer && !canSee(bp, viewer, s.record))
+              return { ok: false, status: 404, message: `No record "${s.record.id}".` };
+        }
+        if (target) entityId = target.record.entityId;
+        if (change.kind !== "create") {
+          if (!target) return { ok: false, status: 404, message: `No record "${change.id}".` };
+          if (change.rev !== undefined && change.rev !== target.rev)
+            return {
+              ok: false,
+              status: 409,
+              message:
+                "Someone changed this record since you read it. Here it is now; apply your change to it.",
+              current: target,
+            };
+        }
+        if (change.kind === "merge" && !dropped)
+          return { ok: false, status: 404, message: `No record "${change.dropId}".` };
+        let next: DataRecord[];
+        let saved: DataRecord | null = null;
+        let notices: string[] = [];
+        if (change.kind === "create") {
+          // Reference numbers the app fills in itself (BK-1042) are filled in here too, as for public bookings.
+          const entity = bp.entities.find((e) => e.id === change.entityId);
+          const data = { ...change.data };
+          if (entity)
+            for (const f of autoReferenceFields(entity))
+              if (data[f.id] === undefined || data[f.id] === "")
+                data[f.id] = nextReference(entity, f, ws.records);
+          const made = createRecord(ws, change.entityId, data, now, newId(change.entityId));
+          if (!made.ok)
+            return { ok: false, status: 400, message: made.errors.map((e) => e.message).join("; ") };
+          next = made.data.records;
+          saved = made.record;
+          notices = made.notices;
+        } else if (change.kind === "update") {
+          const made = updateRecord(ws, change.id, change.patch, now);
+          if (!made.ok)
+            return { ok: false, status: 400, message: made.errors.map((e) => e.message).join("; ") };
+          next = made.data.records;
+          saved = made.record;
+          notices = made.notices;
+        } else if (change.kind === "merge") {
+          const made = mergeInto(ws, change.id, change.dropId, now);
+          if (!made.ok) return { ok: false, status: 400, message: made.message };
+          next = made.data.records;
+          saved = made.record;
+          notices = [
+            made.moved ? `Moved ${made.moved} linked ${made.moved === 1 ? "record" : "records"}.` : "",
+          ].filter(Boolean);
+        } else {
+          const done = applyRecordOps(ws, [{ op: "delete_record", recordId: change.id }], now);
+          if (done.errors.length) return { ok: false, status: 400, message: done.errors.join("; ") };
+          next = done.data.records;
+        }
+        const kept = new Set(next.map((r) => r.id));
+        const puts = next.flatMap((r): RecordPut[] => {
+          const was = before.get(r.id);
+          if (!was) return [{ record: r, rev: null }];
+          return sameValue(was.record, r) ? [] : [{ record: r, rev: was.rev }];
+        });
+        const gone = stored
+          .filter((s) => !kept.has(s.record.id))
+          .map((s) => ({ id: s.record.id, rev: s.rev }));
+        removed = gone.map((g) => g.id);
+        const put = await putRecords(trx, slug, puts, await recordActor(trx, actor));
+        const conflicts = [...put.conflicts, ...(await deleteRecords(trx, slug, gone))];
+        if (conflicts.length) throw new Error(`record write conflicted on ${conflicts.join(", ")}`);
+        hooks = await queueChanges(trx, slug, bp, [
+          ...puts.map((p) => ({ before: before.get(p.record.id)?.record, after: p.record })),
+          ...gone.map((g) => ({ before: before.get(g.id)?.record })),
+        ]);
+        if (fireOnSave(bp) && puts.length)
+          emailRuns = await logSaveRuns(
+            trx,
+            slug,
+            bp,
+            puts.map((p) => ({ before: before.get(p.record.id)?.record, after: p.record })),
+            next,
+            "save",
+            now,
+          );
+        await sql`update workspace set updated_at = now() where id = ${slug}`.execute(trx);
+        const savedId = saved?.id;
+        return {
+          ok: true,
+          record: savedId ? (next.find((r) => r.id === savedId) ?? saved) : null,
+          rev: savedId ? (put.revs[savedId] ?? null) : null,
+          notices,
+        };
+      })();
+      // Logged with the write: what was done, or why it wasn't (a stale rev, a failed check).
+      if (done.ok || done.status !== 404)
+        await logActivity(trx, actor, {
+          workspaceId: slug,
+          action: `record.${change.kind}`,
+          target: entityId,
+          ids:
+            change.kind === "delete" && done.ok
+              ? removed
+              : change.kind === "merge"
+                ? [change.id, change.dropId]
+                : [
+                    done.ok && done.record ? done.record.id : change.kind === "create" ? "" : change.id,
+                  ].filter(Boolean),
+          count: change.kind === "merge" ? 2 : 1,
+          result: done.ok ? "ok" : done.status === 409 ? "conflict" : "error",
+          detail: done.ok ? done.notices.join(" ") || null : done.message,
+        });
+      return done;
+    })
+    .catch(planLimitResult);
   deliverSoon(emailRuns);
   sendSoon(hooks);
   return result;

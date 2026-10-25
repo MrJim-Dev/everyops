@@ -7,6 +7,7 @@ import { isImagePath } from "@/lib/engine/records";
 import { autoReferenceFields } from "@/lib/engine/references";
 import { formatCell, publicFieldsOf, siteOf } from "@/lib/public/resolve";
 import { logActivity } from "./activity";
+import { visitorLimitResult } from "./billing/limits";
 import { db } from "./db";
 import { saveImage } from "./storage";
 import { queueChanges, sendSoon } from "./webhooks";
@@ -170,7 +171,8 @@ export async function attachToBooking(
   if (!found) return GONE;
   if (!publicFieldsOf(found.bp, found.view).some((f) => f.id === fieldId && f.type === "image"))
     return { ok: false, status: 403, message: "This booking doesn't take that picture." };
-  const url = await saveImage(claim.workspace, bytes);
+  const url = await saveImage(claim.workspace, bytes).catch(visitorLimitResult);
+  if (typeof url === "object" && url) return url;
   if (!url)
     return { ok: false, status: 415, message: "Upload a photo or screenshot (PNG, JPG, WebP or GIF)." };
   let hooks = 0;

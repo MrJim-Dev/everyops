@@ -1,4 +1,5 @@
 import { canEdit } from "@/lib/store/workspace-model";
+import { planLimitResult } from "@/server/billing/limits";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { MAX_DOCUMENT_BYTES, MAX_UPLOAD_BYTES, saveDocument, saveImage } from "@/server/storage";
 import { roleIn } from "@/server/workspaces";
@@ -30,9 +31,11 @@ export async function POST(request: Request) {
   if (!access || !canEdit(access.role))
     return Response.json({ ok: false, message: "You can't upload to this workspace." }, { status: 403 });
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const url = document
-    ? await saveDocument(workspaceId, bytes, file instanceof File ? file.name : "File")
-    : await saveImage(workspaceId, bytes);
+  const url = await (document
+    ? saveDocument(workspaceId, bytes, file instanceof File ? file.name : "File")
+    : saveImage(workspaceId, bytes)
+  ).catch(planLimitResult);
+  if (url && typeof url === "object") return Response.json(url, { status: url.status });
   if (!url)
     return Response.json(
       {

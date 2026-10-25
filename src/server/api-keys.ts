@@ -10,7 +10,9 @@ import {
   SECRET_PREFIX,
   visiblePrefix,
 } from "@/lib/api-keys";
+import { apiAllows } from "@/lib/billing/plans";
 import { logActivity, personActor } from "./activity";
+import { accountPlan } from "./billing/limits";
 import { db } from "./db";
 
 /** Most keys one account keeps (revoked ones included until they're cleaned up). */
@@ -76,6 +78,16 @@ export async function createKey(
   userId: string,
   input: NewKey,
 ): Promise<{ ok: true; key: ApiKeyInfo; secret: string } | { ok: false; message: string }> {
+  // The plan decides what keys may do: none on Free, reading on Starter, everything from Pro.
+  const { plan } = await accountPlan(userId);
+  if (plan.limits.api === "none")
+    return { ok: false, message: `API keys come with the Starter plan. Upgrade in Account → Plan & usage.` };
+  const beyond = input.permissions.filter((p) => !apiAllows(plan.limits.api, p));
+  if (beyond.length)
+    return {
+      ok: false,
+      message: `The ${plan.name} plan's keys can only read. Remove ${beyond.join(", ")} or upgrade to Pro.`,
+    };
   const { rows: count } = await sql<{ n: number }>`
     select count(*)::int as n from api_key where user_id = ${userId} and revoked_at is null`.execute(db);
   if ((count[0]?.n ?? 0) >= MAX_KEYS)

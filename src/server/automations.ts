@@ -2,6 +2,7 @@ import "server-only";
 import { sql } from "kysely";
 import { after } from "next/server";
 import { isDemoEmail } from "@/lib/auth/demo";
+import { limitMessage } from "@/lib/billing/decide";
 import type { Blueprint, DataRecord } from "@/lib/blueprint/types";
 import {
   applyActions,
@@ -16,6 +17,7 @@ import {
 import { computeAll } from "@/lib/engine/compute";
 import type { RecordPut } from "@/lib/store/workspace-sync";
 import { logActivity, recordEntries } from "./activity";
+import { emailRoom } from "./billing/limits";
 import { db } from "./db";
 import { sendMail } from "./mail";
 import { sendAlerts } from "./notifications";
@@ -25,8 +27,6 @@ import { enterZone } from "./zone";
 
 type Ex = Parameters<typeof readRecords>[0];
 
-/** Emails one workspace's automations may send in a day, so an automation can't be used to send spam. */
-const DAILY_EMAILS = Number(process.env.AUTOMATION_EMAIL_DAILY_LIMIT ?? 100);
 /** Tries before a pending email is given up on. */
 const MAX_ATTEMPTS = 3;
 const EMAIL = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
@@ -190,13 +190,14 @@ export async function deliverPending(ids?: number[], limit = 50): Promise<{ sent
     }
     const bad = run.emails.filter((e) => !EMAIL.test(e.to));
     const good = run.emails.filter((e) => EMAIL.test(e.to));
-    const { rows: today } = await sql<{ n: number }>`
-      select coalesce(sum(jsonb_array_length(emails)), 0)::int as n from automation_run
-      where workspace_id = ${run.workspace_id} and status = 'sent' and finished_at > now() - interval '1 day'`.execute(
-      db,
-    );
-    if ((today[0]?.n ?? 0) + good.length > DAILY_EMAILS) {
-      await finish("not_sent", `Over the limit of ${DAILY_EMAILS} automation emails a day.`);
+    // The owner's plan sets the day's emails across all their workspaces (AUTOMATION_EMAIL_DAILY_LIMIT caps it).
+    const room = await emailRoom(run.workspace_id);
+    if (room.suspended) {
+      await finish("not_sent", "This account is suspended, so automations don't send email.");
+      continue;
+    }
+    if (good.length > room.left) {
+      await finish("not_sent", limitMessage("emailsPerDay", room.plan));
       continue;
     }
     if (!good.length) {
