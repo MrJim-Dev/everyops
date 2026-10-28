@@ -25,6 +25,9 @@ The dialog shows both records side by side (their fields and totals) and asks wh
 2. points every link to the other at the kept one (bookings, orders, line items), so totals add up,
 3. removes the other.
 
+When it's done, the message says what moved and what the kept record has now ("Moved 3 linked records. Kevin Sy
+now has all 30 bookings."), from `mergeSummary` on the server and in previews alike.
+
 Moving links isn't an edit to those records, so their save automations don't run again. In a live workspace the merge
 runs on the server (`POST /api/workspaces/:id/records/merge`, editors only, through `writeRecord`) over every record,
 so a player's older bookings move even when the browser has only recent ones. It's logged as `record.merge` and can't
