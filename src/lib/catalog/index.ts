@@ -31,6 +31,9 @@ export type CatalogSystem = {
   license: "MIT" | "Apache-2.0";
   version: string;
   uses: number;
+  /** Of the workspaces built from it, those in use in the last 30 days, and those made in the last 30 days. */
+  active?: number;
+  recent?: number;
   includes: string[];
   /** Set for systems published by someone using EveryOps (not the curated catalog). */
   authorId?: string;

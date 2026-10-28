@@ -67,6 +67,8 @@ export type SetupDraft = {
   summary: string;
   data: WorkspaceData;
   preview: { label: string; detail: string }[];
+  /** The community system setup started from; the workspace records it as its source when it's created. */
+  basedOn?: { systemId: string; version: string };
 };
 /** Where the setup conversation is, so a refresh or another device picks it up. */
 export type SetupProgress = {
@@ -115,7 +117,11 @@ export type Workspace = {
   summary: string;
   createdAt: string;
   openedAt: string;
-  source?: { systemId: string; version: string };
+  /**
+   * The community system it was built from, and how: a starter every new account gets, a copy someone chose with
+   * Use, or a workspace setup built starting from it. Community counts only the last two (src/server/community.ts).
+   */
+  source?: { systemId: string; version: string; via?: "starter" | "copy" | "setup" };
   /** Every blueprint version; versions[n - 1] is version n. */
   versions: Blueprint[];
   currentVersion: number;
@@ -270,7 +276,7 @@ export function demoWorkspaces(now = new Date()): Workspace[] {
         name: demo.name,
         summary: demo.summary,
         data: demo.build(now),
-        source: demo.sourceId ? { systemId: demo.sourceId, version: "1.2" } : undefined,
+        source: demo.sourceId ? { systemId: demo.sourceId, version: "1.2", via: "starter" } : undefined,
       },
       newWorkspaceId(demo.slug),
       stamp,

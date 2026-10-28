@@ -356,7 +356,7 @@ export function SetupInterview({
     setLeaving("create");
     const first = draft.data.blueprint.systems[0];
     const go = () => {
-      finishSetup(ws.id, draft.data, draft.name, draft.summary);
+      finishSetup(ws.id, draft.data, draft.name, draft.summary, draft.basedOn);
       useSetupBuild.getState().clear(ws.id);
       router.push(`/w/${ws.id}${first ? `/${first.id}` : ""}`);
     };

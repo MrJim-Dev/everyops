@@ -1,6 +1,7 @@
 import "server-only";
 import type { Blueprint } from "@/lib/blueprint/types";
 import { BUILD_PRINCIPLES, COMMON_NEEDS, matchPlaybooks, type Playbook } from "@/lib/catalog/playbooks";
+import { byUsage, type TemplateUsage, usageText } from "@/lib/community/usage";
 import { type CommunitySystem, getCommunity, listCommunity } from "@/server/community";
 
 /** Community systems change rarely; setup reads them once every few minutes. */
@@ -20,8 +21,13 @@ const words = (text: string) =>
       .filter((w) => w.length > 3),
   );
 
-/** How a community system is built, in a few lines: its record types, screens and public pages. */
-export function describeSystem(s: Pick<CommunitySystem, "id" | "name" | "summary" | "blueprint">): string {
+/**
+ * How a community system is built, in a few lines: its record types, screens and public pages, and how much real
+ * businesses use it, so the AI can tell a proven system from one nobody runs.
+ */
+export function describeSystem(
+  s: Pick<CommunitySystem, "id" | "name" | "summary" | "blueprint"> & Partial<TemplateUsage>,
+): string {
   const bp: Blueprint = s.blueprint;
   const types = bp.entities
     .map((e) => `${e.name}${e.parent ? " (line items)" : ""}: ${e.fields.map((f) => f.name).join(", ")}`)
@@ -38,7 +44,11 @@ export function describeSystem(s: Pick<CommunitySystem, "id" | "name" | "summary
     )
     .join("; ");
   const rules = bp.rules.map((r) => r.name).join("; ");
-  return `- ${s.name} (${s.id}): ${s.summary}\n  Record types: ${types}\n  Pages: ${screens}${rules ? `\n  Rules: ${rules}` : ""}`;
+  const usage =
+    s.uses === undefined
+      ? ""
+      : `\n  Usage: ${usageText({ uses: s.uses, active: s.active ?? 0, recent: s.recent ?? 0 })}`;
+  return `- ${s.name} (${s.id}): ${s.summary}\n  Record types: ${types}\n  Pages: ${screens}${rules ? `\n  Rules: ${rules}` : ""}${usage}`;
 }
 
 export type SetupReferences = { playbooks: Playbook[]; systems: CommunitySystem[] };
@@ -92,7 +102,8 @@ export async function setupReferences(text: string, limit = 3): Promise<SetupRef
   });
   const systems = scored
     .filter((x) => x.score >= 2)
-    .sort((a, b) => b.score - a.score)
+    // Equally good fits: the one more businesses actually run comes first.
+    .sort((a, b) => b.score - a.score || byUsage(a.s, b.s))
     .slice(0, limit)
     .map((x) => x.s);
   return { playbooks, systems };
@@ -119,7 +130,7 @@ export function referencesText(refs: SetupReferences): string {
     );
   if (refs.systems.length)
     parts.push(
-      `Community systems built for similar businesses (start from them, then add what's missing):\n${refs.systems.map(describeSystem).join("\n")}`,
+      `Community systems built for similar businesses (start from them, then add what's missing; when two fit, prefer the one more businesses actively use):\n${refs.systems.map(describeSystem).join("\n")}`,
     );
   return parts.join("\n\n");
 }

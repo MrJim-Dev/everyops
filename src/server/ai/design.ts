@@ -1212,6 +1212,8 @@ export type DesignResult =
       coverage?: { request: string; detail: string }[];
       /** What the workspace doesn't do yet that the brief asked for, so the owner can ask for it afterwards. */
       gaps?: SetupGap[];
+      /** The community system setup started from (the template route), recorded as the workspace's source. */
+      basedOn?: { systemId: string; version: string };
     }
   | { ok: false; message: string };
 
@@ -1358,7 +1360,9 @@ export async function designWorkspace(
         ...(result.ok ? {} : { reason: result.message }),
       }),
     );
-    return result;
+    return result.ok && route.base
+      ? { ...result, basedOn: { systemId: route.base.id, version: route.base.version } }
+      : result;
   };
   const failed = (error: string) =>
     done({

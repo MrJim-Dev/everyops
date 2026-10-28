@@ -2,6 +2,7 @@ import "server-only";
 import { sql } from "kysely";
 import type { Blueprint, DataRecord, IconName } from "@/lib/blueprint/types";
 import type { CatalogCategory } from "@/lib/catalog";
+import type { TemplateUsage } from "@/lib/community/usage";
 import { slugify } from "@/lib/store/workspace-model";
 import { db } from "./db";
 
@@ -28,7 +29,7 @@ export type CommunitySystem = CommunityDoc & {
   sourceWorkspaceId: string | null;
   publishedAt: string;
   updatedAt: string;
-};
+} & TemplateUsage;
 
 type Row = {
   id: string;
@@ -38,14 +39,18 @@ type Row = {
   doc: CommunityDoc;
   published_at: Date;
   updated_at: Date;
-  /** Workspaces built from this system, counted live (see listCommunity). */
-  copies?: number;
+  /** How it's used, counted live (see USAGE). */
+  uses?: number;
+  active?: number;
+  recent?: number;
 };
 
 const toSystem = (r: Row): CommunitySystem => ({
   ...r.doc,
-  // Only real copies count; the stored figure was a placeholder.
-  uses: Number(r.copies ?? 0),
+  // Only real use counts; the stored figure was a placeholder.
+  uses: Number(r.uses ?? 0),
+  active: Number(r.active ?? 0),
+  recent: Number(r.recent ?? 0),
   id: r.id,
   official: r.is_official,
   authorId: r.author_id,
@@ -54,17 +59,50 @@ const toSystem = (r: Row): CommunitySystem => ({
   updatedAt: r.updated_at.toISOString(),
 });
 
+/**
+ * How each community system is used (see TemplateUsage), from the workspaces whose source names it. Starter
+ * workspaces don't count: every new account gets them without choosing anything. They're marked via "starter";
+ * older ones are the workspaces written in the same transaction as the account's seed marker (the same now()).
+ */
+const USAGE = sql`
+  with built as (
+    select w.id, w.created_at, w.doc->'source'->>'systemId' as system_id
+    from workspace w
+    where w.doc->'source'->>'systemId' is not null
+      and coalesce(w.doc->'source'->>'via', '') <> 'starter'
+      and not (
+        w.doc->'source'->>'via' is null
+        and exists (
+          select 1 from account_seed s
+          where s.user_id = w.owner_id and w.created_at between s.seeded_at - interval '5 seconds' and s.seeded_at + interval '5 seconds'
+        )
+      )
+  )
+  select system_id,
+    count(*)::int as uses,
+    count(*) filter (where exists (
+      select 1 from workspace_record r
+      where r.workspace_id = built.id and r.changed_at > now() - interval '30 days'
+        and r.changed_at > built.created_at + interval '1 day'
+    ))::int as active,
+    count(*) filter (where built.created_at > now() - interval '30 days')::int as recent
+  from built group by system_id`;
+
 export async function listCommunity(): Promise<CommunitySystem[]> {
   const { rows } = await sql<Row>`
-    select p.*, (select count(*) from workspace w where w.doc->'source'->>'systemId' = p.id)::int as copies
-    from published_system p order by p.is_official asc, p.published_at desc`.execute(db);
+    with usage as (${USAGE})
+    select p.*, u.uses, u.active, u.recent
+    from published_system p left join usage u on u.system_id = p.id
+    order by p.is_official asc, p.published_at desc`.execute(db);
   return rows.map(toSystem);
 }
 
 export async function getCommunity(id: string): Promise<CommunitySystem | null> {
   const { rows } = await sql<Row>`
-    select p.*, (select count(*) from workspace w where w.doc->'source'->>'systemId' = p.id)::int as copies
-    from published_system p where p.id = ${id}`.execute(db);
+    with usage as (${USAGE})
+    select p.*, u.uses, u.active, u.recent
+    from published_system p left join usage u on u.system_id = p.id
+    where p.id = ${id}`.execute(db);
   return rows[0] ? toSystem(rows[0]) : null;
 }
 

@@ -1,7 +1,15 @@
 "use client";
 
-import { ArrowUpRightIcon, SealCheckIcon, UsersIcon } from "@phosphor-icons/react";
+import {
+  ArrowUpRightIcon,
+  FireIcon,
+  SealCheckIcon,
+  SparkleIcon,
+  TrendUpIcon,
+  UsersIcon,
+} from "@phosphor-icons/react";
 import type { CatalogSystem } from "@/lib/catalog";
+import { type UsageBadge, usageOf, usageText } from "@/lib/community/usage";
 import { formatNumber, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SystemShot } from "./system-shot";
@@ -10,20 +18,51 @@ export function formatUses(uses: number) {
   return uses >= 1000 ? `${formatNumber(Math.round(uses / 100) / 10)}K` : formatNumber(uses);
 }
 
+const BADGES: Record<UsageBadge, { label: string; Icon: typeof FireIcon; className: string }> = {
+  popular: {
+    label: "Most used",
+    Icon: FireIcon,
+    className: "bg-amber-400/15 text-amber-300 ring-amber-300/25",
+  },
+  trending: { label: "Trending", Icon: TrendUpIcon, className: "bg-primary/15 text-primary ring-primary/25" },
+  new: { label: "New", Icon: SparkleIcon, className: "bg-sky-400/15 text-sky-300 ring-sky-300/25" },
+};
+
+/** Most used, Trending or New, over the corner of the screenshot. */
+export function UsageMark({ badge, className }: { badge: UsageBadge; className?: string }) {
+  const { label, Icon, className: tone } = BADGES[badge];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 backdrop-blur-sm",
+        tone,
+        className,
+      )}
+    >
+      <Icon weight="fill" className="size-3" />
+      {label}
+    </span>
+  );
+}
+
 /** Template-gallery card: the screenshot carries the card, the text stays quiet underneath. */
 export function SystemCard({
   system,
   selected,
   onSelect,
   index,
+  badge,
 }: {
   system: CatalogSystem;
   selected?: boolean;
   onSelect: () => void;
   /** Position in a grid; staggers the first-load entrance. */
   index?: number;
+  /** How Community marks it for how it's used (see usageBadges). */
+  badge?: UsageBadge;
 }) {
   const official = !system.authorId;
+  const usage = usageOf(system);
   return (
     <button
       type="button"
@@ -39,7 +78,7 @@ export function SystemCard({
     >
       <div
         className={cn(
-          "overflow-hidden rounded-xl border border-foreground/[0.08] shadow-[0_18px_40px_-28px_rgba(0,0,0,0.9)] transition-[border-color] duration-200 group-hover:border-foreground/20",
+          "relative overflow-hidden rounded-xl border border-foreground/[0.08] shadow-[0_18px_40px_-28px_rgba(0,0,0,0.9)] transition-[border-color] duration-200 group-hover:border-foreground/20",
           selected && "border-primary/60 group-hover:border-primary/60",
         )}
       >
@@ -47,6 +86,7 @@ export function SystemCard({
           system={system}
           className="transition-transform duration-300 ease-(--ease-out-strong) group-hover:scale-[1.015]"
         />
+        {badge ? <UsageMark badge={badge} className="absolute top-2.5 left-2.5 shadow-sm" /> : null}
       </div>
       <div className="flex flex-1 flex-col px-1.5 pt-3.5 pb-1.5">
         <div className="flex items-center gap-2">
@@ -69,9 +109,18 @@ export function SystemCard({
             </span>
             <span className="truncate">{system.author}</span>
           </span>
-          <span className="flex shrink-0 items-center gap-1 tabular">
-            <UsersIcon className="size-3.5" />
-            {system.uses ? formatUses(system.uses) : "New"}
+          <span className="flex shrink-0 items-center gap-2.5 tabular" title={usageText(usage)}>
+            <span className="sr-only">{usageText(usage)}</span>
+            <span aria-hidden className="flex items-center gap-1">
+              <UsersIcon className="size-3.5" />
+              {usage.uses ? `${formatUses(usage.uses)} ${usage.uses === 1 ? "use" : "uses"}` : "No uses yet"}
+            </span>
+            {usage.active ? (
+              <span aria-hidden className="flex items-center gap-1 text-primary">
+                <span className="size-1.5 rounded-full bg-primary" />
+                {formatUses(usage.active)} active
+              </span>
+            ) : null}
           </span>
         </div>
       </div>

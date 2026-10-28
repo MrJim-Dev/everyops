@@ -68,7 +68,13 @@ type State = {
   /** Loads a workspace's records and history when it opens (the list only has summaries). False if it failed. */
   ensureLoaded: (slug: string) => Promise<boolean>;
   saveSetup: (slug: string, progress: SetupProgress) => void;
-  finishSetup: (slug: string, data: WorkspaceData, name: string, summary: string) => void;
+  finishSetup: (
+    slug: string,
+    data: WorkspaceData,
+    name: string,
+    summary: string,
+    basedOn?: { systemId: string; version: string },
+  ) => void;
   /** by: who made it, for invites the plan sends. */
   applyChange: (slug: string, plan: ChangePlan, by?: string, auto?: boolean) => ChangeEntry | null;
   undoChange: (slug: string, changeId: string) => void;
@@ -466,9 +472,9 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
     saveSetup: (slug, progress) =>
       update(slug, (ws) => (ws.setup ? { ...ws, setup: { ...ws.setup, progress } } : ws)),
 
-    finishSetup: (slug, data, name, summary) => {
+    finishSetup: (slug, data, name, summary, basedOn) => {
       if (get().workspaces[slug]?.loaded === false) {
-        void ensureLoaded(slug).then((ok) => ok && get().finishSetup(slug, data, name, summary));
+        void ensureLoaded(slug).then((ok) => ok && get().finishSetup(slug, data, name, summary, basedOn));
         return;
       }
       update(slug, (ws) => {
@@ -477,6 +483,8 @@ export const useWorkspaces = create<State>()((rawSet, get) => {
           ...ws,
           name,
           summary,
+          // A workspace setup built from a community system counts as one of its uses there.
+          ...(basedOn ? { source: { ...basedOn, via: "setup" as const } } : {}),
           versions: [...ws.versions, { ...data.blueprint, version, workspaceName: name }],
           currentVersion: version,
           records: data.records,

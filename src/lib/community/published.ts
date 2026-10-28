@@ -20,6 +20,8 @@ export type PublishedSystem = {
   license: "MIT" | "Apache-2.0";
   version: string;
   uses: number;
+  active?: number;
+  recent?: number;
   includes: string[];
   authorId: string | null;
   sourceWorkspaceId: string | null;
@@ -126,6 +128,8 @@ export function toCatalogSystem(p: PublishedSystem): CatalogSystem {
     license: p.license,
     version: p.version,
     uses: p.uses,
+    active: p.active ?? 0,
+    recent: p.recent ?? 0,
     includes: p.includes,
     authorId: p.authorId ?? undefined,
     publishedAt: p.publishedAt,

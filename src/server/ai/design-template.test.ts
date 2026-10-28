@@ -63,6 +63,8 @@ function community(id: string): CommunitySystem {
     license: entry.license,
     version: entry.version,
     uses: 0,
+    active: 0,
+    recent: 0,
     includes: entry.includes,
     blueprint: data.blueprint,
     sample: { records: data.records, builtOn: todayKey(now) },
@@ -495,6 +497,8 @@ describe("designWorkspace on the template route", () => {
     });
     expect(result.ok).toBe(true);
     expect(vi.mocked(generateJsonHedged).mock.calls[0][1].task).toBe("design-template");
+    // The workspace remembers what it was built from, so Community counts it as a use.
+    expect(result.ok && result.basedOn).toEqual({ systemId: "court-bookings", version: courts.version });
   });
 });
 

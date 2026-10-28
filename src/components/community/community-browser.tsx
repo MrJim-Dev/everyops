@@ -18,6 +18,7 @@ import { SearchInput } from "@/components/views/search-input";
 import { ViewEmpty } from "@/components/views/view-empty";
 import { useCurrentUser } from "@/lib/auth/client";
 import { CATEGORIES } from "@/lib/catalog";
+import { byUsage, usageBadges, usageOf } from "@/lib/community/usage";
 import { useCatalog, useCatalogLoaded } from "@/lib/community/use-catalog";
 import { SystemCard } from "./system-card";
 import { SystemDetail } from "./system-detail";
@@ -50,10 +51,15 @@ export function CommunityBrowser() {
           ? a.name.localeCompare(b.name)
           : f.sort === "newest"
             ? (b.publishedAt ?? "").localeCompare(a.publishedAt ?? "")
-            : b.uses - a.uses,
+            : byUsage(usageOf(a), usageOf(b)),
       );
     return { systems, counts };
   }, [catalog, f.query, f.source, f.category, f.sort, user?.id]);
+  // Marks are worked out across all of Community, so filtering never turns a quiet system into the most used one.
+  const badges = useMemo(
+    () => usageBadges(catalog.map((s) => ({ id: s.id, publishedAt: s.publishedAt, ...usageOf(s) }))),
+    [catalog],
+  );
 
   const selected = f.selectedId ? catalog.find((s) => s.id === f.selectedId) : undefined;
   const sources = (Object.keys(SOURCES) as Source[]).filter((s) => s !== "yours" || user);
@@ -161,6 +167,7 @@ export function CommunityBrowser() {
               key={s.id}
               index={i}
               system={s}
+              badge={badges.get(s.id)}
               selected={s.id === selected?.id}
               onSelect={() => f.open(s.id)}
             />
