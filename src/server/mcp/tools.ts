@@ -280,7 +280,7 @@ const CORE_TOOLS: Tool[] = [
     name: "read_page",
     title: "Read a page",
     description:
-      "The text of a document page (markdown) or a custom page (HTML), or a drawing's shapes, by its tab id from describe_workspace. For other tabs use read_view.",
+      "The text of a document page (markdown) or a page (HTML, listed under Pages), or a drawing's shapes, by its tab id from describe_workspace. For other tabs use read_view.",
     permission: "pages:read",
     readOnly: true,
     properties: { viewId: { type: "string" } },

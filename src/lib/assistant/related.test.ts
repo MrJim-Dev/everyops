@@ -160,7 +160,7 @@ describe("renameInDesign", () => {
   } as unknown as Blueprint;
   const rename = { op: "rename_system", systemId: "players", name: "Members" } as const;
 
-  it("carries a page rename into tabs, forms, website sections, cards and automations, in any case", () => {
+  it("carries a page rename into tabs, forms, page sections, cards and automations, in any case", () => {
     const { ops, steps } = renameInDesign(site, [rename], {});
     expect(ops).toEqual(
       expect.arrayContaining([
@@ -195,7 +195,7 @@ describe("renameInDesign", () => {
         rule: expect.objectContaining({ name: "Welcome new members" }),
       }),
     );
-    expect(steps[0].detail).toBe("1 tab, 1 form, 3 website sections, 1 card, 1 automation");
+    expect(steps[0].detail).toBe("1 tab, 1 form, 3 page sections, 1 card, 1 automation");
   });
 
   it("changes the team's own words for a section where they're kept, and skips what the plan already changes", () => {

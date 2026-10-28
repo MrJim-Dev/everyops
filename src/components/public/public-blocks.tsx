@@ -48,7 +48,7 @@ export function blockLabel(b: ResolvedBlock): string {
     case "text":
       return "Text";
     case "html":
-      return "Custom HTML";
+      return "Custom section";
   }
 }
 

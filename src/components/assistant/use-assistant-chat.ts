@@ -316,6 +316,18 @@ export function useAssistantChat({ onLeave }: { onLeave?: () => void } = {}) {
     void ask(clean, turns, sent, block, elements);
   };
 
+  // A request another screen sent (the Pages library's "Make page") goes out once nothing else is on its way. It's
+  // read from the store, not this render: the panel and the page can both be mounted, and only one may send it.
+  const request = useAssistant((s) => s.request);
+  const sendLatest = useRef(send);
+  sendLatest.current = send;
+  useEffect(() => {
+    const waiting = useAssistant.getState().request;
+    if (request === null || waiting === null || pending) return;
+    useAssistant.getState().sendRequest(null);
+    sendLatest.current(waiting);
+  }, [request, pending]);
+
   const stop = () => inFlight.get(ws.id)?.abort();
 
   /** Sends the last question again after an error or a stop. */

@@ -1,4 +1,4 @@
-import type { Blueprint, DataRecord } from "@/lib/blueprint/types";
+import type { Blueprint, DataRecord, Field, FieldValue } from "@/lib/blueprint/types";
 import { sharedFields, sharedTableProblems } from "@/lib/components/public-safety";
 import { applyFilter, sortRecords } from "@/lib/engine/query";
 import { boundSources, itemsOf } from "./bindings";
@@ -39,6 +39,17 @@ export function listedText(bp: Blueprint, records: DataRecord[], page: PublicPag
   return [...new Set(out)].slice(0, 60);
 }
 
+/**
+ * What a team-only page counts and adds up with, beside the words it shows: numbers and money as numbers, dates and
+ * times as ISO text, a time range as {start, end}, a choice as its option id, a checkbox as true or false, a link as
+ * the record id. Pictures, signatures and long text have none (their text is what there is to show).
+ */
+function cellValue(field: Field, value: FieldValue | undefined): FieldValue | undefined {
+  if (value === undefined || value === "" || ["image", "signature", "long_text", "file"].includes(field.type))
+    return undefined;
+  return value;
+}
+
 /** Called only by the authenticated workspace wrapper for a PRIVATE HTML page. */
 export function workspaceTableData(bp: Blueprint, records: DataRecord[], viewId: string) {
   const view = bp.views.find((v) => v.id === viewId);
@@ -57,7 +68,10 @@ export function workspaceTableData(bp: Blueprint, records: DataRecord[], viewId:
     columns: fields.map((f) => ({ id: f.id, name: f.name })),
     items: rows.slice(0, 500).map((r) => ({
       id: r.id,
-      cells: fields.map((f) => formatCell(bp, records, f, r.data[f.id])),
+      cells: fields.map((f) => {
+        const value = cellValue(f, r.data[f.id]);
+        return { ...formatCell(bp, records, f, r.data[f.id]), ...(value === undefined ? {} : { value }) };
+      }),
     })),
   };
 }

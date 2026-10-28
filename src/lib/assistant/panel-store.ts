@@ -62,6 +62,12 @@ type State = {
   /** A request to put in the composer when the panel shows it (e.g. "add a part to this layout"), for the person to finish. */
   draft: string | null;
   setDraft: (text: string | null) => void;
+  /**
+   * A request another screen sends straight to Ask EveryOps (the Pages library's "Make page"): the panel opens and
+   * sends it as if it had been typed there.
+   */
+  request: string | null;
+  sendRequest: (text: string | null) => void;
   /** Requests in flight per workspace, shared by the panel and the Ask EveryOps page. */
   pending: Record<string, Pending | undefined>;
   setPending: (workspaceId: string, pending: Pending | undefined) => void;
@@ -152,6 +158,8 @@ export const useAssistant = create<State>()((set, get) => {
     setOpenAfterAsk: (openAfterAsk) => set({ openAfterAsk }),
     draft: null,
     setDraft: (draft) => set({ draft }),
+    request: null,
+    sendRequest: (request) => set(request ? { request, open: true, instant: false } : { request: null }),
     pending: {},
     setPending: (workspaceId, pending) => set((s) => ({ pending: { ...s.pending, [workspaceId]: pending } })),
     truncate: (workspaceId, length) => {
