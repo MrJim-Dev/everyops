@@ -1,5 +1,6 @@
 import "server-only";
 import { sql } from "kysely";
+import { DEMO_ACCOUNT } from "@/lib/auth/demo";
 import type { Blueprint, DataRecord, IconName } from "@/lib/blueprint/types";
 import type { CatalogCategory } from "@/lib/catalog";
 import type { TemplateUsage } from "@/lib/community/usage";
@@ -63,6 +64,8 @@ const toSystem = (r: Row): CommunitySystem => ({
  * How each community system is used (see TemplateUsage), from the workspaces whose source names it. Starter
  * workspaces don't count: every new account gets them without choosing anything. They're marked via "starter";
  * older ones are the workspaces written in the same transaction as the account's seed marker (the same now()).
+ * Nor do a system's own source workspace (what it was built and published from) or anything in the shared demo
+ * account, whose data resets every night.
  */
 const USAGE = sql`
   with built as (
@@ -70,6 +73,8 @@ const USAGE = sql`
     from workspace w
     where w.doc->'source'->>'systemId' is not null
       and coalesce(w.doc->'source'->>'via', '') <> 'starter'
+      and not exists (select 1 from published_system p where p.source_workspace_id = w.id)
+      and not exists (select 1 from "user" u where u.id = w.owner_id and lower(u.email) = ${DEMO_ACCOUNT.email})
       and not (
         w.doc->'source'->>'via' is null
         and exists (
