@@ -5,6 +5,7 @@ import Link from "next/link";
 import { SystemIcon } from "@/components/system-icon";
 import { Button } from "@/components/ui/button";
 import { CATEGORIES, type CatalogSystem } from "@/lib/catalog";
+import { usageOf } from "@/lib/community/usage";
 import { BlueprintDialog } from "./blueprint-dialog";
 import { formatUses } from "./system-card";
 import { SystemShot } from "./system-shot";
@@ -12,14 +13,18 @@ import { UseSystemButton } from "./use-system-dialog";
 
 /** Everything needed to decide on a system, laid out top to bottom in the side sheet. */
 export function SystemDetail({ system }: { system: CatalogSystem }) {
+  const usage = usageOf(system);
+  const workspaces = (n: number) => `${formatUses(n)} ${n === 1 ? "workspace" : "workspaces"}`;
   const facts = [
+    ["Built from it", usage.uses ? workspaces(usage.uses) : "Not used yet"],
     [
-      "Copies",
-      system.uses ? `${formatUses(system.uses)} ${system.uses === 1 ? "workspace" : "workspaces"}` : "New",
+      "In use",
+      usage.uses ? (usage.active ? `${workspaces(usage.active)} this month` : "None this month") : "—",
     ],
     ["Category", CATEGORIES.find((c) => c.id === system.category)?.label ?? "Other"],
     ["Version", system.version],
     ["License", system.license],
+    ["New this month", usage.recent ? workspaces(usage.recent) : "—"],
   ];
   return (
     <div className="flex min-h-full flex-col">
