@@ -95,7 +95,7 @@ const KINDS: Record<string, string> = {
   label: "Label",
   p: "Text",
   span: "Text",
-  iframe: "Custom page",
+  iframe: "Page",
   canvas: "Drawing",
   svg: "Icon",
 };

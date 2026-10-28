@@ -28,7 +28,7 @@ const query = (name: string, description: string, schema: object = { type: "stri
 
 const WORKSPACE = pathParam("id", "Workspace id, from GET /workspaces");
 const RECORD = pathParam("recordId", "Record id");
-const VIEW = pathParam("viewId", "A document or custom HTML page's tab id, from the schema's pages");
+const VIEW = pathParam("viewId", "A document or page's tab id, from the schema's pages");
 const TYPE = { ...query("type", "Record type id, from the schema"), required: true };
 const FILTER = query(
   "filter",
@@ -86,7 +86,7 @@ export const openapi = {
   tags: [
     { name: "Workspaces", description: "Workspaces the key reaches and what is in them" },
     { name: "Records", description: "Search, read, create, change and delete records" },
-    { name: "Pages", description: "Document and custom HTML page text" },
+    { name: "Pages", description: "Document and page text (a page's text is its HTML)" },
     { name: "Changes", description: "Ask the workspace's owners for a design change" },
   ],
   paths: {
@@ -253,7 +253,7 @@ export const openapi = {
         operationId: "putPage",
         summary: "Replace a page's text",
         description:
-          "Document pages need staff or above; custom HTML pages are shown to the public, so only owners and admins may change them. The previous text is kept as a version.",
+          "Document pages need staff or above; pages (HTML) may be shared with anyone, so only owners and admins may change them. The previous text is kept as a version.",
         tags: ["Pages"],
         "x-permission": "pages:write",
         parameters: [WORKSPACE, VIEW],

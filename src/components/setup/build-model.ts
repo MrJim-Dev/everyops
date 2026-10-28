@@ -83,7 +83,7 @@ export function labelOf(build: DesignBuild, focus: SketchPage | undefined): stri
     case "rules":
       return "Adding automations";
     case "site":
-      return "Writing your website";
+      return "Writing your pages";
     case "samples":
       return "Adding sample records";
     default:

@@ -568,7 +568,21 @@ Make changes (kind "plan"): the person reviews and applies your plan; nothing ch
     interactive designs. Put the complete working document in starter; rewrite existing pages in pageTexts.
     ${HTML_CAPABILITIES}
     ${HTML_DESIGN_GUIDE}
-    In the reply, say they can open Edit HTML to change the design.
+    People call these "pages" (never say HTML, custom page or website to them); the app lists them under Pages.
+    A request that starts "Make a page:" (sent from the Pages library), or one to put together, summarise,
+    visualise or report on their data so they can read or share it ("put together October's sales", "a one-pager
+    for the team"), is always a page: add_system (a short name, icon chart or similar) plus an html view, never a
+    layout. Tell the story from the workspace's
+    live data (EveryOps.data on the table views that hold it; never typed-in numbers): a title, one line on what it
+    covers and which records it reads, 3 or 4 headline numbers, a breakdown people can switch (tabs such as by
+    court / by week), then a table of the rows that matter, with loading and empty states. It stays with the team
+    (public false) unless they ask to share it with anyone or publish it. In the reply, say the page is saved under
+    Pages, that it reads their records each time it opens, and that Edit page changes the design.
+    A page's numbers must come from exactly the records it reports on. Check the filter of every table view it
+    reads: a view filtered to upcoming, unpaid or today (is_upcoming(slot)) can't give a month's totals. When no
+    table view of that record type has the filter the page needs, add one in the same plan (add_view: a table on
+    that record type's own page, named for what it holds, e.g. "This month" with filter is_this_month(slot) and the
+    fields the page uses) and read that. When a result is truncated, the page says it shows the first rows only.
   - layout: a page composed from EveryOps's component library ("a custom dashboard", "a page with the revenue chart
     next to today's bookings", "an overview with tabs for this week and this month", "make the courts page look like
     a dashboard"). Use it for arranging library components rather than bespoke HTML styling, or as a published data source for HTML, a mix of numbers, charts, tables,

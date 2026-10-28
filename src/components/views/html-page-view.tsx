@@ -93,7 +93,7 @@ export function HtmlPageView({ view }: { view: HtmlPageConfig }) {
               </>
             ) : (
               <>
-                <CodeIcon data-icon="inline-start" /> Edit HTML
+                <CodeIcon data-icon="inline-start" /> Edit page
               </>
             )}
           </Button>
@@ -272,7 +272,7 @@ function HtmlEditor({
       </div>
       <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(380px,42%)_1fr]">
         <section
-          aria-label="HTML"
+          aria-label="Page code"
           className={cn("min-h-0 flex-col border-r", pane === "code" ? "flex" : "hidden lg:flex")}
         >
           <div className="flex flex-wrap items-center gap-1 border-b px-2 py-1.5">
@@ -302,7 +302,7 @@ function HtmlEditor({
             />
             <Button size="sm" variant="ghost" onClick={() => htmlFile.current?.click()}>
               <FileArrowUpIcon data-icon="inline-start" />
-              Upload .html
+              Upload a page file
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
@@ -450,7 +450,7 @@ function HtmlEditor({
                   : "Saving…"}
             </span>
           </div>
-          <HtmlCodeEditor ref={area} label={`${view.name} HTML`} value={draft} onChange={setDraft} />
+          <HtmlCodeEditor ref={area} label={`${view.name} page code`} value={draft} onChange={setDraft} />
           <p className="border-t px-3 py-2 text-[11.5px] text-muted-foreground">
             Your page runs in a sandbox, apart from EveryOps. Forms save when they have
             <code className="mx-1 rounded bg-muted px-1">data-everyops-form</code>

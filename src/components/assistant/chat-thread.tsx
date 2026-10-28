@@ -6,7 +6,9 @@ import {
   ArrowDownIcon,
   ArrowRightIcon,
   BrainIcon,
+  ChartBarIcon,
   CrosshairSimpleIcon,
+  GlobeSimpleIcon,
 } from "@phosphor-icons/react";
 import NextLink from "next/link";
 import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -20,6 +22,8 @@ import { replyBlocks } from "@/lib/assistant/reply-format";
 import type { Navigation } from "@/lib/assistant/screen";
 import type { Blueprint } from "@/lib/blueprint/types";
 import type { ChangePlan } from "@/lib/engine/changes";
+import { isPageView, type PageView, pageTitle } from "@/lib/pages";
+import { isPublic } from "@/lib/public/resolve";
 import { cn } from "@/lib/utils";
 import { DataEvidenceNote } from "./data-evidence";
 import { OutsideActions } from "./outside-actions";
@@ -117,6 +121,42 @@ function newPageOf(plan: ChangePlan, bp: Blueprint): Navigation | undefined {
     }
   }
   return undefined;
+}
+
+/** A page (report, price list, booking page) the plan made, once it's in the workspace: shown as a card to open. */
+function madePageOf(
+  plan: ChangePlan,
+  bp: Blueprint,
+): { path: string; view: PageView; title: string } | undefined {
+  for (const op of plan.ops) {
+    if (op.op !== "add_view" || !isPageView(op.view)) continue;
+    const view = bp.views.find((v) => v.id === op.view.id);
+    const system = bp.systems.find((s) => s.id === op.systemId);
+    if (isPageView(view)) return { path: `/${op.systemId}/${view.id}`, view, title: pageTitle(view, system) };
+  }
+  return undefined;
+}
+
+function PageMade({ view, title, onOpen }: { view: PageView; title: string; onOpen: () => void }) {
+  const shared = isPublic(view);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="mt-2 flex w-full max-w-sm cursor-pointer items-center gap-3 rounded-lg border bg-card p-2.5 text-left outline-none transition-[border-color,transform] duration-150 ease-out hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.98]"
+    >
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">
+        {shared ? <GlobeSimpleIcon className="size-4.5" /> : <ChartBarIcon className="size-4.5" />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13.5px] font-medium text-foreground">{title}</span>
+        <span className="block text-[12px] text-muted-foreground">
+          Page · {shared ? "Anyone with the link" : "Team only"}
+        </span>
+      </span>
+      <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
 }
 
 const chip =
@@ -357,6 +397,18 @@ export function ChatThread({
                         })()}
                       />
                     ) : null}
+                    {t.plan && chat.planStateOf(t) === "applied"
+                      ? (() => {
+                          const made = madePageOf(t.plan, chat.ws.blueprint);
+                          return made ? (
+                            <PageMade
+                              view={made.view}
+                              title={made.title}
+                              onOpen={() => chat.go({ path: made.path, label: made.title, open: true })}
+                            />
+                          ) : null;
+                        })()
+                      : null}
                   </div>
                 </div>
               </div>

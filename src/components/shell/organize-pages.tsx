@@ -58,8 +58,8 @@ export function OrganizePagesDialog({
           .map((p) => p.name)
           .join(", ");
       const entry = applyChange(ws.id, {
-        request: "Organize the sidebar pages",
-        title: "Organize pages",
+        request: "Organize the sidebar systems",
+        title: "Organize systems",
         facts: [],
         steps: [...new Set(changed.map((p) => groupOf(p).trim()))].map((g) => ({
           kind: "change" as const,
@@ -69,7 +69,7 @@ export function OrganizePagesDialog({
         ops,
       });
       if (entry)
-        toast.success("Pages organized", {
+        toast.success("Systems organized", {
           description: "You can also undo it from History.",
           action: { label: "Undo", onClick: () => undoChange(ws.id, entry.id) },
         });
@@ -82,10 +82,10 @@ export function OrganizePagesDialog({
       <DialogContent className="sm:max-w-[440px]">
         <form onSubmit={save} noValidate className="flex flex-col gap-4">
           <DialogHeader>
-            <DialogTitle>Organize pages</DialogTitle>
+            <DialogTitle>Organize systems</DialogTitle>
             <DialogDescription>
-              Put pages under groups like Front desk or Money. Groups open and close in the sidebar, so a long
-              list stays short.
+              Put systems under groups like Front desk or Money. Groups open and close in the sidebar, so a
+              long list stays short.
             </DialogDescription>
           </DialogHeader>
           <datalist id="page-groups">

@@ -1,6 +1,6 @@
 /**
  * The custom HTML website setup builds for businesses whose customers book or order on their own. It's a real HTML
- * page the owner can open and edit (Edit HTML, or ask EveryOps), written from the same words and data as the standard
+ * page the owner can open and edit (Edit page, or ask EveryOps), written from the same words and data as the standard
  * site: hero, highlights, what's offered, how it works, ways to pay, FAQs and contact. Its buttons open the public
  * booking form, so visitors still get the live slot picker.
  *
@@ -669,7 +669,7 @@ function aboutOf(bp: Blueprint): string {
  * HTML page (same id and place), and a booking business also gets a custom HTML booking page that its landing page's
  * buttons open. The booking form stays the place bookings are checked and saved (and the team's in-app form), but
  * visitors never see it: its address redirects to the custom page (FormView.page). Each public booking form also
- * gets the calendar that suits the business. Owners change any of it later (Edit HTML, the Calendar buttons on the
+ * gets the calendar that suits the business. Owners change any of it later (Edit page, the Calendar buttons on the
  * form). Runs once the sample records exist, so the pages show real courts, rates and FAQs.
  */
 export function withCustomSite(

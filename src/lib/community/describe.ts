@@ -13,7 +13,7 @@ export function describeBlueprint(bp: Blueprint, limit = 5): string[] {
     notes: "Notebook",
     document: "Pages",
     canvas: "Canvas",
-    html: "Custom pages",
+    html: "Pages",
     layout: "Layout pages",
   };
   const screens = [...new Set(bp.views.map((v) => names[v.type]).filter((n): n is string => !!n))];

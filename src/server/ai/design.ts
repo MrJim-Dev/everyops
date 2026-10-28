@@ -2172,7 +2172,7 @@ export function tidyBlocks(
 
 const RESERVED_PAGES: Record<string, string> = { settings: "Setup", history: "Log", search: "Lookup" };
 /** URL segments under /w/[workspace] the app uses itself; a page with one of these ids could never be opened. */
-const RESERVED_IDS = new Set(["settings", "history", "ask"]);
+const RESERVED_IDS = new Set(["settings", "history", "ask", "pages"]);
 
 /**
  * Structural slips that would quietly break features: a page named like one of the app's own, bookings without
