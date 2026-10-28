@@ -1212,6 +1212,8 @@ export type DesignResult =
       coverage?: { request: string; detail: string }[];
       /** What the workspace doesn't do yet that the brief asked for, so the owner can ask for it afterwards. */
       gaps?: SetupGap[];
+      /** The community system setup started from (the template route), recorded as the workspace's source. */
+      basedOn?: { systemId: string; version: string };
     }
   | { ok: false; message: string };
 
@@ -1358,7 +1360,9 @@ export async function designWorkspace(
         ...(result.ok ? {} : { reason: result.message }),
       }),
     );
-    return result;
+    return result.ok && route.base
+      ? { ...result, basedOn: { systemId: route.base.id, version: route.base.version } }
+      : result;
   };
   const failed = (error: string) =>
     done({
@@ -2172,7 +2176,7 @@ export function tidyBlocks(
 
 const RESERVED_PAGES: Record<string, string> = { settings: "Setup", history: "Log", search: "Lookup" };
 /** URL segments under /w/[workspace] the app uses itself; a page with one of these ids could never be opened. */
-const RESERVED_IDS = new Set(["settings", "history", "ask"]);
+const RESERVED_IDS = new Set(["settings", "history", "ask", "pages", "documents"]);
 
 /**
  * Structural slips that would quietly break features: a page named like one of the app's own, bookings without

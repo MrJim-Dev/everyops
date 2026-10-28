@@ -1,8 +1,9 @@
 import "server-only";
 import { sql } from "kysely";
+import { getEntity } from "@/lib/blueprint/lookup";
 import type { DataRecord, RecordData } from "@/lib/blueprint/types";
 import { canSee } from "@/lib/engine/access";
-import { mergeInto } from "@/lib/engine/duplicates";
+import { mergeInto, mergeSummary } from "@/lib/engine/duplicates";
 import { newId } from "@/lib/engine/ids";
 import { applyRecordOps, createRecord, updateRecord } from "@/lib/engine/records";
 import { autoReferenceFields, nextReference } from "@/lib/engine/references";
@@ -104,9 +105,7 @@ export async function writeRecord(
         if (!made.ok) return { ok: false, status: 400, message: made.message };
         next = made.data.records;
         saved = made.record;
-        notices = [
-          made.moved ? `Moved ${made.moved} linked ${made.moved === 1 ? "record" : "records"}.` : "",
-        ].filter(Boolean);
+        notices = [mergeSummary(getEntity(ws.blueprint, made.record.entityId), made)].filter(Boolean);
       } else {
         const done = applyRecordOps(ws, [{ op: "delete_record", recordId: change.id }], now);
         if (done.errors.length) return { ok: false, status: 400, message: done.errors.join("; ") };

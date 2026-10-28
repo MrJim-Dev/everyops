@@ -117,7 +117,7 @@ export function describeView(bp: Blueprint, view: View, slug: string) {
   });
   const hints: Record<string, string> = {
     document: "Markdown text: read it with read_page, change it with write_page.",
-    html: "Custom HTML page: read it with read_page, change it with write_page (owners and admins).",
+    html: "Page (shown under Pages, written in HTML): read it with read_page, change it with write_page (owners and admins).",
     canvas: "A drawing: read_page lists its shapes.",
     layout: "Parts from the component library in sections; read_view works every part out.",
     form: "A form for adding records; create_record saves the same record it would.",

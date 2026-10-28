@@ -292,7 +292,7 @@ export function renameInDesign(
   const parts = [
     [count.tabs, "tab", "tabs"],
     [count.forms, "form", "forms"],
-    [count.sections, "website section", "website sections"],
+    [count.sections, "page section", "page sections"],
     [count.cards, "card", "cards"],
     [count.automations, "automation", "automations"],
   ] as const;

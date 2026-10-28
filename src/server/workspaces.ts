@@ -92,7 +92,9 @@ async function seedIfNew(userId: string) {
           name: t.name,
           summary: t.summary,
           data,
-          source: t.source_system_id ? { systemId: t.source_system_id, version: "1.2" } : undefined,
+          source: t.source_system_id
+            ? { systemId: t.source_system_id, version: "1.2", via: "starter" }
+            : undefined,
         },
         newWorkspaceId(t.id),
         now.toISOString(),

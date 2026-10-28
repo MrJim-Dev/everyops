@@ -53,7 +53,14 @@ const patchSchema = z.object({
       createdAt: z.string(),
       openedAt: z.string(),
       currentVersion: z.number().int().min(1),
-      source: z.object({ systemId: z.string(), version: z.string() }).optional(),
+      source: z
+        .object({
+          systemId: z.string(),
+          version: z.string(),
+          // How it was built from that system; Community counts copies and setups, not starters.
+          via: z.enum(["starter", "copy", "setup"]).optional(),
+        })
+        .optional(),
       setup: json.optional(),
     })
     .optional(),

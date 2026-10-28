@@ -65,6 +65,23 @@ describe("HTML data sources", () => {
     expect(JSON.stringify(result)).not.toContain("12345");
     expect(JSON.stringify(result)).not.toContain("Hidden");
   });
+  it("gives a team-only page the values to count and add up, beside the words it shows", () => {
+    const { blueprint, records } = courtBookingsSample(new Date("2026-10-28T04:00:00.000Z"), "Dink & Drop");
+    const list = blueprint.views.find((v) => v.type === "table" && v.entityId === "booking");
+    if (list?.type !== "table") throw new Error("Sample changed.");
+    const result = workspaceTableData(
+      { ...blueprint, views: blueprint.views.map((v) => (v === list ? { ...list, filter: undefined } : v)) },
+      records,
+      list.id,
+    );
+    if (!result.ok) throw new Error(result.message);
+    const booking = records.find((r) => r.id === result.items[0].id);
+    const cell = (id: string) => result.items[0].cells.find((c) => c.fieldId === id);
+    expect(cell("amount")).toMatchObject({ value: booking?.data.amount });
+    expect(cell("amount")?.text).toMatch(/₱/);
+    expect(cell("slot")).toMatchObject({ value: booking?.data.slot });
+    expect(cell("status")).toMatchObject({ value: booking?.data.status });
+  });
   it("reports truncation instead of disguising partial rows as a complete dataset", () => {
     const result = workspaceTableData(
       bp,

@@ -3,12 +3,15 @@
 import {
   ArrowLeftIcon,
   ClockCounterClockwiseIcon,
+  FilesIcon,
   FoldersIcon,
   GearSixIcon,
   GlobeSimpleIcon,
   MagnifyingGlassIcon,
+  PlusIcon,
   SidebarSimpleIcon,
   SparkleIcon,
+  SquaresFourIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -21,7 +24,9 @@ import { SystemIcon } from "@/components/system-icon";
 import { Kbd } from "@/components/ui/kbd";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useAssistant } from "@/lib/assistant/panel-store";
-import type { Blueprint, System } from "@/lib/blueprint/types";
+import type { System } from "@/lib/blueprint/types";
+import { isPagesSystem } from "@/lib/pages";
+import { isPublic } from "@/lib/public/resolve";
 import { useBuildOf, useSetupSketch } from "@/lib/store/setup-build";
 import { usePageGroups, useSidebar } from "@/lib/store/sidebar";
 import { canManage } from "@/lib/store/workspaces";
@@ -55,16 +60,6 @@ function sidebarEntries(systems: System[]) {
   return entries;
 }
 
-/** A page made only of public website pages: listed under Website, apart from the systems the team works in. */
-function isWebsite(bp: Blueprint, system: System) {
-  const views = system.viewIds.map((id) => bp.views.find((v) => v.id === id));
-  return (
-    !system.widgetIds.length &&
-    views.length > 0 &&
-    views.every((v) => v?.type === "landing" || (v?.type === "html" && v.public))
-  );
-}
-
 /**
  * The workspace sidebar. Its content is laid out at full width and never reflows: collapsing narrows
  * the frame around it (see WorkspaceShell), labels fade, and icons stay exactly where they were.
@@ -78,8 +73,9 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
   const toggleAssistant = useAssistant((s) => s.toggle);
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
   const onAsk = isActive(`${ws.basePath}/ask`);
-  const website = ws.blueprint.systems.filter((s) => isWebsite(ws.blueprint, s));
-  const systems = ws.blueprint.systems.filter((s) => !website.includes(s));
+  const pages = ws.blueprint.systems.filter((s) => isPagesSystem(ws.blueprint, s));
+  const systems = ws.blueprint.systems.filter((s) => !pages.includes(s));
+  const library = `${ws.basePath}/pages`;
   const toggleSidebar = useSidebar((s) => s.toggle);
   const openGroups = usePageGroups((s) => s.open);
   const setGroupOpen = usePageGroups((s) => s.setOpen);
@@ -91,15 +87,21 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
   const setupBuild = useBuildOf(ws.id);
   const setup = !ws.blueprint.systems.length && (!!setupSketch || !!setupBuild);
   const setupSite = setup && !!setupSketch?.pages.some(isSitePage);
-  // Website pages show a globe whatever icon they were saved with (often a house, which read as a second home).
-  const systemLink = (system: System, site = false) => {
+  // Pages anyone can open show a globe whatever icon they were saved with (often a house, which read as a second
+  // home); pages only the team sees keep their own icon (a chart for a report).
+  const shared = (system: System) =>
+    system.viewIds.some((id) => {
+      const view = ws.blueprint.views.find((v) => v.id === id);
+      return !!view && isPublic(view);
+    });
+  const systemLink = (system: System, page = false) => {
     const href = `${ws.basePath}/${system.id}`;
     return (
       <SidebarLink
         key={system.id}
         href={href}
         active={isActive(href)}
-        icon={site ? <GlobeSimpleIcon /> : <SystemIcon name={system.icon} />}
+        icon={page && shared(system) ? <GlobeSimpleIcon /> : <SystemIcon name={system.icon} />}
         onNavigate={onNavigate}
         rail={rail}
       >
@@ -200,6 +202,15 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
               </button>
             </RailTip>
             <SidebarLink
+              href={`${ws.basePath}/documents`}
+              active={isActive(`${ws.basePath}/documents`)}
+              icon={<FilesIcon />}
+              onNavigate={onNavigate}
+              rail={rail}
+            >
+              Documents
+            </SidebarLink>
+            <SidebarLink
               href={`${ws.basePath}/history`}
               active={isActive(`${ws.basePath}/history`)}
               icon={<ClockCounterClockwiseIcon />}
@@ -232,8 +243,8 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
             organizer && systems.length > 1 ? (
               <button
                 type="button"
-                aria-label="Organize pages"
-                title="Organize pages"
+                aria-label="Organize systems"
+                title="Organize systems"
                 onClick={() => setOrganizing(true)}
                 className="flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
               >
@@ -252,10 +263,10 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
             pageList()
           )}
           {organizer && !setup && systems.length > LONG_LIST && !systems.some((s) => s.group) ? (
-            <RailTip rail={rail} label="Group these pages">
+            <RailTip rail={rail} label="Group these systems">
               <button
                 type="button"
-                aria-label={rail ? "Group these pages" : undefined}
+                aria-label={rail ? "Group these systems" : undefined}
                 onClick={() => setOrganizing(true)}
                 className={cn(
                   "flex h-8 items-center gap-2.5 overflow-hidden rounded-md px-2 text-[12.5px] whitespace-nowrap text-muted-foreground outline-none hover:bg-sidebar-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -264,16 +275,44 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
                 )}
               >
                 <FoldersIcon className="size-4 shrink-0" />
-                <span className={cn("flex-1 text-left", RAIL_LABEL)}>Group these pages</span>
+                <span className={cn("flex-1 text-left", RAIL_LABEL)}>Group these systems</span>
               </button>
             </RailTip>
           ) : null}
         </SidebarSection>
-        {website.length ? (
-          <SidebarSection label="Website">{website.map((s) => systemLink(s, true))}</SidebarSection>
-        ) : setupSite ? (
-          <SidebarSection label="Website">
+        {setupSite && !pages.length ? (
+          <SidebarSection label="Pages">
             <BuildPages workspaceId={ws.id} rail={rail} site />
+          </SidebarSection>
+        ) : pages.length || (ws.mode === "live" && organizer && !setup) ? (
+          <SidebarSection
+            label="Pages"
+            action={
+              ws.mode === "live" && pages.length ? (
+                <Link
+                  href={library}
+                  aria-label="All pages"
+                  title="All pages"
+                  onClick={onNavigate}
+                  className="flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                >
+                  <SquaresFourIcon className="size-3.5" />
+                </Link>
+              ) : undefined
+            }
+          >
+            {pages.map((s) => systemLink(s, true))}
+            {!pages.length ? (
+              <SidebarLink
+                href={library}
+                active={isActive(library)}
+                icon={<PlusIcon />}
+                onNavigate={onNavigate}
+                rail={rail}
+              >
+                Make a page
+              </SidebarLink>
+            ) : null}
           </SidebarSection>
         ) : null}
       </div>

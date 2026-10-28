@@ -1,4 +1,4 @@
-import { getEntity } from "@/lib/blueprint/lookup";
+import { getEntity, recordTitle } from "@/lib/blueprint/lookup";
 import type { DataRecord, Entity, Field, FieldValue, RecordData, WorkspaceData } from "@/lib/blueprint/types";
 import { computeAll } from "./compute";
 
@@ -73,7 +73,15 @@ export function linkCount(ws: WorkspaceData, record: DataRecord): number {
 }
 
 export type MergeResult =
-  | { ok: true; data: WorkspaceData; record: DataRecord; moved: number; filled: string[] }
+  | {
+      ok: true;
+      data: WorkspaceData;
+      record: DataRecord;
+      moved: number;
+      filled: string[];
+      /** For each record type that had links moved: how many of them now point at the kept record. */
+      totals: { entity: Entity; count: number }[];
+    }
   | { ok: false; message: string };
 
 /**
@@ -108,12 +116,14 @@ export function mergeInto(
     : keep;
   const links = linksTo(ws, entity.id);
   let moved = 0;
+  const movedTypes = new Set<string>();
   const records = ws.records.flatMap((r): DataRecord[] => {
     if (r.id === drop.id) return [];
     if (r.id === keep.id) return [kept];
     const own = links.filter((l) => l.entity.id === r.entityId && r.data[l.field.id] === drop.id);
     if (!own.length) return [r];
     moved++;
+    movedTypes.add(r.entityId);
     return [
       {
         ...r,
@@ -123,11 +133,36 @@ export function mergeInto(
     ];
   });
   const computed = computeAll(ws.blueprint, records, now);
+  const totals = [...movedTypes].map((id) => {
+    const own = links.filter((l) => l.entity.id === id);
+    return {
+      entity: own[0].entity,
+      count: computed.filter((r) => r.entityId === id && own.some((l) => r.data[l.field.id] === keep.id))
+        .length,
+    };
+  });
   return {
     ok: true,
     data: { ...ws, records: computed },
     record: computed.find((r) => r.id === keep.id) ?? kept,
     moved,
     filled,
+    totals,
   };
+}
+
+/** What a merge did, in words: "Moved 3 linked records. Paolo Reyes now has all 21 bookings." */
+export function mergeSummary(entity: Entity, result: Extract<MergeResult, { ok: true }>): string {
+  if (!result.moved) return "";
+  const name = recordTitle(entity, result.record);
+  const has = result.totals.map(({ entity: e, count }) =>
+    count === 1 ? `1 ${e.name.toLowerCase()}` : `all ${count} ${e.pluralName.toLowerCase()}`,
+  );
+  const list = has.length > 1 ? `${has.slice(0, -1).join(", ")} and ${has.at(-1)}` : has[0];
+  return [
+    `Moved ${result.moved} linked ${result.moved === 1 ? "record" : "records"}.`,
+    list ? `${name} now has ${list}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }

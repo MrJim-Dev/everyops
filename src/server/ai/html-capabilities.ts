@@ -39,8 +39,11 @@ EveryOps.bind() after adding bound markup, and the everyops:bound event after ea
 
 DATA: await EveryOps.data("VIEW_ID") reads current results, not a snapshot embedded in the generated source.
 - Private HTML pages inside the signed-in workspace may read table views. Result:
-  {ok:true,viewId,name,type:"table",columns:[{id,name}],items:[{id,cells:[{fieldId,name,kind,text}]}],total,truncated}.
+  {ok:true,viewId,name,type:"table",columns:[{id,name}],items:[{id,cells:[{fieldId,name,kind,text,value}]}],total,truncated}.
   Only that view's fields, filter and sort are used; at most 500 rows. Do not call a truncated list the full dataset.
+  Show text; count, add up, group and sort with value, never by parsing text: money and numbers are numbers, a
+  choice or status is its option id (text is its label), a time range is {start,end} and dates are ISO in UTC (group
+  by hour or day in the workspace's time zone, Asia/Manila unless it says otherwise, with Intl.DateTimeFormat).
 - Public HTML pages (including their signed-in previews) can ONLY read PUBLISHED layout or landing views.
   Layout result: {ok:true,viewId,name,type:"layout",layout:{sections:[{id,title,columns,items:[{id,component,data}]}]}}.
   Each item's data is the component's computed public output; table/data_table data has columns and items with

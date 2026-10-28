@@ -237,9 +237,9 @@ function BlockEditor({ viewId, block }: { viewId: string; block: Block }) {
   if (block.type === "html")
     return (
       <section className="flex flex-col gap-2 rounded-lg border p-4">
-        <h3 className="text-[13px] font-semibold">Custom HTML</h3>
+        <h3 className="text-[13px] font-semibold">Custom section</h3>
         <Textarea
-          aria-label="HTML"
+          aria-label="Section code"
           rows={10}
           className="font-mono text-[12.5px]"
           value={draft}

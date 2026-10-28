@@ -53,6 +53,7 @@ import { displayKind, isNumericKind, statusField } from "@/lib/blueprint/field-k
 import { getEntity, getField, recordTitle } from "@/lib/blueprint/lookup";
 import { sameCode, scannableFields } from "@/lib/blueprint/scannable";
 import type { DataRecord, Field, Sort, TableView as TableViewConfig } from "@/lib/blueprint/types";
+import { keepExport } from "@/lib/documents-client";
 import { downloadText, fileSlug } from "@/lib/download";
 import { tableRows } from "@/lib/engine/table-rows";
 import { toCsv, toSheet } from "@/lib/engine/value-text";
@@ -259,19 +260,22 @@ export function TableView({ view }: { view: TableViewConfig }) {
   const plural = entity.pluralName.toLowerCase();
 
   const [importing, setImporting] = useState(false);
+  // What an export is called: "Bookings" for the whole list, "Bookings - Unpaid" for a view of it.
+  const exportName =
+    view.name.startsWith("All ") || view.name === entity.pluralName
+      ? entity.pluralName
+      : `${entity.pluralName} - ${view.name}`;
   const exportXlsx = async (list: DataRecord[]) => {
     const sheet = toSheet(blueprint, records, fields, list);
-    const name =
-      view.name.startsWith("All ") || view.name === entity.pluralName
-        ? entity.pluralName
-        : `${entity.pluralName} - ${view.name}`;
+    const name = exportName;
     const res = await fetch("/api/export/xlsx", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name, ...sheet, currencySymbol: currencySymbol(currencyOf(blueprint)) }),
     }).catch(() => null);
     if (!res?.ok) return void toast.error("The Excel file couldn't be made. Try CSV instead.");
-    const url = URL.createObjectURL(await res.blob());
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
     const link = Object.assign(document.createElement("a"), {
       href: url,
       download: `${fileSlug(name)}.xlsx`,
@@ -279,10 +283,13 @@ export function TableView({ view }: { view: TableViewConfig }) {
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast.success(`Exported ${list.length} ${list.length === 1 ? entity.name.toLowerCase() : plural}`);
+    void keepExport(ws, `${fileSlug(name)}.xlsx`, blob, editable);
   };
   const exportCsv = (list: DataRecord[]) => {
-    downloadText(`${fileSlug(view.name)}.csv`, toCsv(blueprint, records, fields, list), "text/csv");
+    const csv = toCsv(blueprint, records, fields, list);
+    downloadText(`${fileSlug(exportName)}.csv`, csv, "text/csv");
     toast.success(`Exported ${list.length} ${list.length === 1 ? entity.name.toLowerCase() : plural}`);
+    void keepExport(ws, `${fileSlug(exportName)}.csv`, new Blob([csv], { type: "text/csv" }), editable);
   };
   const setStatus = (optionId: string) => {
     if (!status) return;

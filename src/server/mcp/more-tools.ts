@@ -63,7 +63,7 @@ export const MORE_TOOLS: Tool[] = [
     name: "describe_view",
     title: "Describe a tab or card",
     description:
-      "Every setting of one tab (viewId) or dashboard card (widgetId): a table's columns, filter, sort and grouping, a board's lanes and card fields, a calendar's date field, a form's questions and steps, a layout page's sections and parts, a website's blocks. Field names come with their ids.",
+      "Every setting of one tab (viewId) or dashboard card (widgetId): a table's columns, filter, sort and grouping, a board's lanes and card fields, a calendar's date field, a form's questions and steps, a layout page's sections and parts, a home page's blocks. Field names come with their ids.",
     permission: "pages:read",
     readOnly: true,
     properties: {
@@ -86,7 +86,7 @@ export const MORE_TOOLS: Tool[] = [
     name: "read_view",
     title: "Read a tab or dashboard",
     description:
-      "What a tab shows right now, worked out like the app draws it: a table's rows with its own filter, sort, columns, groups and totals; a board's lanes and cards; a calendar's events from..to; a schedule's bookings and free slots for a day; an approval queue's pending items; notes; a register's products; a layout page's parts (numbers, charts, lists); a website's blocks; a page's text or a drawing's shapes. Give pageId instead for that page's dashboard cards with their numbers.",
+      "What a tab shows right now, worked out like the app draws it: a table's rows with its own filter, sort, columns, groups and totals; a board's lanes and cards; a calendar's events from..to; a schedule's bookings and free slots for a day; an approval queue's pending items; notes; a register's products; a layout page's parts (numbers, charts, lists); a home page's blocks; a page's text or a drawing's shapes. Give pageId instead for that page's dashboard cards with their numbers.",
     permission: "records:read",
     readOnly: true,
     properties: {
@@ -114,7 +114,7 @@ export const MORE_TOOLS: Tool[] = [
     name: "write_page",
     title: "Write a page",
     description:
-      "Replaces the text of a document page (markdown), a custom page (HTML; owners and admins, it's public code) or a drawing (canvas JSON { version: 1, shapes }). The text it replaces is kept as a version (page_history).",
+      "Replaces the text of a document page (markdown), a page (HTML; owners and admins, it can be shared with anyone) or a drawing (canvas JSON { version: 1, shapes }). The text it replaces is kept as a version (page_history).",
     permission: "pages:write",
     readOnly: false,
     properties: { viewId: { type: "string" }, text: { type: "string" } },
@@ -129,10 +129,7 @@ export const MORE_TOOLS: Tool[] = [
           `"${view.name}" is a ${view.type} tab: its design changes through ask_everyops, its records with the record tools.`,
         );
       if (view.type === "html" && !canManage(ctx.role))
-        throw new ToolError(
-          "Custom HTML pages are shown to the public: only owners and admins can change them.",
-          403,
-        );
+        throw new ToolError("Pages can be shared with anyone: only owners and admins can change them.", 403);
       const body = view.type === "canvas" ? JSON.stringify(parseCanvas(args.text)) : args.text;
       const updatedAt = await writePageText(ctx.workspaceId, actorOf(ctx.caller), view.id, body);
       return { ok: true, id: view.id, name: view.name, type: view.type, characters: body.length, updatedAt };
@@ -209,7 +206,7 @@ export const MORE_TOOLS: Tool[] = [
     name: "ask_everyops",
     title: "Ask EveryOps",
     description:
-      "Asks the workspace's own assistant, in plain words, the way a person asks in the app: questions about the business and its records, or a change (add a field, a page, a report card, an automation, a website section; mark bookings paid; rewrite a page). Changes come back as a plan with steps and a planId; nothing changes until apply_change. A plan the key may not apply, team changes, and removals while the owner asks to approve them are saved for an owner or admin instead. Uses the workspace's AI allowance.",
+      "Asks the workspace's own assistant, in plain words, the way a person asks in the app: questions about the business and its records, or a change (add a field, a page, a report card, an automation, a section of a page; mark bookings paid; rewrite a page). Changes come back as a plan with steps and a planId; nothing changes until apply_change. A plan the key may not apply, team changes, and removals while the owner asks to approve them are saved for an owner or admin instead. Uses the workspace's AI allowance.",
     permission: "records:read",
     readOnly: false,
     properties: {

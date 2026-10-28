@@ -10,14 +10,14 @@ type Ctx = RouteContext<"/api/v1/workspaces/[id]/pages/[viewId]">;
 /** Longest page text the API saves. */
 const MAX_PAGE_CHARS = 1_000_000;
 
-/** A document page's markdown or a custom page's HTML, by its tab id from /schema. */
+/** A document page's markdown or a page's HTML, by its tab id from /schema. */
 export async function GET(request: Request, { params }: Ctx) {
   const { id, viewId } = await params;
   return restRoute(request, id, async (call) => Response.json({ data: await call("read_page", { viewId }) }));
 }
 
 /**
- * Replaces a page's text: { "text": "…" }. Document pages need pages:write (staff and up); custom HTML pages are
+ * Replaces a page's text: { "text": "…" }. Document pages need pages:write (staff and up); pages (HTML) are
  * code shown to the public, so only owners and admins may change them, as in the app. The text it replaces is kept
  * as a version that can be restored from the page's history.
  */
@@ -39,12 +39,12 @@ export async function PUT(request: Request, { params }: Ctx) {
   enterZone(bp);
   const view = bp?.views.find((v) => v.id === viewId);
   if (!view || (view.type !== "document" && view.type !== "html"))
-    return apiError(404, "not_found", `No document or custom HTML page "${viewId}".`);
+    return apiError(404, "not_found", `No document or page "${viewId}".`);
   if (view.type === "html" && access.role !== "owner" && access.role !== "admin")
     return apiError(
       403,
       "forbidden",
-      "Custom HTML pages are shown to the public: only owners and admins can change them.",
+      "Pages can be shared with anyone: only owners and admins can change them.",
     );
   const updatedAt = await writePageText(id, actorOf(caller), viewId, body.text);
   return Response.json({

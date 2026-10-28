@@ -57,7 +57,7 @@ export function UseSystemDialog({
         name: finalName,
         summary,
         data,
-        source: { systemId: system.id, version: system.version },
+        source: { systemId: system.id, version: system.version, via: "copy" },
       });
     setOpen(false);
     const first = data.blueprint.systems[0];
