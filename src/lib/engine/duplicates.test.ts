@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getEntity } from "@/lib/blueprint/lookup";
 import type { DataRecord } from "@/lib/blueprint/types";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
-import { findDuplicates, linkCount, matchFields, mergeInto } from "./duplicates";
+import { findDuplicates, linkCount, matchFields, mergeInto, mergeSummary } from "./duplicates";
 
 const NOW = new Date("2026-10-13T09:30:00+08:00");
 
@@ -47,6 +47,23 @@ describe("duplicates", () => {
     expect(linkCount(merged.data, merged.record)).toBe(before);
     expect(merged.record.data.visits).toBe(before);
     expect(merged.record.data.name).toBe("Kevin Sy");
+  });
+
+  it("says what moved and how many the kept record has now", () => {
+    const { ws, kevin, twin } = withTwin();
+    const total = linkCount(ws, kevin) + linkCount(ws, twin);
+    const merged = mergeInto(ws, kevin.id, twin.id, NOW);
+    if (!merged.ok) throw new Error(merged.message);
+    const player = getEntity(ws.blueprint, "player");
+    expect(merged.totals.map((t) => [t.entity.id, t.count])).toEqual([["booking", total]]);
+    expect(mergeSummary(player, merged)).toBe(
+      `Moved 1 linked record. Kevin Sy now has all ${total} bookings.`,
+    );
+    const bare = { ...ws, records: ws.records.filter((r) => r.id !== "booking_twin") };
+    const nothing = mergeInto(bare, kevin.id, twin.id, NOW);
+    if (!nothing.ok) throw new Error(nothing.message);
+    expect(nothing.moved).toBe(0);
+    expect(mergeSummary(player, nothing)).toBe("");
   });
 
   it("fills the kept record's empty fields from the other", () => {

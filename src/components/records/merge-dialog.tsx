@@ -14,7 +14,7 @@ import {
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { recordTitle } from "@/lib/blueprint/lookup";
 import type { DataRecord, Entity } from "@/lib/blueprint/types";
-import { linksTo, mergeInto } from "@/lib/engine/duplicates";
+import { linksTo, mergeInto, mergeSummary } from "@/lib/engine/duplicates";
 import { formatDateTime } from "@/lib/format";
 import { markFresh } from "@/lib/motion/fresh";
 import { useWorkspaces } from "@/lib/store/workspaces";
@@ -82,6 +82,7 @@ export function MergeDialog({
       ws.commit(done.data);
       markFresh([keep.id]);
       toast.success(`Merged into ${recordTitle(entity, keep)}`, {
+        description: mergeSummary(entity, done) || undefined,
         action: { label: "Undo", onClick: () => ws.commit(before) },
       });
     }
