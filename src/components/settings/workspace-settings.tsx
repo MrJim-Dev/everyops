@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { CATALOG } from "@/lib/catalog";
+import { keepExport } from "@/lib/documents-client";
 import { downloadText, fileSlug } from "@/lib/download";
 import { CURRENCIES, currencyOf, formatDate, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import { canManage, useWorkspaces } from "@/lib/store/workspaces";
@@ -44,7 +45,11 @@ export function WorkspaceSettings() {
       toast.info("Workspace link", { description: url });
     }
   };
-  const download = (file: string, data: unknown) => downloadText(file, JSON.stringify(data, null, 2));
+  const download = (file: string, data: unknown) => {
+    const text = JSON.stringify(data, null, 2);
+    downloadText(file, text);
+    void keepExport(ws, file, new Blob([text], { type: "application/json" }), manager);
+  };
   // The latest change still in effect; version numbers stay out of the product.
   const lastChange = workspace.changes.find((c) => !c.undoneAt);
   const source = workspace.source && CATALOG.find((s) => s.id === workspace.source?.systemId);

@@ -1,6 +1,7 @@
 import { canEdit } from "@/lib/store/workspace-model";
 import { apiUser, sameOrigin } from "@/server/session-api";
 import { MAX_DOCUMENT_BYTES, MAX_UPLOAD_BYTES, saveDocument, saveImage } from "@/server/storage";
+import { assertStorageRoom, storageLimitResult } from "@/server/storage-usage";
 import { roleIn } from "@/server/workspaces";
 
 /**
@@ -30,9 +31,16 @@ export async function POST(request: Request) {
   if (!access || !canEdit(access.role))
     return Response.json({ ok: false, message: "You can't upload to this workspace." }, { status: 403 });
   const bytes = new Uint8Array(await file.arrayBuffer());
+  const by = { id: user.id, name: user.name };
+  try {
+    await assertStorageRoom(workspaceId, bytes.length);
+  } catch (error) {
+    const full = storageLimitResult(error);
+    return Response.json(full, { status: full.status });
+  }
   const url = document
-    ? await saveDocument(workspaceId, bytes, file instanceof File ? file.name : "File")
-    : await saveImage(workspaceId, bytes);
+    ? await saveDocument(workspaceId, bytes, file instanceof File ? file.name : "File", by)
+    : await saveImage(workspaceId, bytes, by);
   if (!url)
     return Response.json(
       {
