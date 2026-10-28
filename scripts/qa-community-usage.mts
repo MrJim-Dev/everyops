@@ -8,6 +8,7 @@
  * - small-business-finances: 2 copies, last changed in August → 2 uses, none active.
  * - employee-leave: 1 workspace setup built from it (via "setup"), active → 1 use, 1 active.
  * - a system someone published 3 days ago → New.
+ * - court-bookings' own source workspace and a canteen-pos copy in the demo account → not counted.
  *
  *   tsx --conditions=react-server --env-file=.env.local scripts/qa-community-usage.mts
  */
@@ -91,6 +92,14 @@ async function main() {
   for (let i = 0; i < 2; i++)
     await workspace(`qa-usage-finance-${i}`, owner, "small-business-finances", 90, "copy", 70);
   await workspace("qa-usage-leave-0", owner, "employee-leave", 10, "setup", 1);
+  // Never uses: the workspace an official system was built and published from, and copies in the demo account
+  // (production had one of each per template, all reading 1 use / 1 active).
+  await workspace("qa-usage-source-court", owner, "court-bookings", 15, null, 1);
+  await sql`update published_system set source_workspace_id = 'qa-usage-source-court' where id = 'court-bookings'`.execute(
+    db,
+  );
+  const demo = await user("james@everyops.app", "James Ocampo");
+  await workspace("qa-usage-demo-pos", demo, "canteen-pos", 15, "copy", 1);
 
   const leave = await sql<{
     doc: Record<string, unknown>;
