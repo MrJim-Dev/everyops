@@ -3,6 +3,7 @@
 import {
   ArrowLeftIcon,
   ClockCounterClockwiseIcon,
+  FilesIcon,
   FoldersIcon,
   GearSixIcon,
   GlobeSimpleIcon,
@@ -199,6 +200,15 @@ export function WorkspaceSidebar({ onNavigate, rail = false }: { onNavigate?: ()
                 <Kbd className={RAIL_LABEL}>⌘J</Kbd>
               </button>
             </RailTip>
+            <SidebarLink
+              href={`${ws.basePath}/documents`}
+              active={isActive(`${ws.basePath}/documents`)}
+              icon={<FilesIcon />}
+              onNavigate={onNavigate}
+              rail={rail}
+            >
+              Documents
+            </SidebarLink>
             <SidebarLink
               href={`${ws.basePath}/history`}
               active={isActive(`${ws.basePath}/history`)}

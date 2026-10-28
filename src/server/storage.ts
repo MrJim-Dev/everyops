@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { Storage } from "@google-cloud/storage";
+import { recordUpload } from "./storage-usage";
 
 const BUCKET = process.env.UPLOAD_BUCKET ?? "everyops-prod-uploads";
 export const MAX_UPLOAD_BYTES = 5_000_000;
@@ -12,6 +13,8 @@ const bucket = () => {
   client ??= new Storage({ projectId: process.env.GOOGLE_CLOUD_PROJECT ?? "everyops-prod" });
   return client.bucket(BUCKET);
 };
+/** The uploads bucket, for Documents (src/server/documents.ts); its layout is in src/lib/documents.ts. */
+export const uploadsBucket = bucket;
 
 /** Image types we accept, recognised by their first bytes (never by the name or the browser's claim). SVG is refused. */
 export function imageType(bytes: Uint8Array): { ext: string; mime: string } | null {
@@ -34,7 +37,11 @@ export function imageType(bytes: Uint8Array): { ext: string; mime: string } | nu
  * Stores an image under the workspace in Cloud Storage and returns the app path that serves it. The name is a
  * random UUID, so a file can only be found by someone who was given its link (a QR code on a public page).
  */
-export async function saveImage(workspaceId: string, bytes: Uint8Array): Promise<string | null> {
+export async function saveImage(
+  workspaceId: string,
+  bytes: Uint8Array,
+  by?: { id: string; name: string },
+): Promise<string | null> {
   const type = imageType(bytes);
   if (!type) return null;
   const name = `${workspaceId}/${randomUUID()}.${type.ext}`;
@@ -45,6 +52,7 @@ export async function saveImage(workspaceId: string, bytes: Uint8Array): Promise
       resumable: false,
       metadata: { cacheControl: "private" },
     });
+  await recordUpload(workspaceId, name, bytes.length, { contentType: type.mime, by });
   return `/api/files/${name}`;
 }
 
@@ -102,6 +110,7 @@ export async function saveDocument(
   workspaceId: string,
   bytes: Uint8Array,
   filename: string,
+  by?: { id: string; name: string },
 ): Promise<string | null> {
   const type = documentType(bytes, filename);
   if (!type) return null;
@@ -119,6 +128,7 @@ export async function saveDocument(
       .join("")
       .trim()
       .slice(0, 120) || `File.${type.ext}`;
+  await recordUpload(workspaceId, name, bytes.length, { displayName: shown, contentType: type.mime, by });
   return `/api/files/${name}?name=${encodeURIComponent(shown)}`;
 }
 
