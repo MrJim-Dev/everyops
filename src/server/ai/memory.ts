@@ -1,6 +1,6 @@
 import "server-only";
 import type { MemoryEdit, WorkspaceMemory } from "@/lib/assistant/memory";
-import { generateJsonHedged } from "./gemini";
+import { generateJsonHedged } from "./claude";
 import { MEMORY_SYSTEM, memoryAnswer, memoryPrompt, toEdits, worthRemembering } from "./memory-prompt";
 
 /**

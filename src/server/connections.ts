@@ -4,12 +4,12 @@ import { sql } from "kysely";
 import {
   canPropose,
   canRead,
-  geminiSchema,
   type OutsideAction,
   PROVIDERS,
   type ProviderId,
   splitToolName,
   toolName,
+  toolSchema,
 } from "@/lib/connections";
 import { type Actor, logActivity, personActor } from "./activity";
 import { db } from "./db";
@@ -248,10 +248,10 @@ export async function outsideTools(workspaceId: string, actor: Actor): Promise<O
           const name = toolName(row.provider, t.name);
           const description = `${PROVIDERS[row.provider].name}: ${(t.description ?? t.name).slice(0, 600)}`;
           if (canRead(row.provider, t.name))
-            declarations.push({ name, description, parametersJsonSchema: geminiSchema(t.inputSchema) });
+            declarations.push({ name, description, parametersJsonSchema: toolSchema(t.inputSchema) });
           else if (canPropose(row.provider, t.name))
             proposable.push(
-              `- ${name}: ${description} Arguments (JSON schema): ${JSON.stringify(geminiSchema(t.inputSchema)).slice(0, 1500)}`,
+              `- ${name}: ${description} Arguments (JSON schema): ${JSON.stringify(toolSchema(t.inputSchema)).slice(0, 1500)}`,
             );
         }
       } catch (e) {

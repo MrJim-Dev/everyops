@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { generateJsonHedged } from "@/server/ai/gemini";
+import { generateJsonHedged } from "@/server/ai/claude";
 import {
   checkedMapping,
   IMPORT_MAP_SYSTEM,

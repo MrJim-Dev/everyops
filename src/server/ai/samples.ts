@@ -2,8 +2,8 @@ import "server-only";
 import { z } from "zod";
 import type { Blueprint, Entity, Field } from "@/lib/blueprint/types";
 import { todayKey } from "@/lib/time";
+import { generateJsonHedged } from "./claude";
 import type { Design } from "./design-prompt";
-import { generateJsonHedged } from "./gemini";
 
 type Sample = Design["samples"][number];
 

@@ -3,16 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 vi.mock("./lookup", () => ({ lookupData: vi.fn() }));
 vi.mock("./coverage", () => ({ reviewCoverage: vi.fn() }));
-vi.mock("./gemini", async (original) => ({
-  ...(await original<typeof import("./gemini")>()),
+vi.mock("./claude", async (original) => ({
+  ...(await original<typeof import("./claude")>()),
   generateJsonHedged: vi.fn(),
 }));
 
 import { courtBookingsBlueprint } from "@/lib/catalog/court-bookings";
 import { assistantTurn } from "./assistant";
 import type { AssistantAnswer } from "./assistant-prompt";
+import { generateJsonHedged } from "./claude";
 import { reviewCoverage } from "./coverage";
-import { generateJsonHedged } from "./gemini";
 import { lookupData } from "./lookup";
 
 const input = () => ({

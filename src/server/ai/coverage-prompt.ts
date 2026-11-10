@@ -59,6 +59,10 @@ For each requirement:
 In preserve, list page: or entity: references the person explicitly asked to keep unchanged, even if this plan
 changes them. Keeping a page unchanged includes its tabs, field labels, configuration and record type, not only its name.
 Write request and detail in plain business language using display names, never internal ids or operation names.
+In operations and the evidence map, a system is a page in the sidebar (page: references), a view is a tab on a page,
+and an entity is a record type. Renaming a system renames that page, and its tab and labels are renamed with it by
+the app. A request to rename a page is covered by that; the record type's own name only has to change when the
+person names the record type.
 Every requested change needs its own item; combine closely related constraints only when the evidence covers all.
 Verify exact dates and values, relation targets, public/private visibility, and that a field is shown where requested.
 An operation existing is not proof: inspect its values. A text saying 'paid' does not update a payment status.

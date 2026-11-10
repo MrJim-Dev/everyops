@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { attachmentRef } from "@/lib/assistant/attachments";
 import type { Blueprint } from "@/lib/blueprint/types";
-import { planChangeWithGemini } from "@/server/ai/plan-change";
+import { planChangeWithClaude } from "@/server/ai/plan-change";
 import { takeAiToken } from "@/server/ai/rate-limit";
 import { enterAiUsage, startAiUsage } from "@/server/ai/usage";
 import { auth } from "@/server/auth";
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   if (overBudget) return overBudget;
   enterAiUsage(`account:${session.user.id}`, { feature: "plan-change" });
 
-  const result = await planChangeWithGemini(
+  const result = await planChangeWithClaude(
     parsed.data.blueprint as unknown as Blueprint,
     parsed.data.request,
     { userId: session.user.id, attachments: parsed.data.attachments },

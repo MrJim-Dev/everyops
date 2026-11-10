@@ -23,9 +23,10 @@ export default function Page() {
       <h2>AI processing</h2>
       <p>
         When you use Ask EveryOps or the assistant, your messages, the workspace you're working in, and any
-        files you attach are sent to Gemini on Google Cloud (Vertex AI, asia-southeast1) to answer and to
-        design or update your systems. Attached files are stored in Google Cloud Storage under your account
-        and deleted 90 days after upload. Voice messages are turned into text and not stored.
+        files you attach are sent to Claude, an AI model run by Anthropic, to answer and to design or update
+        your systems. Voice messages, and recordings or videos you attach, are turned into text by Gemini on
+        Google Cloud (Vertex AI) first. Attached files are stored in Google Cloud Storage under your account
+        and deleted 90 days after upload. Voice messages are not stored.
       </p>
       <h2>Your choices</h2>
       <p>

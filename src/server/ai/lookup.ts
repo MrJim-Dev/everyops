@@ -3,7 +3,7 @@ import type { Blueprint } from "@/lib/blueprint/types";
 import { splitToolName } from "@/lib/connections";
 import type { Viewer } from "@/lib/engine/access";
 import type { OutsideTools } from "../connections";
-import { generateJsonHedged } from "./gemini";
+import { generateJsonHedged } from "./claude";
 import {
   describeTypes,
   LOOKUP_SYSTEM,

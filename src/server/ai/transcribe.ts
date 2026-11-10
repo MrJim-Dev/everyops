@@ -1,28 +1,26 @@
 import "server-only";
-import { generateJsonHedged } from "./gemini";
-import { TRANSCRIBE_SYSTEM, transcript } from "./transcribe-prompt";
+import { mediaText } from "./media";
+import { TRANSCRIBE_SYSTEM } from "./transcribe-prompt";
 
 export type TranscribeResult = { ok: true; text: string } | { ok: false; message: string };
 
-/** Turns a voice recording into text the person can review before sending. The audio isn't kept. */
+/**
+ * Turns a voice recording into text the person can review before sending. The audio isn't kept. This runs on Gemini
+ * (see media.ts): Claude doesn't take audio.
+ */
 export async function transcribe(audio: Uint8Array, mime: string): Promise<TranscribeResult> {
-  // A voice note transcribes in about 3 s; one that has sent nothing for 10 s has stalled and gets a twin.
-  const result = await generateJsonHedged(
-    transcript,
-    {
+  // A voice note transcribes in about 3 s, so a call still quiet after 15 s is given up on and asked again.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = await mediaText({
       system: TRANSCRIBE_SYSTEM,
-      prompt: [
-        { inlineData: { mimeType: mime, data: Buffer.from(audio).toString("base64") } },
-        { text: "Transcribe this voice message." },
-      ],
-      timeoutMs: 30_000,
+      prompt: "Transcribe this voice message. Answer with the transcript only.",
+      media: { inlineData: { mimeType: mime, data: Buffer.from(audio).toString("base64") } },
       task: "transcribe",
-    },
-    { hedgeMs: 10_000, afterSilence: true, attempts: 3 },
-  );
-  if (result.ok) return { ok: true, text: result.data.text.trim() };
-  return {
-    ok: false,
-    message: result.retryable ? "Gemini couldn't hear that clearly. Try again." : result.error,
-  };
+      timeoutMs: 15_000,
+      attempt,
+    });
+    if (result.ok) return { ok: true, text: result.text };
+    if (!result.retryable) break;
+  }
+  return { ok: false, message: "We couldn't hear that clearly. Try again." };
 }

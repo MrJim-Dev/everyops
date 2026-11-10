@@ -74,30 +74,46 @@ export function originLabel(origin: string): string {
 const shortHost = (host: string) => host.replace(/\.local$/, "");
 
 /**
- * US dollars per million tokens, from the billing account's Vertex AI SKU rates (October 2026). Thinking is billed
- * as output, and cached input (Gemini reusing an identical prompt start) at a tenth of input. Regional endpoints
- * (e.g. asia-southeast1) cost 10% more than global. These are estimates; Google's invoice is the bill.
+ * US dollars per million tokens (November 2026). Thinking is billed as output. Claude rereads a prompt start it has
+ * kept (cached) at a tenth of input, and saving one costs a quarter more than reading it (write). The Gemini rows
+ * price sound and video, which still run on Vertex AI, and calls logged before the move to Claude; Vertex's regional
+ * endpoints (e.g. asia-southeast1) cost 10% more than global. These are estimates; the invoice is the bill.
  */
-type Rate = { input: number; cached: number; output: number };
+type Rate = { input: number; cached: number; output: number; write?: number };
 const RATES: Record<string, Rate> = {
+  "claude-sonnet-5-5": { input: 2, cached: 0.2, write: 2.5, output: 10 },
+  "claude-haiku-5-5": { input: 0.1, cached: 0.01, write: 0.125, output: 0.5 },
+  "claude-opus-5-5": { input: 4, cached: 0.4, write: 5, output: 20 },
   "gemini-3.5-flash": { input: 1.5, cached: 0.15, output: 9 },
   "gemini-3.7-flash": { input: 1.5, cached: 0.15, output: 7.5 },
   "gemini-3.8-flash": { input: 1.5, cached: 0.15, output: 7.5 },
   "gemini-2.5-flash": { input: 0.3, cached: 0.03, output: 2.5 },
 };
-const FALLBACK = RATES["gemini-3.7-flash"];
+const FALLBACK = RATES["claude-sonnet-5-5"];
 const REGIONAL = 1.1;
 
-export type CallTokens = { input: number; cached: number; output: number; thinking: number };
+/** input is everything read, of which `cached` was reused from the cache and `cacheWrite` was saved to it. */
+export type CallTokens = {
+  input: number;
+  cached: number;
+  output: number;
+  thinking: number;
+  cacheWrite?: number;
+};
 
 /** Estimated cost of one call in micro-dollars (millionths of a dollar), so sums stay exact integers. */
 export function costMicros(model: string, location: string, t: CallTokens): number {
-  const rate = RATES[model] ?? FALLBACK;
+  const rate = RATES[model] ?? (model.startsWith("gemini") ? RATES["gemini-3.7-flash"] : FALLBACK);
   const factor = location === "global" ? 1 : REGIONAL;
   const cached = Math.min(t.cached, t.input);
+  const written = Math.min(t.cacheWrite ?? 0, t.input - cached);
   // Dollars per million tokens is the same number as micro-dollars per token.
   return Math.round(
-    factor * ((t.input - cached) * rate.input + cached * rate.cached + (t.output + t.thinking) * rate.output),
+    factor *
+      ((t.input - cached - written) * rate.input +
+        cached * rate.cached +
+        written * (rate.write ?? rate.input) +
+        (t.output + t.thinking) * rate.output),
   );
 }
 

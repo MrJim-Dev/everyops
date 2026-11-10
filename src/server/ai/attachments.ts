@@ -1,8 +1,9 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import type { Part } from "@google/genai";
 import { Storage } from "@google-cloud/storage";
 import { ATTACHMENT_ID, type AttachmentKind, type AttachmentRef } from "@/lib/assistant/attachments";
+import type { PromptPart } from "./claude";
+import { describeMedia } from "./media";
 import { officeText } from "./office";
 
 const BUCKET = process.env.UPLOAD_BUCKET ?? "everyops-prod-uploads";
@@ -14,7 +15,7 @@ const bucket = () => {
   return client.bucket(BUCKET);
 };
 
-/** `convert` marks Office files: they're stored as the text Gemini reads (CSV for Excel, plain text for Word). */
+/** `convert` marks Office files: they're stored as the text Claude reads (CSV for Excel, plain text for Word). */
 export type FileType = { kind: AttachmentKind; mime: string; ext: string; convert?: "xlsx" | "docx" };
 
 const TEXT_TYPES: Record<string, string> = {
@@ -170,64 +171,101 @@ export async function copyPhotoToWorkspace(
 async function attachmentInfo(
   userId: string,
   id: string,
-): Promise<{ uri: string; mime: string; kind: AttachmentKind } | null> {
+): Promise<{ uri: string; mime: string; kind: AttachmentKind; size: number } | null> {
   if (!ATTACHMENT_ID.test(id)) return null;
   const path = `${ownerFolder(userId)}/${id}`;
   try {
     const [meta] = await bucket().file(path).getMetadata();
     const kind = (meta.metadata?.kind as AttachmentKind | undefined) ?? "image";
-    return { uri: `gs://${BUCKET}/${path}`, mime: meta.contentType ?? "application/octet-stream", kind };
+    return {
+      uri: `gs://${BUCKET}/${path}`,
+      mime: meta.contentType ?? "application/octet-stream",
+      kind,
+      size: Number(meta.size ?? 0),
+    };
   } catch {
     return null;
   }
 }
 
+/** Pictures Claude reads. An iPhone HEIC photo becomes a JPEG in the browser before upload (prepare-image.ts). */
+const CLAUDE_PICTURE = /^image\/(png|jpeg|gif|webp)$/;
+/** Largest picture and PDF sent to Claude. In base64 they grow by a third, and a request holds 32 MB in all. */
+const MAX_PICTURE_BYTES = 3_700_000;
+const MAX_PDF_BYTES = 18_000_000;
+/** All the pictures and PDFs of one request together, so several large files can't push it past the limit. */
+const MAX_REQUEST_BYTES = 22_000_000;
+
+/** What one attached file becomes for Claude: parts to send, or the reason it can't be read. */
+type Loaded = { parts: PromptPart[]; bytes: number } | { skipped: string };
+
+async function loadAttachment(userId: string, ref: AttachmentRef): Promise<Loaded> {
+  const info = await attachmentInfo(userId, ref.id);
+  if (!info) return { skipped: "no longer available" };
+  const label = `Attached file "${ref.name}"`;
+  if (info.kind === "audio" || info.kind === "video") {
+    // Claude can't hear or watch: Gemini reads the file from Cloud Storage and writes up what it says and shows.
+    const text = await describeMedia(info.uri, info.mime, info.kind);
+    if (!text) return { skipped: `a ${info.kind === "audio" ? "recording" : "video"} that couldn't be read` };
+    const what = info.kind === "audio" ? "a recording, written up" : "a video, written up";
+    return { parts: [{ text: `${label} (${what}):\n${text.slice(0, MAX_TEXT_CHARS)}` }], bytes: 0 };
+  }
+  if (info.kind === "image" && !CLAUDE_PICTURE.test(info.mime))
+    return { skipped: "a photo format that can't be read" };
+  const limit = info.kind === "text" ? Infinity : info.kind === "pdf" ? MAX_PDF_BYTES : MAX_PICTURE_BYTES;
+  if (info.size > limit) return { skipped: "too large to read" };
+  const file = await readAttachment(userId, ref.id);
+  if (!file) return { skipped: "no longer available" };
+  if (info.kind === "text") {
+    const text = file.bytes.toString("utf8");
+    const note = text.length > MAX_TEXT_CHARS ? " (only the start is shown)" : "";
+    return { parts: [{ text: `${label}${note}:\n${text.slice(0, MAX_TEXT_CHARS)}` }], bytes: 0 };
+  }
+  const data = file.bytes.toString("base64");
+  return {
+    parts: [
+      { text: `${label}:` },
+      info.kind === "pdf" ? { pdf: { data } } : { image: { mime: info.mime, data } },
+    ],
+    bytes: file.bytes.byteLength,
+  };
+}
+
 /**
- * Gemini parts for a conversation's files, each labelled with its name so the model can refer to it. Text files
- * (including converted Office files) are sent as text; photos, PDFs, audio and video are passed as Cloud Storage
- * links that Gemini reads directly, so they're never loaded into this server's memory and several large files
- * fit in one request. Files that are gone are listed in a note instead.
+ * Claude's parts for a conversation's files, each labelled with its name so the model can refer to it. Text files
+ * (including converted Office files) are sent as text, photos and PDFs as they are, and recordings and videos as a
+ * write-up of what they say and show. Files that are gone or can't be read are listed in a note instead.
  */
-export async function attachmentParts(userId: string, refs: AttachmentRef[]): Promise<Part[]> {
+export async function attachmentParts(userId: string, refs: AttachmentRef[]): Promise<PromptPart[]> {
   if (!refs.length) return [];
   const files = await Promise.all(
-    refs.map(async (r) => {
-      const info = await attachmentInfo(userId, r.id);
-      if (!info) return null;
-      if (info.kind !== "text") return { ...info, text: null };
-      const file = await readAttachment(userId, r.id);
-      return file ? { ...info, text: file.bytes.toString("utf8") } : null;
-    }),
+    refs.map((ref) => loadAttachment(userId, ref).catch((): Loaded => ({ skipped: "couldn't be read" }))),
   );
-  const parts: Part[] = [];
+  const parts: PromptPart[] = [];
   const skipped: string[] = [];
+  let bytes = 0;
   refs.forEach((ref, i) => {
     const file = files[i];
-    const label = `Attached file "${ref.name}"`;
-    if (!file) {
-      skipped.push(`${ref.name} (no longer available)`);
-      return;
+    if ("skipped" in file) skipped.push(`${ref.name} (${file.skipped})`);
+    else if (bytes + file.bytes > MAX_REQUEST_BYTES)
+      skipped.push(`${ref.name} (too large to read with the others)`);
+    else {
+      bytes += file.bytes;
+      parts.push(...file.parts);
     }
-    if (file.text !== null) {
-      const text = file.text;
-      const note = text.length > MAX_TEXT_CHARS ? " (only the start is shown)" : "";
-      parts.push({ text: `${label}${note}:\n${text.slice(0, MAX_TEXT_CHARS)}` });
-      return;
-    }
-    parts.push({ text: `${label}:` }, { fileData: { fileUri: file.uri, mimeType: file.mime } });
   });
   if (skipped.length)
     parts.push({ text: `Files you can't see: ${skipped.join(", ")}. Say so if they matter.` });
   return parts;
 }
 
-/** The user turn for Gemini: the text, then the attached files, then any closing instruction. */
+/** The user turn for Claude: the text, then the attached files, then any closing instruction. */
 export async function promptWithFiles(
   userId: string,
   text: string,
   refs: AttachmentRef[],
   after?: string,
-): Promise<string | Part[]> {
+): Promise<string | PromptPart[]> {
   const files = await attachmentParts(userId, refs);
   if (!files.length) return after ? `${text}\n\n${after}` : text;
   return [{ text }, ...files, ...(after ? [{ text: after }] : [])];

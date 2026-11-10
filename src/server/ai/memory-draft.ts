@@ -2,8 +2,8 @@ import "server-only";
 import { memoryContext, type WorkspaceMemory } from "@/lib/assistant/memory";
 import type { Blueprint, DataRecord } from "@/lib/blueprint/types";
 import { pageExcerpts } from "./assistant";
+import { generateJsonHedged } from "./claude";
 import { dataDigest } from "./digest";
-import { generateJsonHedged } from "./gemini";
 import { MEMORY_DRAFT_SYSTEM, memoryDraftAnswer, toDraftNotes } from "./memory-draft-prompt";
 
 /** Notes drafted from the workspace (design, records, pages) for the owner to confirm in Settings → Assistant. */

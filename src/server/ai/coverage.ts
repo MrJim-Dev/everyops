@@ -1,6 +1,7 @@
 import "server-only";
 import type { Blueprint } from "@/lib/blueprint/types";
 import type { ChangePlan } from "@/lib/engine/changes";
+import { generateJsonHedged } from "./claude";
 import {
   COVERAGE_SYSTEM,
   changedReferences,
@@ -9,7 +10,6 @@ import {
   coverageEvidence,
   trimCoverage,
 } from "./coverage-prompt";
-import { generateJsonHedged } from "./gemini";
 
 /** Small independent schema: does not add to the planner's already large output schema. */
 export async function reviewCoverage(input: {

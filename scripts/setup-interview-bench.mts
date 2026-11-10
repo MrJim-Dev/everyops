@@ -77,7 +77,7 @@ for (let run = 1; run <= runs; run++) {
   const started = Date.now();
   const result = await interviewTurn(messages, userId, questions);
   const ms = Date.now() - started;
-  const gemini = events.filter((e) => e.event === "gemini" && e.task === "interview");
+  const gemini = events.filter((e) => e.event === "claude" && e.task === "interview");
   const row = {
     label,
     run,

@@ -160,14 +160,14 @@ function Totals({ report }: { report: UsageReport }) {
   const perRequest = t.requests ? t.calls / t.requests : 0;
   return (
     <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-      <Stat label="Estimated cost" value={formatCost(t.costMicros)} note="At Vertex AI list rates" />
+      <Stat label="Estimated cost" value={formatCost(t.costMicros)} note="At list rates" />
       <Stat
         label="Tokens"
         value={formatTokens(t.input + t.output + t.thinking)}
         note={`${formatTokens(t.input)} in (${formatTokens(t.cached)} cached) · ${formatTokens(t.output + t.thinking)} out`}
       />
       <Stat
-        label="Gemini calls"
+        label="AI calls"
         value={formatNumber(t.calls)}
         note={`${plural(t.requests, "request")} · ${perRequest.toFixed(1)} calls each`}
       />

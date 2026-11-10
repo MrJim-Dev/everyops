@@ -1,7 +1,6 @@
 import { currencyOf, formatMoney } from "@/lib/format";
 import { htmlConnectionProblems } from "@/lib/public/html-connections";
 import "server-only";
-import type { Part } from "@google/genai";
 import { type AttachmentRef, attachmentsIn } from "@/lib/assistant/attachments";
 import type { DataEvidence } from "@/lib/assistant/evidence";
 import { memoryContext, type WorkspaceMemory } from "@/lib/assistant/memory";
@@ -80,11 +79,12 @@ import {
 } from "./assistant-prompt";
 import { toAssistantRule } from "./assistant-rule";
 import { attachmentParts, copyPhotoToWorkspace } from "./attachments";
+import type { PromptPart } from "./claude";
+import { generateJsonHedged } from "./claude";
 import { reviewCoverage } from "./coverage";
 import { fillNotesView, SIGNATURE_NAME, tidyBlocks, toEntity, toFieldValue, toView } from "./design";
 import { view } from "./design-prompt";
 import { dataDigest } from "./digest";
-import { generateJsonHedged } from "./gemini";
 import { lookupData } from "./lookup";
 import { OUTSIDE_WORDS } from "./lookup-prompt";
 import { lookupProblem } from "./lookup-result";
@@ -1282,7 +1282,8 @@ ${input.messages
   if (attachments.length)
     status(`Reading ${attachments.length} attached ${attachments.length === 1 ? "file" : "files"}`);
   const fileParts = await attachmentParts(input.userId, attachments);
-  const withFiles = (text: string): string | Part[] => (fileParts.length ? [{ text }, ...fileParts] : text);
+  const withFiles = (text: string): string | PromptPart[] =>
+    fileParts.length ? [{ text }, ...fileParts] : text;
   // Each attached photo is copied into the workspace at most once per turn, even across repair attempts.
   const copies = new Map<string, Promise<string | null>>();
   const photo = (id: string) => {
@@ -1303,7 +1304,7 @@ ${input.messages
         ? "Thinking it through"
         : repairs
           ? "Reworking the plan so it fits your workspace"
-          : "Gemini's first answer didn't come through, trying again",
+          : "Claude's first answer didn't come through, trying again",
     );
     const setAside: string[] = [];
     // Answers take 3–8 s and plans with pages 10–25 s, the first part arriving within 3–17 s. A call that has sent
