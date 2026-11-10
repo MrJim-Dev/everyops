@@ -8,16 +8,16 @@ vi.mock("./references", async (original) => ({
 }));
 vi.mock("./samples", () => ({ fillEmptySamples: vi.fn(async (_bp: unknown, samples: unknown) => samples) }));
 vi.mock("./overview-layout", () => ({ withOverviewLayout: vi.fn(async (bp: unknown) => bp) }));
-vi.mock("./gemini", async (original) => ({
-  ...(await original<typeof import("./gemini")>()),
+vi.mock("./claude", async (original) => ({
+  ...(await original<typeof import("./claude")>()),
   generateJsonHedged: vi.fn(),
 }));
 
 import { validateBlueprint } from "@/lib/blueprint/validate";
+import { generateJsonHedged } from "./claude";
 import { reviewCoverage } from "./coverage";
 import { designWorkspace } from "./design";
 import type { Design } from "./design-prompt";
-import { generateJsonHedged } from "./gemini";
 
 const tokens = { input: 1, output: 1, thinking: 0, cached: 0 };
 const ok = (data: unknown) => ({ ok: true as const, data, model: "test", ms: 1, tokens });

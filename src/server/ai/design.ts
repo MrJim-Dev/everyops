@@ -1,6 +1,5 @@
 import { htmlConnectionProblems } from "@/lib/public/html-connections";
 import "server-only";
-import type { Part } from "@google/genai";
 import type { AttachmentRef } from "@/lib/assistant/attachments";
 import { type DesignSketch, type DesignStage, sketchOf } from "@/lib/assistant/design-sketch";
 import { isEmail, isFilePath, isPhone, normalizeUrl } from "@/lib/blueprint/contact";
@@ -40,6 +39,8 @@ import { copyFromBlocks, type SiteCopy, standardBlocks } from "@/lib/public/site
 import { fromLocal, hhmm, todayKey } from "@/lib/time";
 import { attachmentParts } from "./attachments";
 import { CHOICE_REPAIR_SYSTEM, choicePatch, choiceRepairAnswer } from "./choice-repair-prompt";
+import type { PromptPart } from "./claude";
+import { generateJsonHedged } from "./claude";
 import { reviewCoverage } from "./coverage";
 import {
   DESIGN_SYSTEM,
@@ -62,7 +63,6 @@ import {
   withBriefHours,
   withTemplateForms,
 } from "./design-template";
-import { generateJsonHedged } from "./gemini";
 import { withOverviewLayout } from "./overview-layout";
 import {
   communitySystem,
@@ -1379,7 +1379,7 @@ export async function designWorkspace(
   const context = `${examples ? `Examples:\n${examples}\n\n` : ""}${facts}`;
   // The owner's files go with the first request; a repair works from the previous design, which already used them.
   const fileParts = files ? await attachmentParts(files.userId, files.attachments) : [];
-  const prompt: string | Part[] = fileParts.length
+  const prompt: string | PromptPart[] = fileParts.length
     ? [
         { text: context },
         ...fileParts,
@@ -1387,7 +1387,7 @@ export async function designWorkspace(
       ]
     : context;
   /** The template route's prompt: the facts, then the design to start from and how to adapt it. */
-  const templatePrompt = (seed: TemplateSeed, base: { id: string; name: string }): string | Part[] => {
+  const templatePrompt = (seed: TemplateSeed, base: { id: string; name: string }): string | PromptPart[] => {
     const must = seed.master
       .map((id) => seed.design.entities.find((e) => e.id === id))
       .filter((e): e is Design["entities"][number] => !!e)

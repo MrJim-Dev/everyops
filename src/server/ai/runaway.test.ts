@@ -5,7 +5,7 @@ vi.mock("server-only", () => ({}));
 import { posSample } from "@/lib/catalog/canteen-pos";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { ASSISTANT_TEXT_LIMITS } from "./assistant-prompt";
-import { runawayWatcher, withTextLimits } from "./gemini";
+import { runawayWatcher, withTextLimits } from "./claude";
 
 /** Feeds text in small pieces, the way a stream arrives, and returns the first reason given (or null). */
 function watch(text: string, maxStringChars?: number, limits?: Record<string, number>) {

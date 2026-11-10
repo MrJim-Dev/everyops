@@ -11,8 +11,8 @@ vi.mock("./samples", () => ({
   writeTemplateSamples: vi.fn(async () => null),
 }));
 vi.mock("./overview-layout", () => ({ withOverviewLayout: vi.fn(async (bp: unknown) => bp) }));
-vi.mock("./gemini", async (original) => ({
-  ...(await original<typeof import("./gemini")>()),
+vi.mock("./claude", async (original) => ({
+  ...(await original<typeof import("./claude")>()),
   generateJsonHedged: vi.fn(),
 }));
 
@@ -21,6 +21,7 @@ import { CATALOG } from "@/lib/catalog";
 import { PLAYBOOKS } from "@/lib/catalog/playbooks";
 import { todayKey } from "@/lib/time";
 import type { CommunitySystem } from "@/server/community";
+import { generateJsonHedged } from "./claude";
 import { reviewCoverage } from "./coverage";
 import {
   applyDesignPatch,
@@ -40,7 +41,6 @@ import {
   seedForPrompt,
   withBriefHours,
 } from "./design-template";
-import { generateJsonHedged } from "./gemini";
 import { setupReferences, setupRoute } from "./references";
 import { writeTemplateSamples } from "./samples";
 

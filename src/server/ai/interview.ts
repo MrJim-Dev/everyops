@@ -3,7 +3,7 @@ import { attachmentNames, attachmentsIn } from "@/lib/assistant/attachments";
 import { partialString } from "@/lib/partial-json";
 import type { AskQuestion, ChatTurn, SetupQuestion } from "@/lib/store/workspace-model";
 import { promptWithFiles } from "./attachments";
-import { generateJsonHedged } from "./gemini";
+import { generateJsonHedged } from "./claude";
 import { INTERVIEW_SYSTEM, INTERVIEW_TEXT_LIMITS, type Turn, turn } from "./interview-prompt";
 import { referencesText, setupReferences, setupRoute, startingPointText } from "./references";
 import {
@@ -210,5 +210,5 @@ export async function interviewTurn(
         ),
       },
     };
-  return { ok: false, message: "Gemini didn't answer in time. Send your message again." };
+  return { ok: false, message: "Claude didn't answer in time. Send your message again." };
 }

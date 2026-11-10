@@ -6,7 +6,7 @@ import type { ChangePlan } from "@/lib/engine/changes";
 import type { OptionUsage } from "@/lib/engine/options";
 import { type PlanResult, planChange } from "./planner";
 
-export type AiPlanResult = PlanResult & { source?: "gemini" | "basic"; model?: string };
+export type AiPlanResult = PlanResult & { source?: "claude" | "basic"; model?: string };
 
 /**
  * Plans a change with Gemini on the server. If Gemini can't be reached, the built-in planner
@@ -28,7 +28,7 @@ export async function requestPlan(
       | { ok: true; plan: ChangePlan; model: string }
       | { ok: false; message: string; kind?: string }
       | null;
-    if (body?.ok) return { ok: true, plan: body.plan, source: "gemini", model: body.model };
+    if (body?.ok) return { ok: true, plan: body.plan, source: "claude", model: body.model };
     if (body && response.status !== 502) return { ok: false, message: body.message };
   } catch {
     // Network failure: fall through to the built-in planner.

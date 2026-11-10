@@ -25,8 +25,8 @@ EVAL_ONLY=courts,habits EVAL_REPEAT=2 pnpm eval:design
 EVAL_LABEL=after EVAL_BASELINE=/tmp/design-eval-before.json pnpm eval:design
 ```
 
-The report goes to `EVAL_REPORT` (default `<tmp>/design-eval-<label>.json`). Designs run on production's design model
-(gemini-3.5-flash in asia-southeast1) unless `GEMINI_DESIGN_MODEL` is set. Keep `EVAL_CONCURRENCY` the same for runs you
+The report goes to `EVAL_REPORT` (default `<tmp>/design-eval-<label>.json`). Designs run on production's models
+(`CLAUDE_MODEL`, or `CLAUDE_DESIGN_MODEL` when set). Keep `EVAL_CONCURRENCY` the same for runs you
 compare, since running briefs side by side changes their times. `EVAL_KEEP_DESIGNS=1` saves every design next to the report.
 
 ## Reading it

@@ -13,7 +13,7 @@ import { sql } from "kysely";
 import { z } from "zod";
 import { courtBookingsSample } from "@/lib/catalog/court-bookings";
 import { computeAll } from "@/lib/engine/compute";
-import { generateJson } from "@/server/ai/gemini";
+import { generateJson } from "@/server/ai/claude";
 import { auth } from "@/server/auth";
 import { db } from "@/server/db";
 import { writeContent } from "@/server/workspace-data";

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-vi.mock("./gemini", () => ({ generateJsonHedged: vi.fn() }));
+vi.mock("./claude", () => ({ generateJsonHedged: vi.fn() }));
 vi.mock("./record-tools", () => ({ recordTools: vi.fn() }));
 
 import { courtBookingsBlueprint } from "@/lib/catalog/court-bookings";
-import { generateJsonHedged } from "./gemini";
+import { generateJsonHedged } from "./claude";
 import { lookupData } from "./lookup";
 import { recordTools } from "./record-tools";
 

@@ -4,7 +4,7 @@
  * Run it on two checkouts to compare them. Needs the Cloud SQL proxy (community systems) and gcloud ADC (Gemini):
  *
  *   set -a; source .env.local; set +a
- *   GEMINI_DESIGN_MODEL=gemini-3.5-flash GEMINI_DESIGN_LOCATION=asia-southeast1 \
+ *   CLAUDE_DESIGN_MODEL=claude-sonnet-5-5 \
  *   NODE_OPTIONS=--conditions=react-server pnpm exec tsx scripts/setup-route-bench.mts [label] [runs] [scenario,...]
  *
  * Writes JSON lines to /tmp/setup-route-bench-<label>.jsonl and a summary table to stdout.
@@ -91,7 +91,7 @@ for (const [key, scenario] of Object.entries(SCENARIOS)) {
     }));
     const ms = Date.now() - started;
     const done = events.find((e) => e.event === "design_done") ?? {};
-    const gemini = events.filter((e) => e.event === "gemini");
+    const gemini = events.filter((e) => e.event === "claude");
     const row: Row = {
       label,
       scenario: key,

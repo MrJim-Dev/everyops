@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { fitToolOutput, hedged, quotaPause } from "./gemini";
+import { fitToolOutput, hedged, quotaPause } from "./claude";
 
 type R = { ok: true; who: number } | { ok: false; retryable: boolean; rateLimited?: boolean; who: number };
 

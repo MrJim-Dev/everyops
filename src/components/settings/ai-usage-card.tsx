@@ -51,7 +51,7 @@ export function AiUsageCard({ workspaceId, breakdownHref }: { workspaceId: strin
   return (
     <SettingsSection
       title="AI use"
-      description="Gemini tokens (what Ask EveryOps reads and writes) and requests in this workspace. Setup before a workspace exists counts to your account."
+      description="AI tokens (what Ask EveryOps reads and writes) and requests in this workspace. Setup before a workspace exists counts to your account."
       footer={
         data
           ? `Your requests: ${data.mine.used} of ${data.mine.max} in the last 10 minutes. The limit frees up as they age.`

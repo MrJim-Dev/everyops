@@ -6,8 +6,8 @@ import type { Viewer } from "@/lib/engine/access";
 import { zone } from "@/lib/time";
 import { accessScope } from "../access";
 import { db } from "../db";
+import type { ToolSet } from "./claude";
 import { kindOf } from "./digest";
-import type { ToolSet } from "./gemini";
 
 /**
  * The assistant's view of the data. Instead of every record (60k tokens for a busy canteen), Gemini gets a digest
