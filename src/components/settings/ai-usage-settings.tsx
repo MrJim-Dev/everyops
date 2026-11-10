@@ -25,10 +25,10 @@ export function AiUsageSettings() {
         title="Where it came from"
         description={
           canManage(ws.role)
-            ? "Every Gemini call made for this workspace, by feature, step, person, model and where it ran. Duplicates that lost the race, stopped loops and failures count as wasted: they were paid for but their answer was thrown away."
-            : "Every Gemini call made for this workspace, by feature, step, model and where it ran. The latest calls show your own; owners and admins see everyone's."
+            ? "Every AI call made for this workspace, by feature, step, person, model and where it ran. Duplicates that lost the race, stopped loops and failures count as wasted: they were paid for but their answer was thrown away."
+            : "Every AI call made for this workspace, by feature, step, model and where it ran. The latest calls show your own; owners and admins see everyone's."
         }
-        footer="Costs are estimates at Vertex AI's rates for each model; Google's invoice is the bill."
+        footer="Costs are estimates at each model's list rates; the provider's invoice is the bill."
       >
         <AiUsageReport endpoint={`/api/workspaces/${encodeURIComponent(ws.id)}/ai-usage`} view="workspace" />
       </SettingsSection>

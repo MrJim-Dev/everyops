@@ -9,7 +9,8 @@ AUTH_SECRET="$(gcloud secrets versions access latest --secret=everyops-better-au
 SMTP_PASSWORD="$(gcloud secrets versions access latest --secret=everyops-smtp-password --project="$PROJECT")"
 GOOGLE_CLIENT_ID="$(gcloud secrets versions access latest --secret=everyops-google-client-id --project="$PROJECT")"
 GOOGLE_CLIENT_SECRET="$(gcloud secrets versions access latest --secret=everyops-google-client-secret --project="$PROJECT")"
-DB_PASSWORD="$DB_PASSWORD" AUTH_SECRET="$AUTH_SECRET" SMTP_PASSWORD="$SMTP_PASSWORD" GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" APP_URL="${BETTER_AUTH_URL:-http://localhost:3000}" python3 - <<'PY'
+ANTHROPIC_API_KEY="$(gcloud secrets versions access latest --secret=everyops-anthropic-api-key --project="$PROJECT")"
+DB_PASSWORD="$DB_PASSWORD" AUTH_SECRET="$AUTH_SECRET" SMTP_PASSWORD="$SMTP_PASSWORD" GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" APP_URL="${BETTER_AUTH_URL:-http://localhost:3000}" python3 - <<'PY'
 import os, urllib.parse
 pw = urllib.parse.quote(os.environ["DB_PASSWORD"], safe="")
 lines = [
@@ -25,6 +26,7 @@ lines = [
     'MAIL_FROM="EveryOps <notify@everyops.app>"',
     f"GOOGLE_CLIENT_ID={os.environ['GOOGLE_CLIENT_ID']}",
     f"GOOGLE_CLIENT_SECRET={os.environ['GOOGLE_CLIENT_SECRET']}",
+    f"ANTHROPIC_API_KEY={os.environ['ANTHROPIC_API_KEY']}",
 ]
 with open(".env.local", "w") as f:
     f.write("\n".join(lines) + "\n")

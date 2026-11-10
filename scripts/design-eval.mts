@@ -10,8 +10,8 @@
  *   EVAL_LABEL=fanout EVAL_BASELINE=<report from before> pnpm eval:design
  *
  * EVAL_CONCURRENCY (default 3) runs briefs side by side; keep it the same for runs you compare, since it affects time.
- * Designs run on production's design model (gemini-3.5-flash, asia-southeast1) unless GEMINI_DESIGN_MODEL is set;
- * set it to an empty value to design on GEMINI_MODEL. EVAL_KEEP_DESIGNS=1 saves every design next to the report, and
+ * Designs run on production's models (CLAUDE_MODEL, or CLAUDE_DESIGN_MODEL when set, and CLAUDE_FAST_MODEL for
+ * sample records). EVAL_KEEP_DESIGNS=1 saves every design next to the report, and
  * EVAL_RESCORE=<report> scores those saved designs again with the current checks (after a check is fixed), in place,
  * without calling Gemini.
  */
@@ -31,10 +31,8 @@ import {
 } from "@/lib/eval/design-score";
 import { SCENARIOS } from "./fixtures/design-briefs";
 
-if (process.env.GEMINI_DESIGN_MODEL === undefined) process.env.GEMINI_DESIGN_MODEL = "gemini-3.5-flash";
-if (process.env.GEMINI_DESIGN_LOCATION === undefined) process.env.GEMINI_DESIGN_LOCATION = "asia-southeast1";
-// Imported after the model settings above, which gemini.ts reads when it loads.
 const { designWorkspace } = await import("@/server/ai/design");
+const { modelFor } = await import("@/server/ai/claude");
 const { validateBlueprint } = await import("@/lib/blueprint/validate");
 
 const repeat = Math.max(1, Math.min(10, Number(process.env.EVAL_REPEAT) || 3));
@@ -76,7 +74,7 @@ async function runOne(scenario: (typeof scenarios)[number], run: number): Promis
   const of = (name: string) => events.filter((e) => e.event === name);
   const done = of("design_done")[0] ?? {};
   const route = String(done.tier ?? of("design_route")[0]?.tier ?? "unknown");
-  const gemini = of("gemini");
+  const gemini = of("claude");
   const timings: CallTiming[] = gemini.map((g) => ({
     task: String(g.task),
     ms: num(g.ms),
@@ -96,9 +94,9 @@ async function runOne(scenario: (typeof scenarios)[number], run: number): Promis
     droppedWidgets: of("design_widgets_dropped").flatMap((e) => (e.widgets as string[] | undefined) ?? []),
     templatePatch: of("design_template_patched")[0],
     outputParts: of("design_output_parts")[0]?.parts as Record<string, number> | undefined,
-    runaways: of("gemini_runaway").length,
-    stalls: of("gemini_stalled").length,
-    hedges: of("gemini_hedge").length,
+    runaways: of("claude_runaway").length,
+    stalls: of("claude_stalled").length,
+    hedges: of("claude_hedge").length,
     inputTokens: gemini.reduce((n, g) => n + num(g.input), 0),
     outputTokens: gemini.reduce((n, g) => n + num(g.output), 0),
     cachedTokens: gemini.reduce((n, g) => n + num(g.cached), 0),
@@ -164,7 +162,7 @@ async function runAll(): Promise<RunResult[]> {
   );
   const runs: RunResult[] = [];
   out.log(
-    `Design eval "${label}": ${scenarios.length} briefs × ${repeat} runs, ${concurrency} at a time, designing on ${process.env.GEMINI_DESIGN_MODEL || process.env.GEMINI_MODEL || "gemini-3.7-flash"}`,
+    `Design eval "${label}": ${scenarios.length} briefs × ${repeat} runs, ${concurrency} at a time, designing on ${modelFor("design").model}`,
   );
   let next = 0;
   await Promise.all(
@@ -235,10 +233,10 @@ const tasks = [
 ];
 
 const config = {
-  designModel: process.env.GEMINI_DESIGN_MODEL || process.env.GEMINI_MODEL || "gemini-3.7-flash",
-  designLocation: process.env.GEMINI_DESIGN_LOCATION || process.env.GEMINI_LOCATION || "global",
-  model: process.env.GEMINI_MODEL || "gemini-3.7-flash",
-  location: process.env.GEMINI_LOCATION || "global",
+  designModel: modelFor("design").model,
+  designLocation: modelFor("design").location,
+  model: modelFor("assistant").model,
+  location: modelFor("assistant").location,
   repeat,
   concurrency,
 };

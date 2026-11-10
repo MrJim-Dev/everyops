@@ -3,7 +3,7 @@ import type { Blueprint, LayoutItem, LayoutSection, LayoutView, System, Widget }
 import { validateBlueprint } from "@/lib/blueprint/validate";
 import { layoutItems, parseLayout } from "@/lib/components/registry";
 import { todayKey } from "@/lib/time";
-import { generateJsonHedged } from "./gemini";
+import { generateJsonHedged } from "./claude";
 import {
   OVERVIEW_SYSTEM,
   type OverviewRequest,

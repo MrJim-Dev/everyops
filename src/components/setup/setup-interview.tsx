@@ -621,7 +621,7 @@ export function SetupInterview({
                         Create workspace
                       </Button>
                       <span className="text-[12px] text-muted-foreground">
-                        Designed by Gemini and checked by EveryOps. You can change anything later.
+                        Designed by Claude and checked by EveryOps. You can change anything later.
                       </span>
                     </div>
                   </div>

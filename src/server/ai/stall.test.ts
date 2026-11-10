@@ -3,30 +3,30 @@ import { z } from "zod";
 
 vi.mock("server-only", () => ({}));
 
-/** Each test sets how the fake Vertex stream answers: [delay before the part, text of the part]. */
+/** Each test sets how the fake Claude stream answers: [delay before the part, text of the part]. */
 let script: [number, string][] = [];
-vi.mock("@google/genai", async (original) => ({
-  ...(await original<typeof import("@google/genai")>()),
-  GoogleGenAI: class {
-    models = {
-      generateContentStream: async ({ config }: { config: { abortSignal: AbortSignal } }) =>
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: class {
+    messages = {
+      create: async (_params: unknown, { signal }: { signal: AbortSignal }) =>
         (async function* () {
+          yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
           for (const [ms, text] of script) {
             await new Promise<void>((resolve, reject) => {
               const timer = setTimeout(resolve, ms);
-              config.abortSignal.addEventListener("abort", () => {
+              signal.addEventListener("abort", () => {
                 clearTimeout(timer);
-                reject(new Error("This operation was aborted"));
+                reject(new Error("Request was aborted."));
               });
             });
-            yield { candidates: [{ content: { parts: [{ text }] } }] };
+            yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } };
           }
         })(),
     };
   },
 }));
 
-const { generateJson } = await import("./gemini");
+const { generateJson } = await import("./claude");
 const schema = z.object({ n: z.number() });
 const input = {
   system: "",
@@ -39,7 +39,7 @@ const input = {
 
 afterEach(() => vi.useRealTimers());
 
-describe("Gemini calls judged by their streaming", () => {
+describe("Claude calls judged by their streaming", () => {
   it("are stopped when the answer goes quiet midway, and can be retried", async () => {
     vi.useFakeTimers();
     script = [
@@ -50,7 +50,7 @@ describe("Gemini calls judged by their streaming", () => {
     await vi.advanceTimersByTimeAsync(36_000);
     expect(await result).toEqual({
       ok: false,
-      error: "Gemini took too long to answer.",
+      error: "Claude took too long to answer.",
       retryable: true,
       reason: "stalled",
     });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canPropose, canRead, geminiSchema, splitToolName, toolName } from "./connections";
+import { canPropose, canRead, splitToolName, toolName, toolSchema } from "./connections";
 
 describe("outside tool names", () => {
   it("round-trips provider and tool", () => {
@@ -22,9 +22,9 @@ describe("outside tool names", () => {
   });
 });
 
-describe("geminiSchema", () => {
+describe("toolSchema", () => {
   it("keeps what Gemini accepts and drops the rest", () => {
-    const out = geminiSchema({
+    const out = toolSchema({
       $schema: "https://json-schema.org/draft/2020-12/schema",
       type: "object",
       additionalProperties: false,

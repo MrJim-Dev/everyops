@@ -77,18 +77,17 @@ const KEEP = new Set([
  * An MCP tool's input schema in the subset Gemini's function declarations accept: no $schema, $ref, $defs,
  * additionalProperties or oneOf; nested objects and arrays kept; depth capped so a huge schema can't blow the request.
  */
-export function geminiSchema(schema: unknown, depth = 0): Record<string, unknown> {
+export function toolSchema(schema: unknown, depth = 0): Record<string, unknown> {
   if (!schema || typeof schema !== "object" || Array.isArray(schema) || depth > 6) return { type: "object" };
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
     if (!KEEP.has(key)) continue;
     if (key === "properties" && value && typeof value === "object")
       out.properties = Object.fromEntries(
-        Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, geminiSchema(v, depth + 1)]),
+        Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, toolSchema(v, depth + 1)]),
       );
-    else if (key === "items") out.items = geminiSchema(value, depth + 1);
-    else if (key === "anyOf" && Array.isArray(value))
-      out.anyOf = value.map((v) => geminiSchema(v, depth + 1));
+    else if (key === "items") out.items = toolSchema(value, depth + 1);
+    else if (key === "anyOf" && Array.isArray(value)) out.anyOf = value.map((v) => toolSchema(v, depth + 1));
     else if (key === "type" && Array.isArray(value)) {
       // ["string", "null"] → string, nullable
       const types = value.filter((t) => t !== "null");

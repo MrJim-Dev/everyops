@@ -5,7 +5,7 @@ import { validateBlueprint } from "@/lib/blueprint/validate";
 import { applyOps, type ChangeOp, type ChangePlan } from "@/lib/engine/changes";
 import { type OptionUsage, strandedOptions } from "@/lib/engine/options";
 import { attachmentParts } from "./attachments";
-import { generateJsonHedged } from "./gemini";
+import { generateJsonHedged } from "./claude";
 import { type Answer, answer, SYSTEM } from "./plan-change-prompt";
 
 export type PlanChangeResult =
@@ -123,7 +123,7 @@ function clip(text: string, max: number) {
   return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), max - 15)).replace(/[\s,.;:–-]+$/, "")}…`;
 }
 
-export async function planChangeWithGemini(
+export async function planChangeWithClaude(
   bp: Blueprint,
   request: string,
   files?: { userId: string; attachments: AttachmentRef[] },

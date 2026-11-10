@@ -6,8 +6,8 @@ import type { Blueprint, DataRecord } from "@/lib/blueprint/types";
 import { todayKey } from "@/lib/time";
 import { pageExcerpts } from "./assistant";
 import { CHECKUP_SYSTEM, checkupAnswer, toFindings } from "./checkup-prompt";
+import { generateJsonHedged } from "./claude";
 import { dataDigest } from "./digest";
-import { generateJsonHedged } from "./gemini";
 
 /** Compares the workspace with its memory and returns what to fix. Throws when Gemini can't answer. */
 export async function runCheckup(input: {

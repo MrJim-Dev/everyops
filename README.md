@@ -107,26 +107,27 @@ blueprint (JSON) ──► engine (src/lib/engine) ──► views (src/componen
 | `src/components/records` | Shared field display/input, record panel, create dialog |
 | `src/components/workspace` | Workspace context, used by saved workspaces and previews alike |
 
-## AI (Gemini on Vertex AI)
+## AI (Claude)
 
-Gemini runs only on the server, through Vertex AI in `asia-southeast1`, signed in as the Cloud Run service account (locally, gcloud's Application Default Credentials). There are no API keys.
+Claude runs only on the server, through the Anthropic API. The key is `ANTHROPIC_API_KEY`: the Secret Manager secret `everyops-anthropic-api-key` on Cloud Run, `.env.local` on a laptop (`pnpm env:pull` fills it in). Claude takes text, pictures and PDFs; voice messages and attached recordings or videos are turned into text first by Gemini on Vertex AI (`src/server/ai/media.ts`), signed in as the Cloud Run service account.
 
 | File | Role |
 |---|---|
-| `src/server/ai/gemini.ts` | Vertex AI client and `generateJson`: structured JSON checked against a Zod schema, a 25-second timeout, and token and latency logging |
+| `src/server/ai/claude.ts` | Anthropic client and `generateJson`: structured JSON checked against a Zod schema, timeouts, hedged retries, and token and latency logging |
+| `src/server/ai/media.ts` | Gemini on Vertex AI for sound and video only: transcribes voice input and writes up attached recordings and clips |
 | `src/server/ai/rate-limit.ts` | Per-user AI request limit (`AI_RATE_LIMIT` per 10 minutes, default 30) |
 | `src/server/ai/plan-change-prompt.ts` | Instructions and output schema for planning workspace changes, including the formula language |
-| `src/server/ai/plan-change.ts` | Turns Gemini's answer into `ChangeOp`s, rejects anything that doesn't fit the blueprint or fails `validateBlueprint`, and gives Gemini one repair attempt with the errors |
+| `src/server/ai/plan-change.ts` | Turns Claude's answer into `ChangeOp`s, rejects anything that doesn't fit the blueprint or fails `validateBlueprint`, and gives Claude one repair attempt with the errors |
 | `src/app/api/ai/plan-change/route.ts` | `POST` endpoint: signed-in users only, size-limited, rate-limited |
-| `src/lib/assistant/ai-client.ts` | Browser helper used by Ask EveryOps; falls back to the built-in planner only if Gemini is unreachable |
+| `src/lib/assistant/ai-client.ts` | Browser helper used by Ask EveryOps; falls back to the built-in planner only if Claude is unreachable |
 | `src/server/ai/interview*.ts` | Setup conversation: asks short follow-up questions with tap-to-send suggestions, keeps a profile of the business, and decides when to design |
 | `src/server/ai/design*.ts` | Designs the workspace (blueprint plus sample records) from the conversation's brief, with one sidebar page per area the owner manages; tidies small slips, gives any record type left without a screen its own page (`ensurePages`), validates it, and repairs up to twice with a patch of only what changes |
-| `src/app/api/ai/interview`, `src/app/api/ai/design` | The setup endpoints used by `src/components/setup/setup-interview.tsx`. The design endpoint streams JSON lines: the step, a sketch of the pages as Gemini writes them (`src/lib/assistant/design-sketch.ts`), then the draft; setup draws them as the workspace building itself (`design-progress.tsx`) |
+| `src/app/api/ai/interview`, `src/app/api/ai/design` | The setup endpoints used by `src/components/setup/setup-interview.tsx`. The design endpoint streams JSON lines: the step, a sketch of the pages as Claude writes them (`src/lib/assistant/design-sketch.ts`), then the draft; setup draws them as the workspace building itself (`design-progress.tsx`) |
 | `src/server/ai/assistant*.ts` | The workspace assistant: answers questions from the workspace's own data, asks one short question when a request is unclear, or returns a change plan (design ops plus record creates and updates), validated and rehearsed on a copy, with one repair attempt |
 | `src/app/api/ai/assistant/route.ts` | `POST` endpoint: loads the workspace from the database with the caller's role. Owners and admins can change the design, staff can add and update records, viewers can only ask |
 | `src/components/assistant/assistant-panel.tsx`, `src/lib/assistant/panel-store.ts` | Ask EveryOps as a side panel (⌘J, the sidebar's Ask EveryOps entry, or Ask EveryOps on any system page; a sheet on phones). Owners and admins can expand it to the full Ask EveryOps page, the same conversation, and go back with Side panel. Plans show as cards with Apply, Not now and Undo, and land in History |
 
-The model is `gemini-3.7-flash` (`GEMINI_MODEL`) on the `global` endpoint (`GEMINI_LOCATION`), the only place Vertex serves it. Conversation turns take 10–25 seconds, a design 50–100 (it writes about 130 tokens a second, and a detailed brief's design is 12–16k tokens), and an assistant reply 10–50. The global endpoint stalls now and then; hedged retries replace a stalled call. `gemini-3.5-flash` on `asia-southeast1` writes about 2.5 times as fast and is the rollback; `GEMINI_DESIGN_MODEL` and `GEMINI_DESIGN_LOCATION` move only setup's design calls to it (the same finance brief: 47 s on 3.5, 92 s on 3.7). Production designs on 3.5 (the `scripts/deploy.sh` defaults); deploy with `GEMINI_DESIGN_MODEL=` (empty) to design on 3.7 again. Leave temperature at its default and only lower thinking for the designer and the assistant: lowering them elsewhere made Gemini 3 models loop.
+The model is `claude-sonnet-5-5` (`CLAUDE_MODEL`) for the setup conversation, designs, Ask EveryOps and the checkup, and `claude-haiku-5-5` (`CLAUDE_FAST_MODEL`) for the small steps listed in `CLAUDE_FAST_TASKS`: record lookups, memory notes, import matching and sample records. `CLAUDE_DESIGN_MODEL` moves only setup's design calls to another model. Calls run with adaptive thinking at low effort where the caller sets `thinking: "LOW"` and medium otherwise. Answers are constrained to the schema by Claude's structured output; a schema it turns down (the assistant's answer has more optional fields than it allows) is asked for in the instructions instead, and every answer is still parsed by the Zod schema. Instructions are cached for five minutes, so repeat calls reread them at a tenth of the price. To roll back or try another model, deploy with `CLAUDE_MODEL=…`.
 
 ## Public pages
 
